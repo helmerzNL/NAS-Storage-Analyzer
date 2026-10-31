@@ -1,0 +1,112 @@
+<script lang="ts">
+  import { untrack } from 'svelte';
+  import { postForFile, ApiError, type ShareInfo, type Download } from '../lib/api';
+  import { t, i18n } from '../lib/i18n.svelte';
+  import { formatBytes, formatNumber, formatDateTime, ago } from '../lib/format';
+  import { prefs } from '../lib/session.svelte';
+  import { errMessage } from '../lib/errors';
+  import { selection } from '../lib/selection.svelte';
+  import { isScriptType, isWindows, defaultRoot, scannedPath, runCommand, type ScriptType } from '../lib/script';
+  import Dialog from './Dialog.svelte';
+
+  // Makes the script for the files ticked in the lists. The application deletes nothing: this asks the server for text and saves it as a file.
+  let { open = $bindable(false), share }: { open: boolean; share: ShareInfo } = $props();
+
+  const rows = $derived(selection.of(share.id));
+  const types: [ScriptType, string][] = [['powershell', 'script.type.powershell'], ['cmd', 'script.type.cmd'], ['sh', 'script.type.sh']];
+  const remembered = (() => { try { return localStorage.getItem('nasa.script.type'); } catch { return null; } })();
+
+  let type = $state<ScriptType>(isScriptType(remembered) ? remembered : 'powershell');
+  let root = $state(''), touched = $state(false);
+  let busy = $state(false), error = $state(''), rootError = $state('');
+  let made = $state<{ d: Download; url: string; type: ScriptType } | null>(null);
+
+  const scanAt = $derived(share.last_scan?.finished_at ?? null);
+  const stale = $derived(scanAt ? Date.now() - new Date(scanAt).getTime() > 7 * 86_400_000 : false);
+
+  function clearResult() { if (made) URL.revokeObjectURL(made.url); made = null; }
+  // Each time the dialog opens it starts clean, with the base path the share suggests.
+  $effect(() => {
+    if (open) untrack(() => { clearResult(); error = ''; rootError = ''; touched = false; root = defaultRoot(type, share); });
+    else untrack(clearResult);
+  });
+
+  function pick(next: ScriptType) {
+    // A Windows path means nothing to sh and the other way round, so a change of kind of machine starts again from the suggestion.
+    if (isWindows(next) !== isWindows(type)) { touched = false; root = defaultRoot(next, share); }
+    type = next; rootError = '';
+    try { localStorage.setItem('nasa.script.type', next); } catch { /* the choice just is not remembered */ }
+  }
+
+  function save(url: string, name: string) {
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  async function make(e: Event) {
+    e.preventDefault();
+    busy = true; error = ''; rootError = ''; clearResult();
+    try {
+      const d = await postForFile(`/shares/${share.id}/delete-script`, {
+        ids: rows.map((r) => r.id), script: type, client_root: root.trim() || undefined, lang: i18n.lang,
+      });
+      const url = URL.createObjectURL(d.blob);
+      made = { d, url, type };
+      save(url, d.filename);
+    } catch (err) {
+      if (err instanceof ApiError && err.field === 'client_root') rootError = err.detail ?? err.message;
+      else error = errMessage(err);
+    } finally { busy = false; }
+  }
+</script>
+
+<Dialog bind:open title={t('script.title')} wide>
+  <form id="script-form" class="stack" onsubmit={make}>
+    <p class="muted" style="margin:0">{t('script.intro')}</p>
+    <div class="notice info small" style="margin:0" data-testid="script-summary">
+      {t('script.summary', { n: formatNumber(rows.length, i18n.lang), size: formatBytes(selection.bytes, prefs.units, i18n.lang), when: formatDateTime(scanAt, i18n.lang) })}
+    </div>
+    {#if selection.hardlinks > 0}<div class="notice warn small" style="margin:0">{t('script.hardlinks', { n: formatNumber(selection.hardlinks, i18n.lang) })}</div>{/if}
+    {#if stale}<div class="notice warn small" style="margin:0" data-testid="script-stale">{t('script.old', { ago: ago(scanAt, i18n.lang) })}</div>{/if}
+    {#if error}<div class="notice error" style="margin:0" role="alert" data-testid="script-error">{error}</div>{/if}
+
+    <fieldset class="stack">
+      <legend>{t('script.type')}</legend>
+      {#each types as [v, label]}
+        <label class="checkrow"><input type="radio" name="script-type" value={v} checked={type === v} onchange={() => pick(v)} data-testid={'script-type-' + v} /> {t(label)}</label>
+      {/each}
+      {#if type === 'cmd'}<span class="hint">{t('script.type.cmd.hint')}</span>{/if}
+    </fieldset>
+
+    <div class="field">
+      <label for="script-root">{t('script.root')}</label>
+      <div class="input-row wrap">
+        <input id="script-root" class="mono" bind:value={root} oninput={() => (touched = true)} autocomplete="off" spellcheck="false" required
+          placeholder={isWindows(type) ? '\\\\nas\\media' : '/mnt/user/media'} data-testid="script-root" />
+        {#if !isWindows(type) && scannedPath(share)}
+          <button type="button" class="btn" onclick={() => { root = scannedPath(share); touched = true; rootError = ''; }} data-testid="script-root-same">{t('script.root.same')}</button>
+        {/if}
+      </div>
+      <span class="hint">{isWindows(type) ? t('script.root.hint.win', { name: share.name }) : t('script.root.hint.posix', { name: share.name })}</span>
+      {#if rootError}<span class="field-error" role="alert" data-testid="script-root-error">{rootError}</span>{/if}
+    </div>
+
+    {#if made}
+      <div class="notice ok" style="margin:0" role="status" data-testid="script-done">
+        <b>{t('script.done', { name: made.d.filename, n: formatNumber(made.d.files, i18n.lang) })}</b>
+        {#if made.d.skipped}<div data-testid="script-skipped">{t('script.skipped', { n: formatNumber(made.d.skipped, i18n.lang) })}</div>{/if}
+      </div>
+      <div class="field">
+        <span>{t('script.run')}</span>
+        <code class="codeblock mono" data-testid="script-command">{runCommand(made.type, made.d.filename)}</code>
+        <span class="hint">{t('script.run.hint', { n: formatNumber(made.d.files, i18n.lang) })}</span>
+      </div>
+      <div class="row"><a class="btn" href={made.url} download={made.d.filename} data-testid="script-again">{t('script.again')}</a></div>
+    {/if}
+  </form>
+  {#snippet footer()}
+    <button class="btn" type="button" onclick={() => (open = false)}>{t('common.close')}</button>
+    <button class="btn primary" type="submit" form="script-form" disabled={busy || rows.length === 0} data-testid="script-make">{t('script.make')}</button>
+  {/snippet}
+</Dialog>

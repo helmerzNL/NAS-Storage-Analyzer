@@ -11,6 +11,11 @@ snel blijft.
 * **Weergave**: dashboard met donut en groeigrafiek, mappenbrowser met percentages en sorteren, treemap, combineerbare
   filters (categorie, extensie, grootte, gewijzigd, laatst gebruikt, naam), grootste en koudste bestanden en mappen,
   zoeken, CSV-export.
+* **Verwijderscripts** (alleen beheerders): vink bestanden aan in de bestandslijsten en krijg één script (`.ps1`, `.cmd` of `.sh`)
+  dat precies die bestanden verwijdert, op je pc via SMB of op de NAS zelf. **De applicatie verwijdert zelf niets**: zij schrijft de
+  tekst, jij draait het script. Het script toont eerst een samenvatting, vraagt `DELETE <aantal>` te typen en laat een bestand staan
+  dat sinds de scan is veranderd. Hoogstens 2.000 bestanden per script; de padbasis (hoe jouw machine de share ziet) stel je per share
+  in. Wat het script niet veilig kan aanspreken laat het weg en noemt het (zie [ADR 0006](docs/adr/0006-delete-scripts.md)).
 * **Bestandstypes** in acht categorieën (Video, Audio, Afbeeldingen, Documenten, Archieven, Code, Disk images, Overig)
   met een aanpasbare extensietabel; een wijziging werkt direct door in alle cijfers, zonder opnieuw te scannen.
 * **Historie**: per scan een momentopname, met instelbare bewaartermijn; groei per categorie in de tijd.
@@ -199,6 +204,10 @@ dan `docker compose up -d`. Het volledige stappenplan en wat je wel en niet hoef
 * Twee brede leeftijdsfilters over een héle share van 10 miljoen bestanden duren 2,0–2,6 s; alle andere weergaven
   blijven onder 500 ms.
 * Eén directory wordt in één keer gelezen; een map met miljoenen entries kost merkbaar geheugen in de worker.
+* **Verwijderscripts** zijn alleen zo goed als de index: ze controleren grootte en tijd vóór het verwijderen, maar een bestand dat
+  sinds de scan is vervangen door een ander van gelijke grootte en tijd is niet te onderscheiden. Windows kan sommige Linux-namen
+  niet aanspreken (die laat het script weg), `cmd` laat lege bestanden weg en vergelijkt alleen de grootte, en bestanden die alleen in
+  hoofdletters verschillen worden weggelaten. Zie [ADR 0006](docs/adr/0006-delete-scripts.md).
 * Geen OIDC; de auth-laag is zo opgezet dat een extra inlogmethode een sessie kan aanmaken, maar de koppeling is niet gebouwd.
 
 Alle beperkingen met toelichting: [`docs/deploy.md`](docs/deploy.md#9-bekende-beperkingen).
@@ -290,6 +299,13 @@ files is refused, so a dropped mount does not erase your history.
 **Users.** Nobody chooses anyone else's password: an administrator makes an **invitation link** (Instellingen → Gebruikers) that the guest opens to choose their own password or a
 passkey. The link is shown once, works once, expires after 7 days and is never stored (only its hash); *Nieuwe inlog-link* brings back a user who cannot sign in. `NASA_PUBLIC_URL` is the address the links point at.
 Details: [`docs/deploy.md` §4b](docs/deploy.md#4b-gebruikers-uitnodigen).
+
+**Delete scripts.** An administrator can tick files in the file lists (Folders → Files, Lists) and get one script (`.ps1`, `.cmd` or `.sh`)
+that deletes exactly those files, to run on a PC that sees the share over SMB or on the NAS itself. **The application deletes nothing**: it
+writes the text and you run it. The script prints a summary, needs `DELETE <count>` to be typed, and keeps any file whose size or time differs
+from the scan. At most 2,000 files per script. Where your machines see the share (`\\nas\media`, `Z:\`, `/mnt/user/media`) is set per share (*Delete scripts* in
+the share form) and can be changed when the script is made. Files that cannot be addressed safely (odd characters, names Windows cannot open, names
+that differ only in case) are left out and listed in the script. See [ADR 0006](docs/adr/0006-delete-scripts.md).
 
 **Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and Settings → System with *Check now*).
 It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,

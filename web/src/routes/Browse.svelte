@@ -2,7 +2,7 @@
   import { get, qs, type Child, type ChildPage, type DirDetail, type FileRow, type ShareInfo, type TreeNode } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatBytes, formatNumber, formatDate, formatPct } from '../lib/format';
-  import { prefs } from '../lib/session.svelte';
+  import { prefs, isAdmin } from '../lib/session.svelte';
   import { route, setQuery, navigate, link } from '../lib/router.svelte';
   import { filtersFromQuery, filtersToParams, activeFilterCount, type Filters } from '../lib/filters';
   import { loadShares, sharesStore, shareById } from '../lib/shares.svelte';
@@ -11,6 +11,9 @@
   import FilterBar from '../components/FilterBar.svelte';
   import AtimeNotice from '../components/AtimeNotice.svelte';
   import Treemap from '../components/Treemap.svelte';
+  import SelectionBar from '../components/SelectionBar.svelte';
+  import { selection } from '../lib/selection.svelte';
+  import { tickRow, tickAll, tickState } from '../lib/tick';
 
   let { shareId, dirId }: { shareId?: string; dirId?: string } = $props();
 
@@ -97,6 +100,7 @@
     ? `/api/v1${base}/files${qs({ ...pageParams, sort: 'size', dir: dirPath, recursive, format: 'csv' })}`
     : `/api/v1${base}/dirs/${dirPath}/children${qs({ ...pageParams, format: 'csv' })}`);
   const filtered = $derived(activeFilterCount(filters) > 0);
+  const ticks = $derived(tickState(Number(shareId), files));
 </script>
 
 <div class="page-head">
@@ -197,20 +201,29 @@
     </div>
     <div class="card table-wrap flush" aria-busy={loading}>
       <table data-testid="file-table">
-        <thead><tr><th>{t('col.name')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.accessed')}</th></tr></thead>
+        <thead><tr>
+          {#if isAdmin()}<th class="sel"><label class="selcell" title={t('sel.all')}>
+            <input type="checkbox" checked={ticks === 'all'} indeterminate={ticks === 'some'} disabled={!files.length} aria-label={t('sel.all')}
+              onchange={() => tickAll(Number(shareId), files)} data-testid="select-all" /></label></th>{/if}
+          <th>{t('col.name')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.accessed')}</th></tr></thead>
         <tbody>
           {#each files as f (f.id)}
-            <tr data-testid="file-row"><td><span class="truncate" style="display:inline-block;max-width:60ch" title={f.path}>{f.name}</span>
+            <tr data-testid="file-row">
+              {#if isAdmin()}<td class="sel"><label class="selcell">
+                <input type="checkbox" checked={selection.share === Number(shareId) && selection.has(f.id)} aria-label={t('sel.row', { name: f.name })}
+                  onchange={() => tickRow(Number(shareId), f)} data-testid="select-file" /></label></td>{/if}
+              <td><span class="truncate" style="display:inline-block;max-width:60ch" title={f.path}>{f.name}</span>
               {#if recursive}<div class="muted small truncate" style="max-width:60ch">{f.path.slice(0, f.path.length - f.name.length - 1) || '/'}</div>{/if}
               {#if !f.counted}<span class="badge" title={t('files.hardlink.hint')}>{t('files.hardlink')}</span>{/if}</td>
               <td class="right actions">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
               <td class="right hide-sm nowrap">{formatDate(f.mtime, i18n.lang)}</td><td class="right hide-sm nowrap">{formatDate(f.atime, i18n.lang)}</td></tr>
           {:else}
-            <tr><td colspan="4" class="muted">{loading ? t('common.loading') : t('browse.nomatch')}</td></tr>
+            <tr><td colspan={isAdmin() ? 5 : 4} class="muted">{loading ? t('common.loading') : t('browse.nomatch')}</td></tr>
           {/each}
         </tbody>
       </table>
     </div>
     {#if filesCursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={more}>{t('common.more')}</button></div>{/if}
+    {#if isAdmin()}<p class="muted small" style="margin-bottom:0">{t('sel.hint')}</p><SelectionBar {share} />{/if}
   {/if}
 {/if}

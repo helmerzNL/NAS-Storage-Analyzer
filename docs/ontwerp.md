@@ -57,6 +57,8 @@ DuckDB + SQLite (zie prestatiebeslissing: extra export-stap, CGO, single writer)
   SMB-credentials gaan via een `0600` credentials-file in tmpfs, nooit op de command line.
 - Beveiliging scanner: de code opent alleen met `O_RDONLY`, `fstatat(AT_SYMLINK_NOFOLLOW)`; er bestaat geen
   schrijf-, rename- of unlink-codepad. Een test bewaakt dat (grep op verboden syscalls + read-only fixture).
+  De applicatie schrijft wel de *tekst* van een verwijderscript (`internal/delscript`, [ADR 0006](adr/0006-delete-scripts.md)); dat pakket kan
+  geen `os`, `os/exec` of `syscall` importeren, en wie het script draait is de beheerder, op zijn eigen machine.
 
 ## 3. Databaseschema (kern)
 
@@ -140,10 +142,11 @@ Ontwerpkeuzes:
   `login_attempts`; gelijke foutmelding en vergelijkbare responstijd bij onbekende gebruiker.
 - **Proxy:** `X-Forwarded-For/Proto/Host` alleen vertrouwd van `NASA_TRUSTED_PROXIES` (CIDR-lijst).
   WebAuthn `NASA_RP_ID` en `NASA_RP_ORIGINS` configureerbaar.
-- **Rollen:** `admin` (shares, schema's, gebruikers, extensiemapping) en `viewer` (alleen lezen); autorisatie in
+- **Rollen:** `admin` (shares, schema's, gebruikers, extensiemapping, verwijderscripts) en `viewer` (alleen lezen); autorisatie in
   middleware per route, in de OpenAPI-spec per operatie gemarkeerd.
 - **Audit log:** logins (ook mislukt), MFA-wijzigingen, scanstart/-annulering, share- en configuratiewijzigingen,
-  gebruikersbeheer, en de uitkomst van elke scan (door de worker, ook bij een schema: `scan.finished`, `scan.empty` voor een
+  gebruikersbeheer, elk verwijderscript dat is uitgegeven (`script.generate`: soort, aantallen, scan, padbasis en een SHA-256 van het script,
+  nooit een bestandsnaam), en de uitkomst van elke scan (door de worker, ook bij een schema: `scan.finished`, `scan.empty` voor een
   scan zonder bestanden, `scan.errors` bij onleesbare mappen, `scan.failed` met de reden); append-only tabel, doorzoekbaar
   in de UI voor admins.
 - **Geheimen:** `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
