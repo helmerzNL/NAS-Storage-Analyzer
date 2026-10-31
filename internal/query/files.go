@@ -2,9 +2,12 @@ package query
 
 import (
 	"context"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // FileQuery lists files, optionally below a directory.
@@ -51,18 +54,29 @@ type FilePage struct {
 
 var fileSorts = map[string]bool{"size": true, "name": true, "mtime": true, "used": true, "ext": true}
 
-func fileKeySQL(sortName, basis string) (expr string, numeric bool) {
+// keyKind says how a sort key travels in a cursor.
+type keyKind int
+
+const (
+	keyInt  keyKind = iota // bigint
+	keyText                // text, byte order
+	keyTime                // timestamptz, carried as unix microseconds
+)
+
+// fileKeySQL returns the ORDER BY expression. Date keys are the bare column so
+// the (share_id, mtime) / (share_id, atime) indexes can serve the ordering.
+func fileKeySQL(sortName, basis string) (expr string, kind keyKind) {
 	switch sortName {
 	case "name":
-		return `f.name COLLATE "C"`, false
+		return `f.name COLLATE "C"`, keyText
 	case "ext":
-		return `f.ext COLLATE "C"`, false
+		return `f.ext COLLATE "C"`, keyText
 	case "mtime":
-		return epochMicros("f.mtime"), true
+		return "f.mtime", keyTime
 	case "used":
-		return epochMicros(fileUsed(basis, "f")), true
+		return fileUsed(basis, "f"), keyTime
 	}
-	return "f.size", true
+	return "f.size", keyInt
 }
 
 // Files lists files matching the filter in the requested order.
@@ -109,9 +123,13 @@ func (q *DB) Files(ctx context.Context, fq FileQuery) (*FilePage, error) {
 		}
 		conds = append(conds, "f.dir_id = "+a.add(fq.DirID))
 	}
-	key, numeric := fileKeySQL(sortName, m.Basis)
+	key, kind := fileKeySQL(sortName, m.Basis)
+	cursorKey := "(" + key + ")::text"
+	if kind == keyTime {
+		cursorKey = "(extract(epoch from " + key + ") * 1000000)::bigint::text"
+	}
 	if cur != nil {
-		cond, err := keysetCond(a, key, "f.id", cur, numeric)
+		cond, err := keysetCondKind(a, key, "f.id", cur, kind)
 		if err != nil {
 			return nil, err
 		}
@@ -119,7 +137,7 @@ func (q *DB) Files(ctx context.Context, fq FileQuery) (*FilePage, error) {
 	}
 	rows, err := q.pool.Query(ctx, `
 		SELECT f.id, f.dir_id, f.name, f.ext, f.category_id, f.size, f.alloc, f.mtime, f.atime, f.ctime, f.nlink, f.counted,
-		       (`+key+`)::text
+		       `+cursorKey+`
 		FROM files f WHERE f.share_id = $1`+where(conds)+`
 		ORDER BY `+key+` `+dirWord(fq.Desc)+`, f.id `+dirWord(fq.Desc)+` LIMIT `+a.add(limit+1), a.v...)
 	if err != nil {
@@ -187,12 +205,21 @@ type SearchHit struct {
 	Mtime   *time.Time `json:"mtime"`
 }
 
+// SearchResult is the answer to a name search.
+type SearchResult struct {
+	Items []SearchHit `json:"items"`
+	// Truncated: more than searchCandidates files matched, so the list shows the
+	// largest of the first searchCandidates matches found, not necessarily the
+	// largest overall. The caller should ask the user to refine the search.
+	Truncated bool `json:"truncated"`
+}
+
 // MinSearchLen is the shortest search string; shorter patterns cannot use the
 // trigram index and would scan every row.
 const MinSearchLen = 3
 
 // Search finds names containing Q (case-insensitive), largest first.
-func (q *DB) Search(ctx context.Context, sq SearchQuery) ([]SearchHit, error) {
+func (q *DB) Search(ctx context.Context, sq SearchQuery) (*SearchResult, error) {
 	term := strings.TrimSpace(sq.Q)
 	if len([]rune(term)) < MinSearchLen {
 		return nil, invalid("search text must be at least %d characters", MinSearchLen)
@@ -217,28 +244,13 @@ func (q *DB) Search(ctx context.Context, sq SearchQuery) ([]SearchHit, error) {
 	pattern := "%" + likeEscaper.Replace(term) + "%"
 	hits := []SearchHit{}
 
+	truncated := false
 	if sq.Kind != "dirs" {
-		rows, err := q.pool.Query(ctx, `
-			SELECT f.share_id, f.id, f.dir_id, f.name, f.size, f.mtime FROM files f
-			WHERE ($1 = 0 OR f.share_id = $1) AND f.counted AND f.name ILIKE $2
-			ORDER BY f.size DESC, f.id LIMIT $3`, sq.ShareID, pattern, limit)
+		found, trunc, err := q.searchFiles(ctx, sq.ShareID, term, pattern, limit)
 		if err != nil {
 			return nil, err
 		}
-		for rows.Next() {
-			h := SearchHit{Kind: "file"}
-			var mt time.Time
-			if err := rows.Scan(&h.ShareID, &h.ID, &h.DirID, &h.Name, &h.Size, &mt); err != nil {
-				rows.Close()
-				return nil, err
-			}
-			h.Mtime = &mt
-			hits = append(hits, h)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
+		hits, truncated = append(hits, found...), trunc
 	}
 	if sq.Kind != "files" {
 		rows, err := q.pool.Query(ctx, `
@@ -290,5 +302,72 @@ func (q *DB) Search(ctx context.Context, sq SearchQuery) ([]SearchHit, error) {
 			h.Path = joinPath(paths[h.ShareID][h.DirID], h.Name)
 		}
 	}
-	return hits, nil
+	return &SearchResult{Items: hits, Truncated: truncated}, nil
+}
+
+// searchCandidates bounds how many name matches are examined for one search.
+var searchCandidates = 20_000
+
+// SetSearchCandidates lowers the bound; tests use it to reach the truncated
+// path with small data. It returns a function that restores the old value.
+func SetSearchCandidates(n int) (restore func()) {
+	old := searchCandidates
+	searchCandidates = n
+	return func() { searchCandidates = old }
+}
+
+var extLike = regexp.MustCompile(`^\.[A-Za-z0-9]{1,16}$`)
+
+// searchFiles returns the largest files whose name matches.
+//
+// A term that looks like an extension (".jpg") is answered exactly through the
+// (share, ext, size) index. Otherwise the trigram index yields the candidates;
+// when they exceed searchCandidates, the largest of the first searchCandidates
+// found are returned and truncated is set. Ordering millions of matches by size
+// would take seconds, and a result that tells the user to be more specific
+// serves them better than a slow exact answer to a vague question.
+func (q *DB) searchFiles(ctx context.Context, share int64, term, pattern string, limit int) (hits []SearchHit, truncated bool, err error) {
+	scan := func(rows pgx.Rows) ([]SearchHit, error) {
+		defer rows.Close()
+		var out []SearchHit
+		for rows.Next() {
+			h := SearchHit{Kind: "file"}
+			var mt time.Time
+			if err := rows.Scan(&h.ShareID, &h.ID, &h.DirID, &h.Name, &h.Size, &mt); err != nil {
+				return nil, err
+			}
+			h.Mtime = &mt
+			out = append(out, h)
+		}
+		return out, rows.Err()
+	}
+	if extLike.MatchString(term) {
+		rows, err := q.pool.Query(ctx, `
+			SELECT f.share_id, f.id, f.dir_id, f.name, f.size, f.mtime FROM files f
+			WHERE ($1 = 0 OR f.share_id = $1) AND f.counted AND f.ext = $2
+			ORDER BY f.size DESC, f.id LIMIT $3`, share, strings.ToLower(term[1:]), limit)
+		if err != nil {
+			return nil, false, err
+		}
+		hits, err = scan(rows)
+		return hits, false, err
+	}
+	rows, err := q.pool.Query(ctx, `
+		SELECT f.share_id, f.id, f.dir_id, f.name, f.size, f.mtime FROM files f
+		WHERE ($1 = 0 OR f.share_id = $1) AND f.counted AND f.name ILIKE $2 LIMIT $3`, share, pattern, searchCandidates+1)
+	if err != nil {
+		return nil, false, err
+	}
+	cand, err := scan(rows)
+	if err != nil {
+		return nil, false, err
+	}
+	if truncated = len(cand) > searchCandidates; truncated {
+		cand = cand[:searchCandidates]
+	}
+	sort.SliceStable(cand, func(i, j int) bool { return cand[i].Size > cand[j].Size })
+	if len(cand) > limit {
+		cand = cand[:limit]
+	}
+	return cand, truncated, nil
 }

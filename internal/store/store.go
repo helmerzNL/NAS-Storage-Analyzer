@@ -168,6 +168,16 @@ func OpenReadOnly(ctx context.Context, dsn string, maxConns int32, statementTime
 	}
 	cfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
 	cfg.ConnConfig.RuntimeParams["application_name"] = "nasa-api"
+	// pgx prepares statements. After a few runs PostgreSQL would switch to a
+	// generic plan that ignores the actual filter values; for our skewed data
+	// (one extension is 8 % of the files, another 0.01 %) that made a 1 s query
+	// take 9 s. Plan every execution with its real parameters instead.
+	cfg.ConnConfig.RuntimeParams["plan_cache_mode"] = "force_custom_plan"
+	// SSD-tuned clusters (random_page_cost 1.1) make PostgreSQL walk a date
+	// index for filters that match half the table, which is 3x slower than a
+	// parallel sequential scan. 2.0 picks the scan for broad filters and still
+	// uses the indexes for selective ones (measured on 10M files).
+	cfg.ConnConfig.RuntimeParams["random_page_cost"] = "2.0"
 	if statementTimeout > 0 {
 		cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(statementTimeout.Milliseconds(), 10)
 	}

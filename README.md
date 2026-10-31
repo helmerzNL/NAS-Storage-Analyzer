@@ -3,8 +3,8 @@
 Self-hosted tool die NFS/SMB-shares read-only scant en laat zien hoeveel ruimte data inneemt, per share,
 map en bestandstype. Het volledige ontwerp staat in [`docs/ontwerp.md`](docs/ontwerp.md).
 
-**Status: fase 1 van 6 (scanner + databaseschema + CLI-scan).** API, auth, UI, scheduler en Docker-stack
-volgen in latere fasen; deze README wordt dan uitgebreid (architectuur, installatie, NFS/SMB, reverse proxy,
+**Status: fase 1 en 2 klaar (scanner, databaseschema, CLI-scan, read-only REST API).** Auth, UI, scheduler
+en Docker-stack volgen; deze README wordt dan uitgebreid (architectuur, installatie, NFS/SMB, reverse proxy,
 back-up, bekende beperkingen).
 
 ## CLI (fase 1)
@@ -24,6 +24,40 @@ export NASA_DB_DSN='postgres://user:pass@localhost/nasa'
 
 Logregels zijn JSON op stdout, de samenvatting gaat naar stderr. Afsluiten met Ctrl-C annuleert de scan;
 de eerder opgeslagen data blijft dan ongewijzigd (exitcode 130).
+
+## API (fase 2)
+
+```bash
+export NASA_DB_DSN='postgres://user:pass@localhost/nasa'
+./nasa serve                      # luistert op 127.0.0.1:8080
+curl localhost:8080/api/v1/shares
+curl 'localhost:8080/api/v1/shares/1/dirs/root/children?category=video&sort=size'
+curl 'localhost:8080/api/v1/shares/1/cold/files?unused_days=730&format=csv' > koud.csv
+```
+
+* Contract: [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.0), ook op `/openapi.yaml`. Contracttests valideren
+  elk antwoord tegen de spec.
+* **Er is nog geen authenticatie.** `nasa serve` weigert daarom een niet-loopback-adres, tenzij je
+  `-allow-unauthenticated-remote` opgeeft. De API-sessies in de database zijn read-only en hebben een
+  `statement_timeout`.
+* Filters (`category`, `ext`, `min_size`, `max_size`, `modified_*`, `used_*`, `unused_days`, `q`) zijn
+  combineerbaar en werken in de mappenbrowser en de bestandslijsten. Elke lijst kan als CSV (`format=csv`).
+* `/metrics` (Prometheus) bevat per share grootte, aantal bestanden, laatste scan en vrije ruimte.
+* Prestaties op 10 miljoen bestanden: [`docs/bench-phase2.md`](docs/bench-phase2.md).
+
+## PostgreSQL-instellingen
+
+De API zet `plan_cache_mode=force_custom_plan` en `random_page_cost=2.0` zelf per sessie. Daarnaast helpt het
+bij grote shares om `shared_buffers` (circa 25 % van het RAM), `effective_cache_size` (circa 50–75 %) en
+`max_parallel_workers_per_gather` (aantal cores / 2) ruim te zetten.
+
+## Benchmark
+
+```bash
+go build -o nasabench ./cmd/nasabench
+NASA_DB_DSN=postgres://user@host/bench ./nasabench seed -files 10000000 -dirs 200000
+NASA_DB_DSN=postgres://user@host/bench ./nasabench queries -runs 20 -out rapport.md
+```
 
 ## Tests
 

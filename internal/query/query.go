@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -18,10 +19,13 @@ import (
 
 // DB runs read queries. Hand it a pool whose sessions are read-only.
 type DB struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	paths *pathCache
 }
 
-func New(pool *pgxpool.Pool) *DB { return &DB{pool: pool} }
+func New(pool *pgxpool.Pool) *DB {
+	return &DB{pool: pool, paths: &pathCache{names: map[dirKey]string{}, paths: map[dirKey]string{}}}
+}
 
 var (
 	// ErrNotFound: the share, directory or scan does not exist.
@@ -144,6 +148,23 @@ func keysetCond(a *args, keyExpr, idExpr string, c *cursor, numeric bool) (strin
 	return fmt.Sprintf("(%s, %s) %s (%s, %s)", keyExpr, idExpr, op, a.add(k), a.add(c.ID)), nil
 }
 
+// keysetCondKind is keysetCond for keys that may be text, integers or
+// timestamps (carried in the cursor as unix microseconds).
+func keysetCondKind(a *args, keyExpr, idExpr string, c *cursor, kind keyKind) (string, error) {
+	if kind != keyTime {
+		return keysetCond(a, keyExpr, idExpr, c, kind == keyInt)
+	}
+	n, err := strconv.ParseInt(c.Key, 10, 64)
+	if err != nil {
+		return "", invalid("invalid cursor")
+	}
+	op := ">"
+	if c.Desc {
+		op = "<"
+	}
+	return fmt.Sprintf("(%s, %s) %s (%s, %s)", keyExpr, idExpr, op, a.add(time.UnixMicro(n).UTC()), a.add(c.ID)), nil
+}
+
 func dirWord(desc bool) string {
 	if desc {
 		return "DESC"
@@ -200,30 +221,115 @@ func (q *DB) dirRef(ctx context.Context, share, dir int64) (*dirRef, error) {
 	return &d, err
 }
 
+type dirKey struct{ share, id int64 }
+
+// pathCache remembers directory names and resolved paths. A directory id never
+// changes its path (ids are not reused; a renamed directory gets a new id), so
+// entries stay valid across scans. It is cleared when it grows too large.
+type pathCache struct {
+	mu    sync.Mutex
+	names map[dirKey]string
+	paths map[dirKey]string
+}
+
+const pathCacheMax = 500_000
+
+func (c *pathCache) get(k dirKey) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	p, ok := c.paths[k]
+	return p, ok
+}
+
 // dirPaths resolves directory ids to slash-separated paths below the share
-// root ("" is the root, children look like "/movies/2024").
+// root ("" is the root, children look like "/movies/2024"). Unknown ids are
+// looked up with two primary-key queries: the ltree path of each directory
+// lists its ancestor ids, whose names are then fetched in one batch.
 func (q *DB) dirPaths(ctx context.Context, share int64, ids []int64) (map[int64]string, error) {
 	out := make(map[int64]string, len(ids))
-	if len(ids) == 0 {
+	var miss []int64
+	for _, id := range ids {
+		if p, ok := q.paths.get(dirKey{share, id}); ok {
+			out[id] = p
+		} else {
+			miss = append(miss, id)
+		}
+	}
+	if len(miss) == 0 {
 		return out, nil
 	}
-	rows, err := q.pool.Query(ctx, `
-		SELECT d.id, string_agg(a.name, '/' ORDER BY a.depth)
-		FROM dirs d JOIN dirs a ON a.share_id = d.share_id AND a.path @> d.path
-		WHERE d.share_id = $1 AND d.id = ANY($2) GROUP BY d.id`, share, ids)
+	rows, err := q.pool.Query(ctx, `SELECT id, path::text FROM dirs WHERE share_id = $1 AND id = ANY($2)`, share, miss)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	chains := make(map[int64][]int64, len(miss))
+	need := map[int64]bool{}
+	q.paths.mu.Lock()
 	for rows.Next() {
 		var id int64
-		var p string
-		if err := rows.Scan(&id, &p); err != nil {
+		var path string
+		if err := rows.Scan(&id, &path); err != nil {
+			q.paths.mu.Unlock()
+			rows.Close()
 			return nil, err
 		}
-		out[id] = p
+		labels := strings.Split(path, ".")
+		chain := make([]int64, 0, len(labels))
+		for _, l := range labels {
+			n, _ := strconv.ParseInt(l, 10, 64)
+			chain = append(chain, n)
+			if _, ok := q.paths.names[dirKey{share, n}]; !ok {
+				need[n] = true
+			}
+		}
+		chains[id] = chain
 	}
-	return out, rows.Err()
+	q.paths.mu.Unlock()
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(need) > 0 {
+		ask := make([]int64, 0, len(need))
+		for id := range need {
+			ask = append(ask, id)
+		}
+		nr, err := q.pool.Query(ctx, `SELECT id, name FROM dirs WHERE share_id = $1 AND id = ANY($2)`, share, ask)
+		if err != nil {
+			return nil, err
+		}
+		q.paths.mu.Lock()
+		for nr.Next() {
+			var id int64
+			var name string
+			if err := nr.Scan(&id, &name); err != nil {
+				q.paths.mu.Unlock()
+				nr.Close()
+				return nil, err
+			}
+			q.paths.names[dirKey{share, id}] = name
+		}
+		q.paths.mu.Unlock()
+		nr.Close()
+		if err := nr.Err(); err != nil {
+			return nil, err
+		}
+	}
+	q.paths.mu.Lock()
+	defer q.paths.mu.Unlock()
+	if len(q.paths.paths) > pathCacheMax || len(q.paths.names) > 2*pathCacheMax {
+		q.paths.paths, q.paths.names = map[dirKey]string{}, map[dirKey]string{}
+	}
+	for id, chain := range chains {
+		var b strings.Builder
+		for _, anc := range chain[1:] { // the first label is the share root, whose name is empty
+			b.WriteByte('/')
+			b.WriteString(q.paths.names[dirKey{share, anc}])
+		}
+		out[id] = b.String()
+		q.paths.paths[dirKey{share, id}] = b.String()
+	}
+	return out, nil
 }
 
 func uniqueIDs(ids []int64) []int64 {
@@ -294,10 +400,21 @@ var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 func (f Filter) conds(a *args, basis, alias string) []string {
 	var c []string
 	col := func(n string) string { return alias + "." + n }
-	if len(f.Categories) > 0 {
+	// A single value is written as plain equality: only then can the planner
+	// read (share, ext, size) or (share, category, size) in size order and stop
+	// early. With "= ANY" it walks the size index and filters millions of rows.
+	switch len(f.Categories) {
+	case 0:
+	case 1:
+		c = append(c, col("category_id")+" = "+a.add(f.Categories[0]))
+	default:
 		c = append(c, col("category_id")+" = ANY("+a.add(f.Categories)+")")
 	}
-	if len(f.Exts) > 0 {
+	switch len(f.Exts) {
+	case 0:
+	case 1:
+		c = append(c, col("ext")+" = "+a.add(f.Exts[0]))
+	default:
 		c = append(c, col("ext")+" = ANY("+a.add(f.Exts)+")")
 	}
 	if f.MinSize != nil {

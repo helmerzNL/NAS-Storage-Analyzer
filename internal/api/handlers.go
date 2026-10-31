@@ -529,10 +529,12 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	hits, err := s.q.Search(r.Context(), query.SearchQuery{ShareID: share, Q: q.Get("q"), Kind: q.Get("kind"), Limit: p.Limit})
+	res, err := s.q.Search(r.Context(), query.SearchQuery{ShareID: share, Q: q.Get("q"), Kind: q.Get("kind"), Limit: p.Limit})
 	if err != nil {
 		return err
 	}
+	hits := res.Items
+	w.Header().Set("X-Truncated", strconv.FormatBool(res.Truncated))
 	if csv, err := wantsCSV(r); err != nil {
 		return err
 	} else if csv {
@@ -541,5 +543,5 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) error {
 				return []string{i64(h.ShareID), h.Kind, i64(h.ID), textCell(h.Path), textCell(h.Name), i64(h.Size), ts(h.Mtime)}
 			})
 	}
-	return writeJSON(w, items[query.SearchHit]{Items: hits})
+	return writeJSON(w, res)
 }

@@ -366,10 +366,19 @@ paths:
         - {$ref: "#/components/parameters/Format"}
       responses:
         "200":
-          description: Matches.
+          description: Matches, largest first.
+          headers:
+            X-Truncated: {description: "`true` when the result is truncated (see `truncated`).", schema: {type: string}}
           content:
             application/json:
-              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/SearchHit"}}}}
+              schema:
+                type: object
+                required: [items, truncated]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/SearchHit"}}
+                  truncated:
+                    type: boolean
+                    description: "More than 20,000 files matched, so the list shows the largest of the first 20,000 found. Ask the user to refine the search. A term that looks like an extension (`.jpg`) is always exact."
             text/csv: {schema: {type: string}}
         default: {$ref: "#/components/responses/Problem"}
 

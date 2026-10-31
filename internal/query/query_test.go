@@ -3,6 +3,7 @@ package query_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
@@ -751,15 +752,15 @@ func TestCategoriesAndExtensions(t *testing.T) {
 func TestSearch(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
-	hits, err := f.q.Search(ctx, query.SearchQuery{ShareID: f.share, Q: "OLD"})
+	res, err := f.q.Search(ctx, query.SearchQuery{ShareID: f.share, Q: "OLD"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(hits) != 1 || hits[0].Kind != "dir" || hits[0].Path != "/video/old" {
-		t.Errorf("hits = %+v", hits)
+	if hits := res.Items; len(hits) != 1 || hits[0].Kind != "dir" || hits[0].Path != "/video/old" || res.Truncated {
+		t.Errorf("hits = %+v truncated=%v", hits, res.Truncated)
 	}
-	hits, _ = f.q.Search(ctx, query.SearchQuery{Q: ".mkv"})
-	if len(hits) != 2 || hits[0].Name != "c.mkv" || hits[0].Path != "/video/old/c.mkv" {
+	res, _ = f.q.Search(ctx, query.SearchQuery{Q: ".mkv"})
+	if hits := res.Items; len(hits) != 2 || hits[0].Name != "c.mkv" || hits[0].Path != "/video/old/c.mkv" {
 		t.Errorf("mkv hits = %+v", hits)
 	}
 	if _, err := f.q.Search(ctx, query.SearchQuery{Q: "ab"}); !isInvalid(err) {
@@ -831,3 +832,63 @@ func TestErrorsAndEdgeCases(t *testing.T) {
 		t.Errorf("cursor reuse across sorts: %v", err)
 	}
 }
+
+func TestSearchCommonTermsAndExtensions(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	for i := 1; i <= 2300; i++ {
+		ts.Write(t, root+"/bulk/common_"+strings.Repeat("0", 4-len(itoa(i)))+itoa(i)+".txt", i)
+	}
+	ts.Write(t, root+"/bulk/other.bin", 5000)
+	ts.Write(t, root+"/bulk/BIG.TXT", 9999)
+	sh, err := st.EnsureShare(context.Background(), "common", root, nil, 4, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scanrun.Run(context.Background(), st, sh, scanrun.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	q := query.New(st.Pool)
+	search := func(term string, limit int) *query.SearchResult {
+		t.Helper()
+		res, err := q.Search(context.Background(), query.SearchQuery{ShareID: sh.ID, Q: term, Kind: "files", Limit: limit})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+
+	// Fewer matches than the candidate bound: exact, largest first.
+	res := search("COMMON_", 5)
+	if res.Truncated || len(res.Items) != 5 {
+		t.Fatalf("truncated=%v items=%d", res.Truncated, len(res.Items))
+	}
+	for i, h := range res.Items {
+		if want := int64(2300 - i); h.Size != want {
+			t.Errorf("hit %d size = %d, want %d", i, h.Size, want)
+		}
+	}
+	// A term that looks like an extension is exact through the extension index,
+	// whatever the number of matches, and case-insensitive.
+	defer query.SetSearchCandidates(100)()
+	res = search(".TXT", 3)
+	if res.Truncated || len(res.Items) != 3 || res.Items[0].Name != "BIG.TXT" || res.Items[1].Size != 2300 {
+		t.Errorf(".TXT: truncated=%v items=%+v", res.Truncated, res.Items)
+	}
+	// Any other term with more matches than the bound is truncated, and says so.
+	res = search("common_", 5)
+	if !res.Truncated || len(res.Items) != 5 {
+		t.Fatalf("truncated=%v items=%d, want truncated with 5 items", res.Truncated, len(res.Items))
+	}
+	for i := 1; i < len(res.Items); i++ {
+		if res.Items[i].Size > res.Items[i-1].Size {
+			t.Errorf("truncated result is not sorted by size: %v", res.Items)
+		}
+	}
+	// A rare term still returns exactly what matches.
+	if res = search("common_0042", 10); res.Truncated || len(res.Items) != 1 || res.Items[0].Size != 42 {
+		t.Errorf("rare term: %+v", res)
+	}
+}
+
+func itoa(n int) string { return fmt.Sprint(n) }
