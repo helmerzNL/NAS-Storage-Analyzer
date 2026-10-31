@@ -89,6 +89,7 @@ inside the app. These are the app's limits as numbers; **whatever is in front mu
 | Sign-in attempts | 5 failed attempts per user and 30 per client address in an hour, then a lockout | The app must see the real client address: set `NASA_TRUSTED_PROXIES` to the proxy, or all clients share the proxy's address and its 30-attempt budget. |
 | Session | idle after **12 h**, absolute after **7 days** | — |
 | Folder picker (`GET /api/v1/fs/dirs`) | reads at most **20,000** directory entries and returns at most **1,000** folders, within the 15 s of one JSON request; an ordinary JSON response, about 100 KB for 1,000 folders with ordinary names | Nothing beyond the JSON request row above. |
+| Delete script (`POST /api/v1/shares/{share}/delete-script`) | at most **2,000 file ids** per request (about 25 KB of the 64 KiB body), answered within the 15 s of one JSON request; the response is a text download of about 200 bytes per file (a few MB at most with extremely long paths) | Nothing beyond the JSON request row above. |
 | Scan of one directory | **10 min** (`DirTimeout`); a slower directory counts as an error and the scan goes on | Not applicable (the worker talks to the NAS, not through a proxy). |
 
 Nothing else in front of the app constrains it. Examples of the proxy settings that follow from this table (Caddy, nginx,

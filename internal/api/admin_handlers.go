@@ -33,6 +33,8 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("GET "+v+"/system/update", lvAdmin, s.updateStatus)
 		h("POST "+v+"/system/update/check", lvAdmin, s.updateCheck)
 	}
+	// Writes the text of a script that deletes the selected files; the application itself deletes nothing (ADR 0006).
+	h("POST "+v+"/shares/{share}/delete-script", lvAdmin, s.deleteScript)
 	h("GET "+v+"/shares/{share}/history", lvViewer, s.history)
 	h("GET "+v+"/shares/{share}/dirs/{dir}/history", lvViewer, s.dirHistory)
 	h("PUT "+v+"/auth/prefs", lvViewer, s.putPrefs)

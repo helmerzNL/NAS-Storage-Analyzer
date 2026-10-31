@@ -48,8 +48,20 @@ than the file.
   prefix, the same name in another folder, a case twin). PowerShell is a Windows target (`\\server\share` and `Z:\` paths);
   Linux and macOS are covered by the `sh` script.
 
-This ADR covers the generator. The endpoint that builds a script from ticked file ids, the per-share base path, the audit
-entry and the interface follow in later pull requests and extend the Enforcement section.
+- **The endpoint is `POST /api/v1/shares/{share}/delete-script`, Admin-only.** It takes the ids of the ticked files (at most
+  2,000), the kind of script (`cmd`, `powershell`, `sh`), the base path and the language, and answers with the script as a
+  download. The ids are looked up in the index of the last published scan (`query.FilesForScript`); an id that is not a file of
+  this share, whatever share it belongs to, is reported as gone, so the answer tells nothing about another share. A file or a
+  folder above it that has a sibling whose name differs only in case is left out (`ReasonAmbiguous`): SMB from Windows and a
+  Mac cannot tell the two apart. The comparison is the database's `lower()`, so for a database whose locale is `C` that is
+  ASCII only; the official PostgreSQL image is a UTF-8 locale.
+- **The base path is stored per share and per kind of machine** (`client_windows`, `client_posix` in the share's `config`,
+  validated with `NormalizeRoot` when saved, and again when a script is made), and can be overridden in the request. The app
+  never guesses it: the container path is not the path of the person's machine, and a wrong guess would aim a script at a copy.
+- **The audit log gets `script.generate`**: the kind of script, the counts, the scan id, the base path and a SHA-256 of the
+  script. Never a file name; the log is read by people who may not see the share.
+
+This ADR covers the generator and the endpoint. The interface follows in a later pull request and extends the Enforcement section.
 
 ## Consequences
 
@@ -89,4 +101,12 @@ entry and the interface follow in later pull requests and extend the Enforcement
 `internal/delscript` tests: `TestCodeDoesNotDependOnTheFiles`, `TestPackageCannotRunProgramsOrTouchFiles`, the classification and
 base-path tables, the golden scripts, `FuzzGenerate`, and `TestScriptsDeleteExactlyTheSelection` (every shell, 12 scenarios).
 CI job `delete-script-shells` (Linux, macOS, Windows; fails when a shell is missing or a test is skipped), and `go-tests`, which
-requires the POSIX shells and `pwsh`.
+requires the POSIX shells.
+
+The endpoint: `internal/api` `TestDeleteScriptIsAdminOnly` (401, 403, CSRF), `TestDeleteScriptDeletesExactlyTheSelectionWhenRun`
+(a share is scanned, ids are picked, the script is run in `sh` against the real files and removes those and no others; asking
+for a script removes nothing; the audit entry holds the hash and no name), `TestDeleteScriptUsesTheShareBasePathAndTheTargetKind`,
+`TestDeleteScriptRefusesBadRequests` and `TestDeleteScriptLeavesOutWhatCannotBeNamedSafely`; `internal/query`
+`TestFilesForScript…` (order, other shares' ids, case twins of files and of folders); `internal/shares`
+`TestValidateClientRoots` and `TestClientRootsSurviveOtherChanges` (a partial update and the scan command's `EnsureShare` keep the
+base paths).
