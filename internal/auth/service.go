@@ -86,7 +86,7 @@ type User struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	LastLoginAt   *time.Time `json:"last_login_at"`
 	// Prefs are the user's interface settings: units (binary|decimal),
-	// language (nl|en), theme (system|light|dark).
+	// language (nl|en), theme (system|light|dark), accent (#rrggbb, empty: the default).
 	Prefs map[string]string `json:"prefs"`
 
 	passwordHash *string
@@ -528,13 +528,32 @@ var prefValues = map[string]map[string]bool{
 	"theme":    {"system": true, "light": true, "dark": true},
 }
 
+// accentRE is the accent colour a person may pick: #rrggbb. Anything else would end up in a CSS custom property.
+var accentRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// validPref checks one preference and returns the value to store. "accent" is a free colour (#rrggbb, stored in
+// lower case) or empty for the app's default; the other preferences are a fixed set.
+func validPref(key, value string) (string, bool) {
+	if key == "accent" {
+		if value == "" {
+			return "", true
+		}
+		return strings.ToLower(value), accentRE.MatchString(value)
+	}
+	return value, prefValues[key][value]
+}
+
 // SetPrefs stores interface settings; unknown keys and values are rejected.
 func (s *Service) SetPrefs(ctx context.Context, userID int64, prefs map[string]string) (map[string]string, error) {
+	clean := make(map[string]string, len(prefs))
 	for k, v := range prefs {
-		if !prefValues[k][v] {
+		nv, ok := validPref(k, v)
+		if !ok {
 			return nil, fmt.Errorf("invalid preference %s=%q", k, v)
 		}
+		clean[k] = nv
 	}
+	prefs = clean
 	var out map[string]string
 	err := s.pool.QueryRow(ctx, `UPDATE users SET prefs = prefs || $2::jsonb WHERE id = $1 RETURNING prefs`, userID, prefs).Scan(&out)
 	return out, err

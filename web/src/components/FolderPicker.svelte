@@ -45,9 +45,9 @@
 <Dialog bind:open title={t('fs.title')}>
   <div class="stack" data-testid="folder-picker">
     {#if error}
-      <div class="alert bad row between" role="alert">
+      <div class="notice error row between" role="alert">
         <span>{error}</span>
-        <button type="button" class="small" onclick={() => load(listing?.path ?? '')}>{t('common.retry')}</button>
+        <button type="button" class="btn small" onclick={() => load(listing?.path ?? '')}>{t('common.retry')}</button>
       </div>
     {/if}
 
@@ -58,35 +58,35 @@
           {#if c.path === listing.path}
             <span class="mono"><b>{c.name}</b></span>
           {:else}
-            <button type="button" class="ghost small mono" onclick={() => load(c.path)}>{c.name}</button>
+            <button type="button" class="btn ghost small mono" onclick={() => load(c.path)}>{c.name}</button>
           {/if}
         {/each}
       </nav>
 
       <ul class="folders" aria-busy={loading} data-testid="folder-list">
         {#if listing.parent}
-          <li><button type="button" class="ghost grow left" onclick={() => load(listing!.parent!)} data-testid="folder-up">↑ {t('fs.up')}</button></li>
+          <li><button type="button" class="btn ghost grow left" onclick={() => load(listing!.parent!)} data-testid="folder-up">↑ {t('fs.up')}</button></li>
         {/if}
         {#each listing.dirs as d (d.path)}
           <li>
-            <button type="button" class="ghost grow left" onclick={() => load(d.path)} data-testid={'folder-' + d.name}>
+            <button type="button" class="btn ghost grow left" onclick={() => load(d.path)} data-testid={'folder-' + d.name}>
               <span aria-hidden="true">›</span> <span class="mono truncate">{d.name}</span>{#if d.symlink}<span class="muted" title={t('fs.symlink')}> ↪</span>{/if}
             </button>
-            <button type="button" class="small" onclick={() => pick(d.path)} aria-label={t('fs.choose.named', { name: d.name })} data-testid={'pick-' + d.name}>{t('fs.choose')}</button>
+            <button type="button" class="btn small" onclick={() => pick(d.path)} aria-label={t('fs.choose.named', { name: d.name })} data-testid={'pick-' + d.name}>{t('fs.choose')}</button>
           </li>
         {:else}
           <li class="muted pad">{listing.parent ? t('fs.empty') : t('fs.empty.root')}</li>
         {/each}
       </ul>
 
-      {#if listing.truncated}<div class="alert info small">{t('fs.truncated')}</div>{/if}
+      {#if listing.truncated}<div class="notice info small">{t('fs.truncated')}</div>{/if}
     {:else if loading}
       <p class="muted">{t('common.loading')}</p>
     {/if}
   </div>
 
   {#snippet footer()}
-    <button type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-    <button type="button" class="primary" disabled={!listing} onclick={() => listing && pick(listing.path)} data-testid="folder-choose">{t('fs.choose.this')}</button>
+    <button class="btn" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
+    <button type="button" class="btn primary" disabled={!listing} onclick={() => listing && pick(listing.path)} data-testid="folder-choose">{t('fs.choose.this')}</button>
   {/snippet}
 </Dialog>

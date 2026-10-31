@@ -73,8 +73,8 @@
       <BetaBadge />
     </h1>
 
-    {#if session.httpsRequired}<div class="alert warn">{t('auth.httpsrequired')}</div>{/if}
-    {#if error}<div class="alert bad" role="alert" data-testid="auth-error">{error}</div>{/if}
+    {#if session.httpsRequired}<div class="notice warn">{t('auth.httpsrequired')}</div>{/if}
+    {#if error}<div class="notice error" role="alert" data-testid="auth-error">{error}</div>{/if}
 
     {#if view === 'setup'}
       <h2>{t('setup.title')}</h2>
@@ -84,7 +84,7 @@
         <label class="field">{t('auth.username')}<input bind:value={username} autocomplete="username" required data-testid="setup-username" /></label>
         <label class="field">{t('auth.password')}<input type="password" bind:value={password} autocomplete="new-password" minlength={session.minPassword} required data-testid="setup-password" /><span class="hint">{t('auth.pw.hint', { n: session.minPassword })}</span></label>
         <label class="field">{t('auth.confirm')}<input type="password" bind:value={confirm} autocomplete="new-password" required data-testid="setup-confirm" /></label>
-        <button class="primary" type="submit" disabled={busy} data-testid="setup-submit">{t('setup.create')}</button>
+        <button class="btn primary" type="submit" disabled={busy} data-testid="setup-submit">{t('setup.create')}</button>
       </form>
 
     {:else if view === 'login'}
@@ -92,40 +92,40 @@
       <form class="stack" onsubmit={doLogin}>
         <label class="field">{t('auth.username')}<input bind:value={username} autocomplete="username webauthn" required data-testid="login-username" /></label>
         <label class="field">{t('auth.password')}<input type="password" bind:value={password} autocomplete="current-password" required data-testid="login-password" /></label>
-        <button class="primary" type="submit" disabled={busy} data-testid="login-submit">{t('auth.signin')}</button>
+        <button class="btn primary" type="submit" disabled={busy} data-testid="login-submit">{t('auth.signin')}</button>
       </form>
       {#if passkeysSupported()}
-        <div class="row"><hr style="flex:1;border:0;border-top:1px solid var(--border)" /><span class="muted small">{t('auth.or')}</span><hr style="flex:1;border:0;border-top:1px solid var(--border)" /></div>
-        <button type="button" onclick={doPasskeyLogin} disabled={busy} data-testid="login-passkey">🔑 {t('auth.passkey')}</button>
+        <div class="or-divider"><hr /><span class="muted small">{t('auth.or')}</span><hr /></div>
+        <button class="btn" type="button" onclick={doPasskeyLogin} disabled={busy} data-testid="login-passkey">🔑 {t('auth.passkey')}</button>
       {/if}
 
     {:else if view === 'mfa'}
       <h2>{t('mfa.title')}</h2>
       <p class="muted">{t('mfa.intro')}</p>
       {#if method === 'passkey'}
-        <button class="primary" type="button" onclick={doPasskeyMfa} disabled={busy} data-testid="mfa-passkey">🔑 {t('mfa.passkey')}</button>
+        <button class="btn primary" type="button" onclick={doPasskeyMfa} disabled={busy} data-testid="mfa-passkey">🔑 {t('mfa.passkey')}</button>
       {:else}
         <form class="stack" onsubmit={doCode}>
           <label class="field">{method === 'totp' ? t('mfa.totp') : t('mfa.recovery')}
             <input bind:value={code} autocomplete="one-time-code" inputmode={method === 'totp' ? 'numeric' : 'text'} required data-testid="mfa-code" />
           </label>
-          <button class="primary" type="submit" disabled={busy} data-testid="mfa-submit">{t('mfa.verify')}</button>
+          <button class="btn primary" type="submit" disabled={busy} data-testid="mfa-submit">{t('mfa.verify')}</button>
         </form>
       {/if}
       <div class="row small">
         {#each ['totp', 'passkey', 'recovery'] as m}
           {#if session.methods.includes(m) && m !== method}
-            <button class="ghost small" type="button" onclick={() => { method = m as typeof method; code = ''; error = ''; }} data-testid={'mfa-use-' + m}>{t('mfa.use.' + m)}</button>
+            <button class="btn ghost small" type="button" onclick={() => { method = m as typeof method; code = ''; error = ''; }} data-testid={'mfa-use-' + m}>{t('mfa.use.' + m)}</button>
           {/if}
         {/each}
       </div>
-      <button class="ghost small" type="button" onclick={cancel}>{t('common.cancel')}</button>
+      <button class="btn ghost small" type="button" onclick={cancel}>{t('common.cancel')}</button>
 
     {:else if view === 'enroll'}
       <h2>{t('enroll.title')}</h2>
       <p class="muted">{t('enroll.intro')}</p>
       <Enroll onDone={enrolled} />
-      <button class="ghost small" type="button" onclick={cancel}>{t('auth.signout')}</button>
+      <button class="btn ghost small" type="button" onclick={cancel}>{t('auth.signout')}</button>
 
     {:else}
       <h2>{t('codes.title')}</h2>
@@ -133,7 +133,7 @@
     {/if}
 
     <div class="row small muted" style="justify-content:center">
-      <button class="ghost small" type="button" onclick={() => setLang(i18n.lang === 'nl' ? 'en' : 'nl')}>{i18n.lang === 'nl' ? 'English' : 'Nederlands'}</button>
+      <button class="btn ghost small" type="button" onclick={() => setLang(i18n.lang === 'nl' ? 'en' : 'nl')}>{i18n.lang === 'nl' ? 'English' : 'Nederlands'}</button>
     </div>
   </div>
 </div>

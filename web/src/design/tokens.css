@@ -1,0 +1,109 @@
+/*
+ * Flux76 web design system: tokens
+ *
+ * Copied from App-Guidance shared/templates/web-design-system/tokens.css (see web/src/design/README.md for what the app changed and why).
+ * App changes are marked "NASA:" so the next sync with the starter is a diff, not a hunt.
+ *
+ * Extracted from Flux76HQ/3dprint_pricing (frontend/css/app.css), the app this look was designed for. Copy this file into an app, then
+ * change only what the app's own brand needs (see web-app-design.md): the default accent, the font stack, the radius.
+ *
+ * The contract:
+ *  - Every colour in a component comes from a token here. No hex in components.
+ *  - The whole interface follows --accent (set by the person, on <html>, from JavaScript): the page glow, the focus ring, the
+ *    active navigation and the buttons are all derived from it. The neutrals are deliberately NOT tinted by the brand, so any accent
+ *    colour sits well on them.
+ *  - Light and dark are both complete. Dark is chosen by [data-theme="dark"] or, when nothing is chosen, by the system.
+ *  - Statuses (--tone-*) have their own colours and never follow the accent: "new" must not turn green because the person chose green.
+ *  - Contrast: text 4.5:1, control borders (--rand) 3:1 on --surface-field. Re-measure when you change a neutral.
+ */
+:root {
+  --accent: #0f766e;                  /* NASA: the app's brand teal. The default; overwritten on <html> from the person's preference */
+  --on-accent: #ffffff;               /* text on the accent; JavaScript flips it with the accent's luminance */
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, black);
+  --accent-subtle: color-mix(in srgb, var(--accent) 14%, transparent);
+  /* NASA: the accent as TEXT. The pure accent stays for fills, borders and rings; small text takes this variant, which is darker on
+     light surfaces and lighter on dark ones (web-app-design.md, "Known gap"). appearance.test.ts measures it for every preset. */
+  --accent-ink: color-mix(in srgb, var(--accent) 62%, black);
+
+  --bg: #f4f5fa;
+  --bg-glow-1: color-mix(in srgb, var(--accent) 11%, transparent);
+  --bg-glow-2: color-mix(in srgb, var(--accent) 5%, transparent);
+  --surface: rgba(255, 255, 255, .72);        /* glass: navigation and pop-ups only */
+  --surface-solid: #ffffff;                   /* cards */
+  --surface-field: #ffffff;                   /* inputs */
+  --surface-rgb: 255, 255, 255;               /* the same as plain numbers, for rgba() (Safari drops calc()/color-mix() inside a backdrop) */
+  --text: #1a1c28;
+  --text-muted: #525568;
+  --lijn: rgba(26, 28, 40, .10);              /* dividers: decoration */
+  --lijn-strong: rgba(26, 28, 40, .16);       /* card and pop-up edges */
+  --rand: #777a8f;                            /* control borders: >= 3:1 on --surface-field */
+
+  --danger: #b4232c;
+  --ok: #1d7a3a;
+  --tone-neutral: #5b6178;
+  --tone-busy: #9a5b00;
+  --tone-info: #0b64b8;
+  --tone-done: var(--ok);
+
+  --glass-blur: saturate(180%) blur(20px);
+  --glass-border: rgba(255, 255, 255, .5);
+  --shadow: 0 1px 2px rgba(30, 24, 70, .05), 0 10px 28px -12px rgba(30, 24, 70, .16);
+  --radius: 16px;
+  --radius-sm: 10px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;   /* NASA: paths, codes */
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+  color-scheme: light dark;
+}
+
+:root[data-theme="light"] { color-scheme: light; }
+
+:root[data-theme="dark"] {
+  --bg: #0c0d15;
+  --accent-ink: color-mix(in srgb, var(--accent) 58%, white);
+  --bg-glow-1: color-mix(in srgb, var(--accent) 20%, transparent);
+  --bg-glow-2: color-mix(in srgb, var(--accent) 8%, transparent);
+  --surface: rgba(24, 26, 39, .66);
+  --surface-solid: #181a27;
+  --surface-field: #12131d;
+  --surface-rgb: 24, 26, 39;
+  --text: #eceef6;
+  --text-muted: #b3b6c8;
+  --lijn: #2a2d3f;
+  --lijn-strong: rgba(255, 255, 255, .14);
+  --rand: #8a8da6;
+  --danger: #ff8a90;
+  --ok: #6fdc8c;
+  --tone-neutral: #aab0c8;
+  --tone-busy: #f5b84a;
+  --tone-info: #7cc0ff;
+  --glass-border: rgba(255, 255, 255, .10);
+  --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 30px -12px rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
+
+/* Nothing chosen: follow the system. The values repeat the block above on purpose: CSS cannot share them between a selector and a media query. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #0c0d15;
+    --accent-ink: color-mix(in srgb, var(--accent) 58%, white);
+    --bg-glow-1: color-mix(in srgb, var(--accent) 20%, transparent);
+    --bg-glow-2: color-mix(in srgb, var(--accent) 8%, transparent);
+    --surface: rgba(24, 26, 39, .66);
+    --surface-solid: #181a27;
+    --surface-field: #12131d;
+    --surface-rgb: 24, 26, 39;
+    --text: #eceef6;
+    --text-muted: #b3b6c8;
+    --lijn: #2a2d3f;
+    --lijn-strong: rgba(255, 255, 255, .14);
+    --rand: #8a8da6;
+    --danger: #ff8a90;
+    --ok: #6fdc8c;
+    --tone-neutral: #aab0c8;
+    --tone-busy: #f5b84a;
+    --tone-info: #7cc0ff;
+    --glass-border: rgba(255, 255, 255, .10);
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 30px -12px rgba(0, 0, 0, .6);
+  }
+}

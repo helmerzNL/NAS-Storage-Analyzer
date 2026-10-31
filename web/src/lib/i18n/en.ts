@@ -7,7 +7,7 @@ export const en: Record<string, string> = {
   'nav.extensions': 'File types', 'nav.users': 'Users', 'nav.audit': 'Audit log', 'nav.account': 'My account',
   'live.running': 'A scan is running', 'live.running.n': '{n} scan(s) running',
   'pref.units': 'Units', 'pref.units.binary': 'KiB (1024)', 'pref.units.decimal': 'kB (1000)', 'pref.units.binary.long': 'Binary: KiB, MiB, GiB (1024)',
-  'pref.units.decimal.long': 'Decimal: kB, MB, GB (1000)', 'pref.language': 'Language', 'pref.theme': 'Appearance', 'pref.theme.system': 'Follow system',
+  'pref.units.decimal.long': 'Decimal: kB, MB, GB (1000)', 'pref.language': 'Language', 'pref.theme': 'Theme', 'pref.theme.system': 'Follow system',
   'pref.theme.light': 'Light', 'pref.theme.dark': 'Dark',
   'role.admin': 'Administrator', 'role.viewer': 'Viewer', 'kind.bind': 'Mounted path', 'kind.nfs': 'NFS', 'kind.smb': 'SMB', 'mode.full': 'full scan', 'mode.incremental': 'incremental scan',
   'cat.video': 'Video', 'cat.audio': 'Audio', 'cat.images': 'Images', 'cat.documents': 'Documents', 'cat.archives': 'Archives', 'cat.code': 'Code',
@@ -106,7 +106,7 @@ export const en: Record<string, string> = {
   'ext.saved': 'Saved; {n} share(s) are being updated', 'ext.deleted': 'Removed; the extension now counts as Other', 'ext.move': 'Move .{ext} to another category',
 
   // account
-  'account.lastlogin': 'last signed in {when}', 'account.prefs': 'Appearance', 'account.password': 'Password', 'account.pw.current': 'Current password', 'account.pw.new': 'New password',
+  'account.lastlogin': 'last signed in {when}', 'account.prefs': 'Preferences', 'account.password': 'Password', 'account.pw.current': 'Current password', 'account.pw.new': 'New password',
   'account.pw.change': 'Change password', 'account.pw.changed': 'Password changed', 'account.pw.note': 'Your other sessions are signed out.',
   'account.totp': 'Authenticator app', 'account.enabled': 'Set up', 'account.notset': 'Not set up', 'account.totp.remove': 'Remove', 'account.totp.removed': 'Authenticator app removed',
   'account.totp.remove.body': 'Confirm with your password to remove the authenticator app.', 'account.lastfactor': 'Add a passkey first: a second factor is required.',
@@ -124,4 +124,12 @@ export const en: Record<string, string> = {
   'err.last_factor': 'A second factor is required: add another one first.', 'err.setup_done': 'Setup is already complete; sign in.', 'err.invalid_setup_token': 'This setup token is wrong.',
   'err.https_required': 'Sign-in is only possible over https.', 'err.already_active': 'A scan is already queued or running.', 'err.busy': 'A scan is queued or running. Cancel it first.',
   'err.no_data': 'This share has not been scanned yet.', 'err.passkey_domain': 'Passkeys do not work on this address ({host}). Open the app through a host name over https (or http://localhost), and have the administrator set NASA_RP_ID to that host name.', 'err.passkey_known': 'This passkey is already registered on your account.', 'err.passkey_cancelled': 'The passkey request was cancelled or timed out.',
+  // Appearance (web-app-design.md): the accent colour, and the settings menu
+  'pref.accent': 'Accent colour', 'pref.accent.custom': 'Pick another colour', 'pref.accent.hint': 'Buttons, the open menu item and focus rings follow this colour. Statuses keep their own colours.',
+  'pref.accent.reset': 'Back to the default',
+  'accent.default': 'Default (teal)', 'accent.violet': 'Violet', 'accent.blue': 'Blue', 'accent.indigo': 'Indigo', 'accent.purple': 'Purple', 'accent.pink': 'Pink',
+  'accent.red': 'Red', 'accent.orange': 'Orange', 'accent.green': 'Green', 'accent.teal': 'Bright teal', 'accent.bordeaux': 'Bordeaux', 'accent.graphite': 'Graphite',
+  'nav.settings': 'Settings', 'settings.menu': 'Settings menu', 'settings.personal': 'Personal', 'settings.data': 'Data', 'settings.admin': 'Administration',
+  'settings.appearance': 'Appearance and language', 'settings.security': 'Security', 'settings.units.note': 'The units choice is also in the top bar.',
+  'fold.open': 'Show', 'fold.closed': 'Hide',
 };

@@ -9,7 +9,7 @@
 </script>
 
 {#if job}
-  <div class="stack" style="gap:6px" data-testid="scan-progress">
+  <div class="scan-progress" data-testid="scan-progress">
     <div class="row between small">
       <span><b>{job.kind === 'recategorize' ? t('scan.recategorizing') : job.state === 'queued' ? t('scan.queued') : t('scan.running')}</b>
         <span class="muted">· {job.trigger === 'schedule' ? t('scan.by.schedule') : t('scan.by', { user: job.requested_by || '–' })}</span></span>
@@ -19,7 +19,7 @@
       <i style:width="{p?.percent != null ? Math.min(100, p.percent) : job.state === 'queued' ? 0 : 100}%" style:opacity={p?.percent == null ? 0.35 : 1}></i>
     </div>
     {#if p}
-      <div class="small muted" style="display:flex;gap:14px;flex-wrap:wrap">
+      <div class="small muted meta">
         <span>{formatNumber(p.files, i18n.lang)} {t('scan.files')}</span>
         <span>{formatNumber(Math.round(p.files_per_sec), i18n.lang)} {t('scan.files_s')}</span>
         <span>{formatBytes(p.bytes, prefs.units, i18n.lang)}</span>

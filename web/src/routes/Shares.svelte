@@ -86,10 +86,11 @@
 
 {#snippet err(name: string)}{#if fieldErr[name]}<span class="field-error" role="alert">{fieldErr[name]}</span>{/if}{/snippet}
 
-<div class="page-head"><div class="grow"><h1>{t('nav.shares')}</h1><p class="muted" style="margin:0">{t('shares.intro')}</p></div>
-  <button class="primary" onclick={() => edit()} data-testid="add-share">{t('shares.add')}</button></div>
+<div class="page-head"><h1>{t('nav.shares')}</h1>
+  <button class="btn primary" onclick={() => edit()} data-testid="add-share">{t('shares.add')}</button></div>
+<p class="muted intro">{t('shares.intro')}</p>
 
-<div class="card table-wrap" style="padding:0">
+<div class="card table-wrap flush">
   <table data-testid="share-table">
     <thead><tr><th>{t('col.name')}</th><th>{t('shares.target')}</th><th class="hide-sm">{t('shares.schedule')}</th><th class="hide-sm">{t('dash.lastscan')}</th><th></th></tr></thead>
     <tbody>
@@ -98,10 +99,10 @@
           <td class="mono small truncate" style="max-width:34ch" title={target(s)}>{target(s)}</td>
           <td class="hide-sm small">{#if s.cron}<span class="mono">{s.cron}</span><div class="muted">{t('shares.next', { when: formatDateTime(s.next_run_at, i18n.lang) })}</div>{:else}<span class="muted">{t('cron.none')}</span>{/if}</td>
           <td class="hide-sm small">{s.last_scan ? ago(s.last_scan.finished_at, i18n.lang) : '–'}</td>
-          <td class="right nowrap">
-            <button class="small" onclick={() => scan(s, 'auto')} disabled={!!s.active_job}>{t('scan.now')}</button>
-            <button class="small" onclick={() => edit(s)} data-testid={'edit-' + s.name}>{t('common.edit')}</button>
-            <button class="small danger" onclick={() => { confirmDelete = s; delOpen = true; }}>{t('common.delete')}</button></td></tr>
+          <td class="right actions">
+            <button class="btn small" onclick={() => scan(s, 'auto')} disabled={!!s.active_job}>{t('scan.now')}</button>
+            <button class="btn small" onclick={() => edit(s)} data-testid={'edit-' + s.name}>{t('common.edit')}</button>
+            <button class="btn small danger" onclick={() => { confirmDelete = s; delOpen = true; }}>{t('common.delete')}</button></td></tr>
       {:else}<tr><td colspan="5" class="muted">{t('shares.none')}</td></tr>{/each}
     </tbody>
   </table>
@@ -109,7 +110,7 @@
 
 <Dialog bind:open title={f.id ? t('shares.edit', { name: f.name }) : t('shares.add')} wide>
   <form id="share-form" class="stack" onsubmit={save}>
-    {#if error}<div class="alert bad" role="alert">{error}</div>{/if}
+    {#if error}<div class="notice error" role="alert">{error}</div>{/if}
     <div class="form-grid">
       <label class="field">{t('shares.name')}<input bind:value={f.name} required data-testid="f-name" />{@render err('name')}</label>
       <label class="field">{t('shares.kind')}
@@ -121,12 +122,12 @@
         <label for="f-path">{t('shares.path')}</label>
         <div class="input-row">
           <input id="f-path" bind:value={f.path} required class="mono" data-testid="f-path" />
-          <button type="button" onclick={() => (pickOpen = true)} data-testid="f-browse">{t('shares.browse')}</button>
+          <button class="btn" type="button" onclick={() => (pickOpen = true)} data-testid="f-browse">{t('shares.browse')}</button>
         </div>
         <span class="hint">{t('shares.path.hint', { root: sharesRoot })}</span>{@render err('path')}
       </div>
     {:else}
-      <div class="alert info small">{t('shares.mount.note')}</div>
+      <div class="notice info small">{t('shares.mount.note')}</div>
       <div class="form-grid">
         <label class="field">{t('shares.server')}<input bind:value={f.server} required placeholder="nas.lan" />{@render err('server')}</label>
         {#if f.kind === 'nfs'}
@@ -176,8 +177,8 @@
     </div>
   </form>
   {#snippet footer()}
-    <button type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-    <button class="primary" type="submit" form="share-form" disabled={busy} data-testid="f-save">{t('common.save')}</button>
+    <button class="btn" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
+    <button class="btn primary" type="submit" form="share-form" disabled={busy} data-testid="f-save">{t('common.save')}</button>
   {/snippet}
 </Dialog>
 
@@ -186,7 +187,7 @@
 <Dialog bind:open={delOpen} title={t('shares.delete.title')}>
   <p>{t('shares.delete.body', { name: confirmDelete?.name ?? '' })}</p>
   {#snippet footer()}
-    <button onclick={() => (delOpen = false)}>{t('common.cancel')}</button>
-    <button class="danger" onclick={remove} data-testid="confirm-delete">{t('common.delete')}</button>
+    <button class="btn" onclick={() => (delOpen = false)}>{t('common.cancel')}</button>
+    <button class="btn danger" onclick={remove} data-testid="confirm-delete">{t('common.delete')}</button>
   {/snippet}
 </Dialog>

@@ -15,11 +15,11 @@
   <p>{t('codes.explain')}</p>
   <div class="codes" data-testid="recovery-codes">{#each codes as c}<span>{c}</span>{/each}</div>
   <div class="row">
-    <button type="button" onclick={() => navigator.clipboard?.writeText(codes.join('\n'))}>{t('codes.copy')}</button>
-    <button type="button" onclick={download}>{t('codes.download')}</button>
+    <button class="btn" type="button" onclick={() => navigator.clipboard?.writeText(codes.join('\n'))}>{t('codes.copy')}</button>
+    <button class="btn" type="button" onclick={download}>{t('codes.download')}</button>
   </div>
   {#if onconfirm}
     <label class="checkrow"><input type="checkbox" bind:checked={saved} data-testid="codes-saved" /> {t('codes.saved')}</label>
-    <button class="primary" type="button" disabled={!saved} onclick={onconfirm} data-testid="codes-continue">{t('common.continue')}</button>
+    <button class="btn primary" type="button" disabled={!saved} onclick={onconfirm} data-testid="codes-continue">{t('common.continue')}</button>
   {/if}
 </div>

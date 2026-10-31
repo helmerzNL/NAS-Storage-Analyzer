@@ -67,12 +67,12 @@
 </script>
 
 <div class="page-head">
-  <div class="grow"><h1>{t('nav.dashboard')}</h1>
-    {#if shares.length}<div class="muted">{t('dash.total', { size: formatBytes(total.bytes, prefs.units, i18n.lang), files: formatNumber(total.files, i18n.lang), n: shares.length })}</div>{/if}</div>
+  <h1>{t('nav.dashboard')}</h1>
   {#if isAdmin()}<a class="btn" href="/admin/shares" use:link>{t('nav.shares')}</a>{/if}
 </div>
+{#if shares.length}<p class="muted intro">{t('dash.total', { size: formatBytes(total.bytes, prefs.units, i18n.lang), files: formatNumber(total.files, i18n.lang), n: shares.length })}</p>{/if}
 
-{#if error}<div class="alert bad" role="alert">{error}</div>{/if}
+{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 {#if loaded && shares.length === 0}
   <div class="card" data-testid="no-shares"><h2>{t('dash.empty.title')}</h2><p class="muted">{isAdmin() ? t('dash.empty.admin') : t('dash.empty.viewer')}</p>
     {#if isAdmin()}<a class="btn primary" href="/admin/shares" use:link>{t('shares.add')}</a>{/if}</div>
@@ -92,10 +92,10 @@
       <div class="row">
         {#if l}<a class="btn small primary" href="/browse/{s.id}" use:link>{t('dash.browse')}</a>{/if}
         {#if isAdmin()}
-          {#if job}<button class="small danger" onclick={() => cancel(s)} data-testid="cancel-scan">{t('scan.cancel')}</button>
+          {#if job}<button class="btn small danger" onclick={() => cancel(s)} data-testid="cancel-scan">{t('scan.cancel')}</button>
           {:else}
-            <button class="small" onclick={() => scan(s, 'auto')} data-testid="scan-now">{t('scan.now')}</button>
-            <button class="small" onclick={() => scan(s, 'full')} title={t('scan.full.hint')}>{t('scan.full')}</button>
+            <button class="btn small" onclick={() => scan(s, 'auto')} data-testid="scan-now">{t('scan.now')}</button>
+            <button class="btn small" onclick={() => scan(s, 'full')} title={t('scan.full.hint')}>{t('scan.full')}</button>
           {/if}
         {/if}
       </div>
@@ -104,7 +104,7 @@
     {#if job}<ScanStatus share={s} {job} />{/if}
     <AtimeNotice share={s} />
     {#if s.latest_scan && s.latest_scan.status !== 'running' && s.latest_scan.status !== 'succeeded' && s.latest_scan.error}
-      <div class="alert bad">{s.latest_scan.error}</div>
+      <div class="notice error">{s.latest_scan.error}</div>
     {/if}
 
     {#if l}
