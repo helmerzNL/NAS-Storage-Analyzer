@@ -49,6 +49,35 @@ const migrateLockKey int64 = 0x4e41534d // "NASM"
 // Migrate applies all embedded migrations that have not run yet, then seeds
 // categories and default extensions.
 func (s *Store) Migrate(ctx context.Context) error {
+	if err := s.MigrateTo(ctx, 0); err != nil {
+		return err
+	}
+	return s.seed(ctx)
+}
+
+// MigrationVersions lists the versions of the embedded migrations in order.
+func MigrationVersions() ([]int, error) {
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		return nil, err
+	}
+	var out []int
+	for _, e := range entries {
+		ver, err := strconv.Atoi(strings.SplitN(e.Name(), "_", 2)[0])
+		if err != nil {
+			return nil, fmt.Errorf("migration %q: name must start with a number", e.Name())
+		}
+		out = append(out, ver)
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
+// MigrateTo applies the embedded migrations that have not run yet, up to and
+// including version max (0 means all of them), without seeding. Migrate uses
+// it; the schema and upgrade tests use it to stand a database at an older
+// version and move it forward one migration at a time.
+func (s *Store) MigrateTo(ctx context.Context, max int) error {
 	conn, err := s.Pool.Acquire(ctx)
 	if err != nil {
 		return err
@@ -73,6 +102,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ver, err := strconv.Atoi(strings.SplitN(name, "_", 2)[0])
 		if err != nil {
 			return fmt.Errorf("migration %q: name must start with a number", name)
+		}
+		if max > 0 && ver > max {
+			break
 		}
 		var done bool
 		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)`, ver).Scan(&done); err != nil {
@@ -101,7 +133,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.seed(ctx)
+	return nil
 }
 
 // seed inserts the built-in categories and default extension mapping. Rows

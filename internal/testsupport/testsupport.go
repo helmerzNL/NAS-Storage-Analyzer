@@ -21,11 +21,11 @@ import (
 
 var dbCounter atomic.Int64
 
-// NewStore creates a throwaway database on the server named by NASA_TEST_DSN,
-// migrates it and drops it again when the test ends. Without NASA_TEST_DSN the
-// test is skipped, unless NASA_REQUIRE_DB=1 turns that into a failure so CI
-// cannot silently skip the integration tests.
-func NewStore(t *testing.T) *store.Store {
+// NewEmptyDB creates a throwaway database on the server named by NASA_TEST_DSN and
+// returns its connection string. It is dropped again when the test ends. Without
+// NASA_TEST_DSN the test is skipped, unless NASA_REQUIRE_DB=1 turns that into a failure
+// so CI cannot silently skip the integration tests.
+func NewEmptyDB(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("NASA_TEST_DSN")
 	if dsn == "" {
@@ -48,18 +48,25 @@ func NewStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	u.Path = "/" + name
-	st, err := store.Open(ctx, u.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
-		st.Close()
 		admin.Exec(ctx, `DROP DATABASE `+name+` WITH (FORCE)`)
 		admin.Close(ctx)
 	})
+	return u.String()
+}
+
+// NewStore creates a throwaway database (see NewEmptyDB) and migrates it.
+func NewStore(t *testing.T) *store.Store {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, NewEmptyDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close) // runs before the database is dropped: cleanups run last to first
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
 	return st
 }
 
