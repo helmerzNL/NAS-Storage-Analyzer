@@ -12,6 +12,7 @@ import { b64urlToBuf, bufToB64url } from './webauthn';
 import { nl } from './i18n/nl';
 import { en } from './i18n/en';
 import { pageTitle, APP_NAME } from './version.svelte';
+import { bannerVisible } from './updates.svelte';
 
 describe('formatBytes', () => {
   it('uses 1024 or 1000 steps', () => {
@@ -230,5 +231,24 @@ describe('release channel', () => {
   it('is the title index.html starts with, so a stable build never flashes another one', () => {
     const html = readFileSync(join(__dirname, '../../index.html'), 'utf8');
     expect(html).toContain(`<title>${APP_NAME}</title>`);
+  });
+});
+
+describe('the update banner', () => {
+  const status = (over: Partial<import('./api').UpdateStatus> = {}) => ({ enabled: true, current: '0.1.0', latest: '0.2.0', available: true, url: '', checked_at: null, error: '', error_detail: '', repo: 'o/r', ...over });
+  it('shows for an available update that was not dismissed for exactly that version', () => {
+    expect(bannerVisible(status(), '')).toBe(true);
+    expect(bannerVisible(status(), '0.2.0')).toBe(false);   // "Later" hides it for this version...
+    expect(bannerVisible(status({ latest: '0.3.0' }), '0.2.0')).toBe(true);   // ...an even newer one brings it back
+  });
+  it('stays away when there is nothing to announce', () => {
+    expect(bannerVisible(null, '')).toBe(false);
+    expect(bannerVisible(status({ available: false, latest: '0.1.0' }), '')).toBe(false);
+    expect(bannerVisible(status({ enabled: false, available: false, latest: '' }), '')).toBe(false);
+    expect(bannerVisible(status({ latest: '' }), '')).toBe(false);
+    expect(bannerVisible(status({ error: 'HTTP 403 (rate limit)', available: false, latest: '' }), '')).toBe(false);
+  });
+  it('keeps announcing an update that a failed check could not confirm again', () => {
+    expect(bannerVisible(status({ error: 'Timeout' }), '')).toBe(true);   // a failure keeps the last good answer
   });
 });

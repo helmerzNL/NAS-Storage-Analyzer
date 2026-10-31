@@ -41,3 +41,13 @@ func dataPathWarning(dataPath string) string {
 		"at the next reboot. Set an absolute folder of the host in .env, then run scripts/migrate_data.sh on the host "+
 		"(docs/deploy.md, section 'Waar de data staat / Where the data lives').", dataPath)
 }
+
+// updateCheckEnabled reads NASA_UPDATE_CHECK: on unless it says no. "false", "0", "no" and "off" (any case) switch it off;
+// anything else, including empty, leaves the default, which is on.
+func updateCheckEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "0", "no", "off":
+		return false
+	}
+	return true
+}

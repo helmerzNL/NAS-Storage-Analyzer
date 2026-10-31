@@ -15,6 +15,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
+	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 )
 
 // Options turn on authentication. Without Auth the server serves everything
@@ -45,6 +46,8 @@ type Options struct {
 	SharesRoot string
 	// Static serves the web UI for every non-API path (nil: no UI).
 	Static http.Handler
+	// Updates tells the administrator that a newer release exists (nil: the routes are not registered).
+	Updates *updates.Checker
 }
 
 // ParseTrustedProxies parses a comma-separated list of CIDRs or addresses.

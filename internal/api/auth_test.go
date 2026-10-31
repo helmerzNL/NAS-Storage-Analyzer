@@ -33,6 +33,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
+	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 	"github.com/helmerznl/nas-storage-analyzer/internal/worker"
 )
 
@@ -118,7 +119,8 @@ func newAuthEnv(t *testing.T, mut func(*api.Options)) *authEnv {
 	}
 	t.Cleanup(ro.Close)
 	opts := api.Options{Auth: svc, SetupToken: "setup-token-123", Queue: jobs.NewQueue(st.Pool),
-		Shares: shares.NewService(st.Pool, box, shares.Options{}, time.UTC)}
+		Shares:  shares.NewService(st.Pool, box, shares.Options{}, time.UTC),
+		Updates: updates.New("0.0.0", false, nil)} // switched off: no test reaches out to GitHub unless it brings its own checker
 	if mut != nil {
 		mut(&opts)
 	}

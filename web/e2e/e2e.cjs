@@ -343,6 +343,10 @@ const expectText = async (page, sel, re, msg) => {
       await vp.waitForSelector('[data-testid=share-Media]');
       if (await vp.$('a[href="/admin/shares"]')) throw new Error('a viewer sees the shares administration');
       if (await vp.$('[data-testid=scan-now]')) throw new Error('a viewer sees the scan button');
+      // The update check is the administrator's business: no banner, no dot, and the API refuses a viewer.
+      if (await vp.$('[data-testid=update-banner]') || await vp.$('.update-dot')) throw new Error('a viewer is told about updates');
+      const viewerUpdate = await vp.evaluate(async () => [(await fetch('/api/v1/system/update')).status, (await fetch('/api/v1/system/update/check', { method: 'POST' })).status]);
+      if (viewerUpdate[0] !== 403 || ![401, 403].includes(viewerUpdate[1])) throw new Error('a viewer can reach the update status: ' + viewerUpdate);
       await vp.goto(BASE + '/admin/users');
       if (await vp.$('[data-testid=user-table]')) throw new Error('a viewer reached the user list');
       await vp.goto(BASE + '/account');
@@ -409,11 +413,55 @@ const expectText = async (page, sel, re, msg) => {
       await shot('14-audit-empty-scan');
     });
 
+    await step('update check: the administrator is told, per version, and nothing about the installation is sent', async () => {
+      const gh = (p) => fetch(process.env.FAKE_GITHUB + p).then((r) => r.status === 204 ? null : r.json());
+      await page.goto(BASE + '/');
+      await page.waitForSelector('[data-testid=update-banner]');
+      const banner = (await page.textContent('[data-testid=update-banner]')).replace(/\s+/g, ' ');
+      if (!/v9\.9\.9/.test(banner) || !/v0\.1\.0/.test(banner)) throw new Error('the banner does not say which versions: ' + banner);
+      if (!(await page.$('.nav a .update-dot'))) throw new Error('no dot on the Settings entry');
+      await shot('30-update-banner');
+      // What GitHub was sent: a fixed User-Agent, no cookie, no token, no query string, no version.
+      const sent = await gh('/__last');
+      if (sent.headers['user-agent'] !== 'nas-storage-analyzer-update-check') throw new Error('User-Agent: ' + sent.headers['user-agent']);
+      for (const h of ['cookie', 'authorization', 'x-csrf-token', 'referer', 'origin']) if (sent.headers[h]) throw new Error('the request carries ' + h);
+      if (sent.url !== '/helmerzNL/NAS-Storage-Analyzer/releases/latest' || JSON.stringify(sent.headers).includes('0.1.0')) throw new Error('the request says too much: ' + JSON.stringify(sent));
+      // "Later" hides it for this version and the choice is remembered in this browser; a different version brings it back.
+      await page.click('[data-testid=update-later]');
+      await page.waitForSelector('[data-testid=update-banner]', { state: 'detached' });
+      await page.reload();
+      await page.waitForSelector('[data-testid=share-Media]');
+      await page.waitForTimeout(500);
+      if (await page.$('[data-testid=update-banner]')) throw new Error('a dismissed banner came back on a page load');
+      if (await page.$('.nav a .update-dot')) throw new Error('the dot stays after the banner was dismissed');
+      await page.evaluate(() => localStorage.setItem('nasa.update.dismissed', '9.9.8'));
+      await page.reload();
+      await page.waitForSelector('[data-testid=update-banner]');
+      // View opens Settings > System, which says which state it is in and links to the release notes, built from the repository.
+      await page.click('[data-testid=update-view]');
+      await page.waitForSelector('[data-testid=system-update]');
+      if ((await page.getAttribute('[data-testid=update-state]', 'data-state')) !== 'available') throw new Error('state is not "available"');
+      if ((await page.textContent('[data-testid=update-latest]')).trim() !== '9.9.9' || (await page.textContent('[data-testid=update-current]')).trim() !== '0.1.0') throw new Error('versions on the System page');
+      const notes = await page.getAttribute('[data-testid=update-notes]', 'href');
+      if (notes !== process.env.FAKE_GITHUB + '/helmerzNL/NAS-Storage-Analyzer/releases/tag/v9.9.9') throw new Error('release notes link: ' + notes);
+      if (!(await page.$('.settings-nav a[aria-current=page][href="/admin/system"]'))) throw new Error('System is not the open settings part');
+      await shot('31-system');
+      // Check now inside the floor of 30 seconds does not call GitHub again (nor does a page view): the answer is remembered.
+      const before = (await gh('/__hits')).hits;
+      await page.click('[data-testid=update-check-now]');
+      await page.waitForTimeout(400);
+      for (let i = 0; i < 3; i++) await page.goto(BASE + '/');
+      if ((await gh('/__hits')).hits !== before) throw new Error('GitHub was asked again within the floor: ' + before + ' -> ' + (await gh('/__hits')).hits);
+      // Under every settings page the administrator also finds System.
+      await page.goto(BASE + '/admin/users');
+      await page.waitForSelector('.settings-nav a[href="/admin/system"] .update-dot', { timeout: 5000 }).catch(() => { throw new Error('no dot on the System entry of the menu'); });
+    });
+
     await step('settings menu: grouped parts with icons, the open part marked by more than colour', async () => {
       await page.goto(BASE + '/account');
       await page.waitForSelector('.settings-nav');
       const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
-      const want = [['Persoonlijk', ['/account', '/account/security']], ['Gegevens', ['/admin/shares', '/admin/extensions']], ['Beheer', ['/admin/users', '/admin/audit']]];
+      const want = [['Persoonlijk', ['/account', '/account/security']], ['Gegevens', ['/admin/shares', '/admin/extensions']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
       if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
       for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
       const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));

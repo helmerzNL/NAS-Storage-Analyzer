@@ -17,6 +17,9 @@
   import Extensions from './routes/Extensions.svelte';
   import Account from './routes/Account.svelte';
   import Appearance from './routes/Appearance.svelte';
+  import System from './routes/System.svelte';
+  import UpdateBanner from './components/UpdateBanner.svelte';
+  import { update, loadUpdate, resetUpdate, bannerVisible, dismissedState } from './lib/updates.svelte';
   import SettingsLayout from './components/SettingsLayout.svelte';
 
   initPrefs();
@@ -26,6 +29,9 @@
   });
   // Live scan status for all pages, as long as someone is signed in.
   $effect(() => { if (isActive()) { startLive(); return () => stopLive(); } });
+  // An update is the administrator's business: ask once after an administrator signs in (the server remembers the answer), nobody else.
+  $effect(() => { if (isAdmin()) void loadUpdate(); else resetUpdate(); });
+  const updateDot = $derived(isAdmin() && bannerVisible(update.status, dismissedState.version));
 
   const inSettings = $derived(route.path.startsWith('/account') || route.path.startsWith('/admin/'));
   const nav = $derived([
@@ -55,7 +61,7 @@
           <BetaBadge />
         </a>
         <nav class="nav" aria-label={t('nav.main')}>
-          {#each nav as n}<a href={n.href} use:link class:active={n.on} aria-current={n.on ? 'page' : undefined}>{n.label}</a>{/each}
+          {#each nav as n}<a href={n.href} use:link class:active={n.on} aria-current={n.on ? 'page' : undefined}>{n.label}{#if n.href === '/account' && updateDot}<span class="update-dot" title={t('update.dot')}></span><span class="sr-only"> ({t('update.dot')})</span>{/if}</a>{/each}
         </nav>
         <div class="tools">
         {#if live.running > 0}<a class="badge info" href="/" use:link title={t('live.running')}>⟳ {t('live.running.n', { n: live.running })}</a>{/if}
@@ -75,6 +81,7 @@
       </div>
     </header>
     <main>
+      <UpdateBanner />
       {#if route.path === '/'}<Dashboard />
       {:else if browse}<Browse shareId={browse.share} dirId={browse.dir} />
       {:else if route.path.startsWith('/lists')}<Lists />
@@ -83,6 +90,7 @@
       {:else if route.path.startsWith('/admin/extensions') && isAdmin()}<SettingsLayout><Extensions /></SettingsLayout>
       {:else if route.path.startsWith('/admin/users') && isAdmin()}<SettingsLayout><Users /></SettingsLayout>
       {:else if route.path.startsWith('/admin/audit') && isAdmin()}<SettingsLayout><Audit /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/system') && isAdmin()}<SettingsLayout><System /></SettingsLayout>
       {:else if route.path.startsWith('/account/security')}<SettingsLayout><Account /></SettingsLayout>
       {:else if route.path === '/account' || route.path === '/account/'}<SettingsLayout><Appearance /></SettingsLayout>
       {:else}<div class="card"><h1>404</h1><p class="muted">{t('app.notfound')}</p><a href="/" use:link>{t('nav.dashboard')}</a></div>{/if}

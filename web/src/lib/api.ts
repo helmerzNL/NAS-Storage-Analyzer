@@ -78,6 +78,11 @@ export interface AuthStatus {
   setup_required: boolean; authenticated: boolean; min_password_length: number; https_required: boolean;
   stage?: 'pending' | 'enroll' | 'active'; csrf_token?: string; methods?: string[]; user?: User;
 }
+/** GET /api/v1/system/update: what the update check knows (administrators only). */
+export interface UpdateStatus {
+  enabled: boolean; current: string; latest: string; available: boolean; url: string;
+  checked_at: string | null; error: string; error_detail: string; repo: string;
+}
 export interface Progress {
   dirs: number; reused_dirs: number; files: number; errors: number; bytes: number; alloc: number; current_dir: string;
   files_per_sec: number; percent: number | null; eta_seconds: number | null; elapsed_seconds: number; ops_limit: number;

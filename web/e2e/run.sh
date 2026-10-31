@@ -10,10 +10,13 @@ psql "$BASE_DB/postgres" -qc "create database $DB" >/dev/null
 export NASA_DB_DSN="$BASE_DB/$DB?sslmode=disable"
 export NASA_ENCRYPTION_KEY=$($BIN genkey) NASA_LISTEN=127.0.0.1:8097 NASA_SHARES_ROOT=$WORK/shares NASA_MOUNT_DIR=$WORK/mnt
 export NASA_TZ=Europe/Amsterdam
+# The update check asks github.com; the test gives it a stand-in that answers like GitHub and records what it was sent.
+node "$HERE/fake-github.cjs" 8098 & FAKEGH=$!
+export NASA_UPDATE_BASE_URL=http://127.0.0.1:8098 FAKE_GITHUB=http://127.0.0.1:8098
 mkdir -p "$WORK/shares" "$WORK/mnt"
 $BIN serve >"$WORK/serve.log" 2>&1 & SERVE=$!
 $BIN worker >"$WORK/worker.log" 2>&1 & WORKER=$!
-cleanup() { kill $SERVE $WORKER 2>/dev/null || true; wait 2>/dev/null || true; psql "$BASE_DB/postgres" -qc "drop database if exists $DB with (force)" >/dev/null 2>&1 || true; rm -rf "$WORK"; }
+cleanup() { kill $SERVE $WORKER $FAKEGH 2>/dev/null || true; wait 2>/dev/null || true; psql "$BASE_DB/postgres" -qc "drop database if exists $DB with (force)" >/dev/null 2>&1 || true; rm -rf "$WORK"; }
 trap cleanup EXIT
 for i in $(seq 1 50); do grep -q setup_token "$WORK/serve.log" 2>/dev/null && break; sleep 0.2; done
 export SETUP_TOKEN=$(grep -o '"setup_token":"[^"]*"' "$WORK/serve.log" | head -1 | cut -d'"' -f4)

@@ -4,15 +4,18 @@ import (
 	"bufio"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
+	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 )
 
 func shareBody(name, path string) map[string]any {
@@ -421,5 +424,92 @@ func TestLiveStatusStream(t *testing.T) {
 	}
 	if !sawJob || !sawProgress || !sawDone {
 		t.Errorf("job event seen=%v, progress seen=%v, completion event seen=%v", sawJob, sawProgress, sawDone)
+	}
+}
+
+// fakeGitHubFor answers like GitHub does for /releases/latest: a redirect to the tag page.
+func fakeGitHubFor(t *testing.T, tag string, hits *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Location", "/"+updates.DefaultRepo+"/releases/tag/"+tag)
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The update check tells the administrator, and only the administrator; it announces and does nothing else.
+func TestUpdateCheckIsForTheAdministratorOnly(t *testing.T) {
+	var hits atomic.Int32
+	gh := fakeGitHubFor(t, "v0.9.0", &hits)
+	checker := updates.New("0.1.0", true, nil)
+	checker.BaseURL = gh.URL
+	e := newAuthEnv(t, func(o *api.Options) { o.Updates = checker })
+
+	// Nobody signed in: refused, and GitHub was not asked.
+	anon := e.client()
+	expect(t, anon.do("GET", "/api/v1/system/update", nil), 401, "unauthenticated")
+	expect(t, anon.do("POST", "/api/v1/system/update/check", nil), 401, "unauthenticated")
+
+	admin, _, _ := e.setupAdmin()
+	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 201, "")
+	v := e.client()
+	v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
+	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
+	v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)})
+	expect(t, v.do("GET", "/api/v1/system/update", nil), 403, "forbidden")
+	expect(t, v.do("POST", "/api/v1/system/update/check", nil), 403, "forbidden")
+	if hits.Load() != 0 {
+		t.Fatalf("a refused request made GitHub get asked %d times", hits.Load())
+	}
+
+	// The administrator gets the status (the client also validates every answer against the OpenAPI document).
+	r := admin.do("GET", "/api/v1/system/update", nil)
+	expect(t, r, 200, "")
+	if r.Body["enabled"] != true || r.Body["current"] != "0.1.0" || r.Body["latest"] != "0.9.0" || r.Body["available"] != true ||
+		r.Body["error"] != "" || r.Body["repo"] != updates.DefaultRepo || r.Body["url"] != gh.URL+"/"+updates.DefaultRepo+"/releases/tag/v0.9.0" {
+		t.Errorf("status = %s", r.Raw)
+	}
+	admin.do("GET", "/api/v1/system/update", nil)
+	if hits.Load() != 1 {
+		t.Errorf("a page view called GitHub %d times, want 1 (the answer is remembered)", hits.Load())
+	}
+	// "Check now" inside the 30 second floor answers with the remembered status instead of asking again.
+	expect(t, admin.do("POST", "/api/v1/system/update/check", nil), 200, "")
+	if hits.Load() != 1 {
+		t.Errorf("check now went through inside the floor: %d requests", hits.Load())
+	}
+	// A changing request needs the CSRF token like every other one.
+	expect(t, admin.do("POST", "/api/v1/system/update/check", nil, "X-CSRF-Token", ""), 403, "csrf")
+}
+
+// Switched off is reported as off, not as a failure, and without a single request.
+func TestUpdateCheckCanBeSwitchedOff(t *testing.T) {
+	var hits atomic.Int32
+	gh := fakeGitHubFor(t, "v0.9.0", &hits)
+	checker := updates.New("0.1.0", false, nil)
+	checker.BaseURL = gh.URL
+	e := newAuthEnv(t, func(o *api.Options) { o.Updates = checker })
+	admin, _, _ := e.setupAdmin()
+	r := admin.do("GET", "/api/v1/system/update", nil)
+	expect(t, r, 200, "")
+	if r.Body["enabled"] != false || r.Body["error"] != "" || r.Body["available"] != false || hits.Load() != 0 {
+		t.Errorf("status = %s, GitHub asked %d times", r.Raw, hits.Load())
+	}
+}
+
+// Without a checker the routes do not exist at all.
+func TestUpdateRoutesAreAbsentWithoutAChecker(t *testing.T) {
+	e := newAuthEnv(t, func(o *api.Options) { o.Updates = nil })
+	for _, path := range []string{"/api/v1/system/update", "/api/v1/system/update/check"} {
+		resp, err := http.Get(e.srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("GET %s = %d, want 404 or 405", path, resp.StatusCode)
+		}
 	}
 }
