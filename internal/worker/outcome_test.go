@@ -28,3 +28,21 @@ func TestScanOutcome(t *testing.T) {
 		}
 	}
 }
+
+func TestFailureHint(t *testing.T) {
+	for msg, wantHint := range map[string]bool{
+		"open /mnt/user/Media/Films: permission denied":                               true,
+		"scan failed: Permission Denied":                                              true,
+		"the share is empty, but the previous scan found files: is it still mounted?": false,
+		"another scan of this share is already running":                               false,
+		"": false,
+	} {
+		got := failureHint(msg)
+		if (got != "") != wantHint {
+			t.Errorf("%q: hint %q, want a hint: %v", msg, got, wantHint)
+		}
+		if wantHint && !strings.Contains(got, "NASA_SHARES_GID") {
+			t.Errorf("%q: the hint must name the setting: %s", msg, got)
+		}
+	}
+}

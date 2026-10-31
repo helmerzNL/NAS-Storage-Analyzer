@@ -182,3 +182,32 @@ func TestBrowseTruncatesHugeFolders(t *testing.T) {
 		t.Errorf("got %d folders, truncated=%v", len(l.Dirs), l.Truncated)
 	}
 }
+
+// The commonest reason a folder cannot be read is a share that only its owner and one group may read (Unraid:
+// nobody:users, mode 770) while the app runs as a user that is neither. The picker has to say what to do about it.
+func TestBrowseExplainsAFolderItCannotRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks; run as another user to cover this")
+	}
+	root := t.TempDir()
+	closed := filepath.Join(root, "Films")
+	if err := os.Mkdir(closed, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(closed, 0o755) })
+
+	_, err := shares.Browse(root, closed)
+	var ve *shares.ValidationError
+	if !errors.As(err, &ve) || ve.Field != "path" {
+		t.Fatalf("want a path validation error, got %v", err)
+	}
+	for _, want := range []string{"permission denied", "NASA_SHARES_GID", fmt.Sprintf("uid %d", os.Getuid())} {
+		if !strings.Contains(ve.Msg, want) {
+			t.Errorf("the message must mention %q: %s", want, ve.Msg)
+		}
+	}
+	// The folder is still offered in its parent, so the picker can show it and explain when it is opened.
+	if l, err := shares.Browse(root, ""); err != nil || strings.Join(names(l), ",") != "Films" {
+		t.Errorf("the parent listing: %v %v", l, err)
+	}
+}

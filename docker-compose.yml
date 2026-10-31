@@ -30,6 +30,11 @@ x-nasa: &nasa
     - no-new-privileges:true
   cap_drop:
     - ALL
+  # A supplementary group, so the containers can read shares that only the owner and one group may read (Unraid:
+  # nobody:users with mode 770, so NASA_SHARES_GID=100). They keep their own uid. The default is the image's own
+  # group, which changes nothing.
+  group_add:
+    - "${NASA_SHARES_GID:-10001}"
   depends_on:
     db:
       condition: service_healthy

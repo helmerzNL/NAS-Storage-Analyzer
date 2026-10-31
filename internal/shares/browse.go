@@ -2,6 +2,7 @@ package shares
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"io/fs"
 	"os"
@@ -161,7 +162,16 @@ func mapFSError(err error) error {
 	case errors.Is(err, fs.ErrNotExist):
 		return ErrNotFound
 	case errors.Is(err, fs.ErrPermission):
-		return bad("path", "this folder cannot be read (permission denied)")
+		return bad("path", "this folder cannot be read (permission denied). %s", PermissionHint())
 	}
 	return err
+}
+
+// PermissionHint says who the app runs as and what to do about a folder it cannot read. The usual cause is a share
+// that only its owner and one group may read (Unraid: nobody:users, mode 770) while the app runs as a user that is
+// neither; NASA_SHARES_GID adds the group.
+func PermissionHint() string {
+	return fmt.Sprintf("The app runs as uid %d, gid %d. Give that user read access, or set NASA_SHARES_GID to the numeric "+
+		"group that owns the share (Unraid: 100) and recreate the containers; see docs/deploy.md, Leesrechten.",
+		os.Getuid(), os.Getgid())
 }
