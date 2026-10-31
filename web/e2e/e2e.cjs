@@ -1,7 +1,8 @@
 // End-to-end test of the whole product in a real browser: setup wizard, TOTP,
 // recovery codes, share management, a scan by the worker, browsing, filters,
 // treemap, lists, search, passkeys (virtual authenticator), users, audit log.
-// Run through e2e/run.sh, which starts the server, the worker and a database.
+// Run through e2e/run.sh (starts a server, a worker and a database), or against a running stack:
+//   BASE_URL=http://localhost:8080 SETUP_TOKEN=... SHARE_DIR=./shares SHARE_APP_PATH=/mnt/shares node e2e.cjs
 const { chromium } = require('playwright');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
@@ -9,7 +10,8 @@ const path = require('node:path');
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:8097';
 const TOKEN = process.env.SETUP_TOKEN;
-const SHARE_DIR = process.env.SHARE_DIR;
+const SHARE_DIR = process.env.SHARE_DIR; // where this script writes the test files
+const SHARE_APP_PATH = process.env.SHARE_APP_PATH || SHARE_DIR; // the same folder as the server sees it
 const SHOTS = process.env.SHOTS || '/tmp/e2e-shots';
 const PASSWORD = 'een-lang-wachtwoord-123';
 fs.mkdirSync(SHOTS, { recursive: true });
@@ -52,6 +54,8 @@ const expectText = async (page, sel, re, msg) => {
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/401|403|409|400/.test(m.text())) errors.push('console: ' + m.text()); });
+  const apiLog = []; // every API call with its status, for the failure report
+  page.on('response', (r) => { if (r.url().includes('/api/') && !r.url().includes('/events')) apiLog.push(`${r.request().method()} ${new URL(r.url()).pathname}${new URL(r.url()).search.slice(0, 40)} -> ${r.status()}`); });
   const apiFailures = [];
   page.on('response', async (r) => { if (r.url().includes('/api/') && r.status() >= 400) apiFailures.push(`${r.request().method()} ${new URL(r.url()).pathname} -> ${r.status()} ${(await r.text().catch(() => '')).slice(0, 160)}`); });
   const shot = (n) => page.screenshot({ path: path.join(SHOTS, n + '.png'), fullPage: true });
@@ -100,7 +104,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.click('a[href="/admin/shares"]');
       await page.click('[data-testid=add-share]');
       await page.fill('[data-testid=f-name]', 'Media');
-      await page.fill('[data-testid=f-path]', path.join(SHARE_DIR, 'media'));
+      await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'media'));
       await page.fill('[data-testid=f-cron]', 'not a cron');
       await page.click('[data-testid=f-save]');
       await page.waitForSelector('dialog[open] .field-error, dialog[open] .alert.bad');
@@ -262,7 +266,8 @@ const expectText = async (page, sel, re, msg) => {
       await page.fill('[data-testid=u-name]', 'kijker');
       await page.fill('[data-testid=u-pw]', 'kijker-wachtwoord-1');
       await page.click('[data-testid=u-save]');
-      await page.waitForSelector('[data-testid=user-row]:has-text("kijker")');
+      // Exact username, not :has-text(): every row's role dropdown contains the word "Kijker".
+      await page.waitForSelector('[data-testid=user-row][data-username=kijker]');
       await shot('13-users');
       const v = await browser.newContext({ locale: 'nl-NL' });
       const vp = await v.newPage();
@@ -288,7 +293,8 @@ const expectText = async (page, sel, re, msg) => {
 
     await step('audit log records the story', async () => {
       await page.goto(BASE + '/admin/audit');
-      await page.waitForSelector('[data-testid=audit-table] tbody tr');
+      // The table also has a "loading" row; wait for a real entry.
+      await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
       for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'user.create', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
@@ -297,7 +303,12 @@ const expectText = async (page, sel, re, msg) => {
     await step('file types: move an extension and see sizes follow without rescanning', async () => {
       await page.goto(BASE + '/admin/extensions');
       await page.waitForSelector('[data-testid=ext-mkv]');
-      await page.selectOption('[data-testid=ext-mkv] select', { label: '→ Archieven' });
+      // Wait for the save itself: leaving the page at once would cancel the request.
+      const moved = (label) => Promise.all([
+        page.waitForResponse((r) => r.request().method() === 'PUT' && r.url().includes('/extension-map/mkv') && r.ok()),
+        page.selectOption('[data-testid=ext-mkv] select', { label }),
+      ]);
+      await moved('→ Archieven');
       // The worker recategorises in the background; poll until the sizes follow.
       let ok = false;
       for (let i = 0; i < 30 && !ok; i++) {
@@ -307,12 +318,22 @@ const expectText = async (page, sel, re, msg) => {
       }
       if (!ok) throw new Error('archives folder after moving mkv');
       await page.goto(BASE + '/admin/extensions');
-      await page.selectOption('[data-testid=ext-mkv] select', { label: '→ Video' });
+      await page.waitForSelector('[data-testid=ext-mkv]');
+      await moved('→ Video');
     });
 
     await step('no JavaScript errors occurred', async () => { if (errors.length) throw new Error(errors.join('\n')); });
   } catch (e) {
     await shot('failure').catch(() => {});
+    // Every other open page too (the step may have been working in a second browser context).
+    let n = 0;
+    for (const c of browser.contexts()) for (const p of c.pages()) {
+      if (p === page) continue;
+      const text = (await p.evaluate(() => document.body.innerText).catch(() => '')).replace(/\s+/g, ' ').slice(0, 300);
+      console.log(`other page ${p.url()}: ${text}`);
+      await p.screenshot({ path: path.join(SHOTS, `failure-other-${++n}.png`), fullPage: true }).catch(() => {});
+    }
+    console.log('extension/category calls:\n  ' + apiLog.filter((l) => /extension-map|categories|audit/.test(l)).slice(-12).join('\n  '));
     if (apiFailures.length) console.log('failed API calls:\n  ' + apiFailures.slice(-8).join('\n  '));
     if (errors.length) console.log('browser errors:\n  ' + errors.join('\n  '));
     console.log('\nfailed at the step above; screenshot:', path.join(SHOTS, 'failure.png'));

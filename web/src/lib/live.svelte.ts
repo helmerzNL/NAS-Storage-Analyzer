@@ -6,6 +6,16 @@ export const live = $state<{ shares: Record<number, ShareStatus>; running: numbe
   shares: {}, running: 0, version: 0, connected: false,
 });
 
+/**
+ * Whether a status update means a page showing this share should reload. The first
+ * update seen for a share counts when the share already has a scan: a fast scan can finish
+ * between a page loading its data and the first update arriving, and nothing else would tell.
+ */
+export function scanChanged(prev: ShareStatus | undefined, next: ShareStatus): boolean {
+  if (!prev) return next.latest_scan_id != null;
+  return prev.latest_scan_id !== next.latest_scan_id || prev.latest_scan_status !== next.latest_scan_status;
+}
+
 let source: EventSource | null = null;
 const listeners = new Set<(s: ShareStatus, prev: ShareStatus | undefined) => void>();
 
@@ -26,7 +36,7 @@ export function startLive() {
       next[s.share_id] = s;
       if (s.job) running++;
       const prev = live.shares[s.share_id];
-      if (prev && (prev.latest_scan_id !== s.latest_scan_id || prev.latest_scan_status !== s.latest_scan_status)) listeners.forEach((f) => f(s, prev));
+      if (scanChanged(prev, s)) listeners.forEach((f) => f(s, prev));
     }
     live.shares = next;
     live.running = running;

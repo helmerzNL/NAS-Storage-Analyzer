@@ -40,7 +40,7 @@
     <thead><tr><th>{t('auth.username')}</th><th>{t('users.role')}</th><th class="hide-sm">{t('users.mfa')}</th><th class="hide-sm">{t('users.lastlogin')}</th><th></th></tr></thead>
     <tbody>
       {#each users as u (u.id)}
-        <tr data-testid="user-row"><td><b>{u.username}</b>{#if u.display_name} <span class="muted">({u.display_name})</span>{/if}
+        <tr data-testid="user-row" data-username={u.username}><td><b>{u.username}</b>{#if u.display_name} <span class="muted">({u.display_name})</span>{/if}
           {#if u.disabled}<span class="badge bad">{t('users.disabled')}</span>{/if}{#if u.id === session.user?.id}<span class="badge info">{t('users.you')}</span>{/if}</td>
           <td><select value={u.role} onchange={(e) => setRole(u, e.currentTarget.value)} style="width:auto" aria-label={t('users.role')}>
             <option value="admin">{t('role.admin')}</option><option value="viewer">{t('role.viewer')}</option></select></td>

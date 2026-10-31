@@ -27,12 +27,16 @@
     ]);
     cats[s.id] = c.items; hist[s.id] = h.items;
   }
+  let seq = 0;
   async function load() {
+    const my = ++seq; // overlapping loads (a status update during the first load): the newest wins
     try {
-      shares = (await get<{ items: ShareInfo[] }>('/shares')).items;
+      const list = (await get<{ items: ShareInfo[] }>('/shares')).items;
+      if (my !== seq) return;
+      shares = list;
       await Promise.all(shares.map(loadShare));
       error = '';
-    } catch (e) { error = errMessage(e); } finally { loaded = true; }
+    } catch (e) { if (my === seq) error = errMessage(e); } finally { if (my === seq) loaded = true; }
   }
   onMount(() => { void load(); return onScanChange(() => void load()); });
 

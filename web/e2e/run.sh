@@ -19,4 +19,4 @@ for i in $(seq 1 50); do grep -q setup_token "$WORK/serve.log" 2>/dev/null && br
 export SETUP_TOKEN=$(grep -o '"setup_token":"[^"]*"' "$WORK/serve.log" | head -1 | cut -d'"' -f4)
 [ -n "$SETUP_TOKEN" ] || { echo "server did not start:"; cat "$WORK/serve.log" | cut -c1-300; exit 1; }
 export SHARE_DIR=$WORK/shares BASE_URL=http://localhost:8097
-NODE_PATH=$(npm root -g) node "$HERE/e2e.cjs" || { echo "--- serve log"; tail -20 "$WORK/serve.log" | cut -c1-300; echo "--- worker log"; tail -10 "$WORK/worker.log" | cut -c1-300; exit 1; }
+NODE_PATH=$(npm root -g) node "$HERE/e2e.cjs" || { echo "--- audit log (newest first)"; psql "$NASA_DB_DSN" -Atc "select to_char(at,'HH24:MI:SS.MS'), action, target, ip, detail from audit_log order by id desc limit 14" 2>&1 | cut -c1-200; [ -n "${E2E_HOLD:-}" ] && { echo "HOLDING for $E2E_HOLD s on $BASE_URL (work dir $WORK)"; sleep "$E2E_HOLD"; }; echo "--- serve log"; tail -20 "$WORK/serve.log" | cut -c1-300; echo "--- worker log"; tail -10 "$WORK/worker.log" | cut -c1-300; exit 1; }

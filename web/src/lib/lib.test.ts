@@ -1,3 +1,5 @@
+import { scanChanged } from './live.svelte';
+import type { ShareStatus } from './api';
 import { describe, expect, it } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -172,5 +174,23 @@ describe('translations', () => {
   it('translate every error code the server sends', () => {
     for (const c of ['unauthenticated', 'mfa_required', 'enroll_required', 'forbidden', 'csrf', 'locked', 'invalid_credentials', 'invalid_code', 'not_found',
       'conflict', 'last_admin', 'last_factor', 'setup_done', 'invalid_setup_token', 'https_required', 'already_active', 'busy', 'no_data']) expect('err.' + c in nl, c).toBe(true);
+  });
+});
+
+describe('scanChanged', () => {
+  const st = (id: number | null, status: string | null): ShareStatus => ({ share_id: 1, job: null, latest_scan_id: id, latest_scan_status: status, latest_scan_finished_at: null });
+  it('reloads when the first update already shows a finished scan (fast scan, late stream)', () => {
+    expect(scanChanged(undefined, st(7, 'succeeded'))).toBe(true);
+  });
+  it('does not reload for a share that was never scanned', () => {
+    expect(scanChanged(undefined, st(null, null))).toBe(false);
+  });
+  it('reloads when a scan starts, finishes, or a newer scan appears', () => {
+    expect(scanChanged(st(null, null), st(1, 'running'))).toBe(true);
+    expect(scanChanged(st(1, 'running'), st(1, 'succeeded'))).toBe(true);
+    expect(scanChanged(st(1, 'succeeded'), st(2, 'running'))).toBe(true);
+  });
+  it('stays quiet while nothing changes', () => {
+    expect(scanChanged(st(3, 'succeeded'), st(3, 'succeeded'))).toBe(false);
   });
 });
