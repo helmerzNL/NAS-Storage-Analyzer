@@ -1,0 +1,101 @@
+#!/bin/sh
+# NAS Storage Analyzer: delete script. It deletes exactly the files in the data block below, after you confirm.
+# The data block is plain data: nothing in it is ever run as a command. Run this file with: sh <this file>
+data() {
+cat <<'NASA_DELSCRIPT_DATA_END'
+N|3
+R|/mnt/user/Media
+I|NAS Storage Analyzer: delete script
+I|Share:          Media
+I|Base path:      /mnt/user/Media
+I|Index of scan:  2026-10-31 12:30 UTC (scan 7)
+I|Generated:       2026-10-31 13:00 UTC
+I|Files to delete: 3
+I|Size (upper bound): 1.4 GiB
+I|1 of these have other hard links: removing them may free no space.
+I|Per folder (largest first):
+I|      1        42 B  /Movies/
+I|      1     1.4 GiB  /Movies/Action/
+I|      1         7 B  /Music/
+I|NOT in this script (1), see the reason per file:
+I|  /Movies/gone.mkv: no longer in the index (a scan ran since you selected it)
+I|--------
+F|1500000000|1761900000|/Movies/Action/a b.mkv
+F|42|1761900001|/Movies/it's 100%.mkv
+F|7|0|/Music/日本語.flac
+NASA_DELSCRIPT_DATA_END
+}
+N=$(data | sed -n 's/^N|//p')
+ROOT=$(data | sed -n 's/^R|//p')
+ROOT=${ROOT%/}
+data | sed -n 's/^I|//p'
+COUNT=$(data | grep -c '^F|')
+if [ "$COUNT" != "$N" ]; then
+  printf '%s%s%s%s%s\n' 'This script is incomplete or was changed: expected ' "$N" ' files, found ' "$COUNT" '. Nothing was changed.'
+  exit 2
+fi
+if stat -c '%s %Y' / >/dev/null 2>&1; then
+  STATFMT=gnu
+elif stat -f '%z %m' / >/dev/null 2>&1; then
+  STATFMT=bsd
+else
+  printf '%s\n' 'This script needs a stat command that prints the size and time of a file. Nothing was changed.'
+  exit 2
+fi
+fstat() {
+  if [ "$STATFMT" = gnu ]; then stat -c '%s %Y' "$1"; else stat -f '%z %m' "$1"; fi
+}
+if [ ! -d "${ROOT:-/}" ]; then
+  printf '%s\n' 'Cannot open the base path. Is it right, and is the share reachable? Nothing was changed.'
+  exit 2
+fi
+# A record is cut apart with parameter expansion, not with read and IFS: read would take a trailing bar off the path.
+FOUND=$(data | { c=0; while IFS= read -r L; do case $L in F\|*) ;; *) continue ;; esac; L=${L#F|}; L=${L#*|}; P=${L#*|}; if [ -e "$ROOT$P" ] || [ -h "$ROOT$P" ]; then c=$((c + 1)); fi; done; printf '%s' "$c"; })
+printf '%s%s%s%s%s\n' 'Found under the base path: ' "$FOUND" ' of ' "$N" '.'
+if [ "$FOUND" = 0 ]; then
+  printf '%s\n' 'None of the files were found. Is the base path right? Nothing was changed.'
+  exit 2
+fi
+printf '%s%s%s' 'Type DELETE ' "$N" ' to confirm: '
+ANS=
+IFS= read -r ANS || ANS=
+if [ "$ANS" != "DELETE $N" ]; then
+  printf '\n%s\n' 'Cancelled. Nothing was changed.'
+  exit 2
+fi
+data | {
+  deleted=0; kept=0; gone=0; failed=0
+  while IFS= read -r L; do
+    case $L in F\|*) ;; *) continue ;; esac
+    L=${L#F|}; S=${L%%|*}; L=${L#*|}; M=${L%%|*}; P=${L#*|}
+    F=$ROOT$P
+    if [ -h "$F" ]; then
+      kept=$((kept + 1)); printf '%s: %s\n' 'not a regular file, kept' "$F"; continue
+    fi
+    if [ ! -e "$F" ]; then
+      gone=$((gone + 1)); printf '%s: %s\n' 'already gone' "$F"; continue
+    fi
+    if [ ! -f "$F" ]; then
+      kept=$((kept + 1)); printf '%s: %s\n' 'not a regular file, kept' "$F"; continue
+    fi
+    set -- $(fstat "$F")
+    if [ "$1" != "$S" ]; then
+      kept=$((kept + 1)); printf '%s: %s\n' 'changed since the scan, kept' "$F"; continue
+    fi
+    if [ "$M" != 0 ]; then
+      D=$(($2 - M)); if [ "$D" -lt 0 ]; then D=$((0 - D)); fi
+      if [ "$D" -gt 2 ]; then
+        kept=$((kept + 1)); printf '%s: %s\n' 'changed since the scan, kept' "$F"; continue
+      fi
+    fi
+    rm -f -- "$F" 2>/dev/null
+    if [ ! -e "$F" ] && [ ! -h "$F" ]; then
+      deleted=$((deleted + 1)); printf '%s: %s\n' 'deleted' "$F"
+    else
+      failed=$((failed + 1)); printf '%s: %s\n' 'FAILED' "$F"
+    fi
+  done
+  printf '%s%s%s%s%s%s%s%s%s\n' 'Done: ' "$deleted" ' deleted, ' "$kept" ' kept, ' "$gone" ' already gone, ' "$failed" ' failed.'
+  [ "$failed" = 0 ]
+}
+exit $?
