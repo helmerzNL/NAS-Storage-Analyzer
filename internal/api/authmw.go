@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
@@ -51,6 +52,8 @@ type Options struct {
 	PublicURL string
 	// Updates tells the administrator that a newer release exists (nil: the routes are not registered).
 	Updates *updates.Checker
+	// Backup makes and restores the backup file from the settings screen (nil: the routes are not registered).
+	Backup *backup.Service
 }
 
 // ParseTrustedProxies parses a comma-separated list of CIDRs or addresses.

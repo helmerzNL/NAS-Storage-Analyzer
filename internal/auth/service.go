@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -521,16 +520,11 @@ func validPref(key, value string) (string, bool) {
 
 // SetPrefs stores interface settings; unknown keys and values are rejected.
 func (s *Service) SetPrefs(ctx context.Context, userID int64, prefs map[string]string) (map[string]string, error) {
-	clean := make(map[string]string, len(prefs))
-	for k, v := range prefs {
-		nv, ok := validPref(k, v)
-		if !ok {
-			return nil, fmt.Errorf("invalid preference %s=%q", k, v)
-		}
-		clean[k] = nv
+	prefs, err := CleanPrefs(prefs)
+	if err != nil {
+		return nil, err
 	}
-	prefs = clean
 	var out map[string]string
-	err := s.pool.QueryRow(ctx, `UPDATE users SET prefs = prefs || $2::jsonb WHERE id = $1 RETURNING prefs`, userID, prefs).Scan(&out)
+	err = s.pool.QueryRow(ctx, `UPDATE users SET prefs = prefs || $2::jsonb WHERE id = $1 RETURNING prefs`, userID, prefs).Scan(&out)
 	return out, err
 }

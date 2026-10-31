@@ -57,7 +57,8 @@ otherwise restore the backup you took before the update (`deploy.md` §5).
 
 `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` kept separately; without the key the stored SMB passwords cannot be
 decrypted. Commands, the restore sequence and what does not need saving (the scan index can be rebuilt with a full scan) are in
-[`deploy.md` §5](deploy.md#5-back-up-en-herstel).
+[`deploy.md` §5](deploy.md#5-back-up-en-herstel). Besides that, *Settings → Backup* in the app takes an owner's own copy of the configuration (shares, file types, display preferences:
+no credentials, no scan results) as one JSON file and restores it on the server in one transaction; it does not replace the dump.
 
 ## 5. Runtime architecture and data location
 
@@ -79,7 +80,9 @@ inside the app. These are the app's limits as numbers; **whatever is in front mu
 
 | What | App limit | What it asks of what is in front |
 |---|---|---|
-| Largest request body | **64 KiB** of JSON. The app accepts no file uploads. | Must allow request bodies of at least 64 KiB. |
+| Largest request body | **64 KiB** of JSON, except the backup upload below. The app accepts no other file uploads. | Must allow request bodies of at least 64 KiB. |
+| Backup upload (`POST /api/v1/backup/stage`) | at most **8 MiB** of JSON (a real backup is tens of kilobytes), read within the 30 s of `ReadTimeout` and answered within the 15 s of one JSON request; a refused file is not kept, a staged one is removed after an hour | Must allow a body of at least **8 MiB** on that path (nginx: `client_max_body_size 8m;`; its default of 1 MiB is enough for an ordinary backup). |
+| Backup download (`GET /api/v1/backup`) | one JSON file, sent with its `Content-Length` and `Cache-Control: no-store` | Must not cache it; nothing beyond the JSON request row below. |
 | Request headers | read within 10 s (`ReadHeaderTimeout`) | A proxy that is slower than 10 s to forward headers is refused by the app. |
 | Request read | whole request read within 30 s (`ReadTimeout`) | — |
 | Idle keep-alive | 2 min (`IdleTimeout`) | Upstream keep-alive of at most 2 min, or the app closes first. |

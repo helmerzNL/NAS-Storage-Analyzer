@@ -374,6 +374,29 @@ docker compose up -d
 * Een bestandssysteem-snapshot of kopie van `DATA_PATH/postgres` met de database gestopt werkt ook (`docker compose stop db`).
 * Een grote database (tientallen miljoenen bestanden) dumpt in minuten tot een uur; plan dat buiten de scantijd.
 
+### In de app: een back-up van wat je zelf hebt ingevoerd
+
+*Instellingen → Back-up* (alleen beheerders) maakt van alles wat je zelf hebt ingevoerd **één klein JSON-bestand** en zet het terug, zonder shell.
+
+* **Wat erin staat:** je shares met al hun instellingen, de bestandstypen en ieders weergavevoorkeuren (taal, eenheden, thema, accent).
+* **Wat er nooit in staat:** wachtwoorden, passkeys, authenticator-geheimen, herstelcodes, sessies, uitnodigingen, accounts en rollen, en het auditlog. Een bestand dat je mailt of in de
+  cloud zet kan de applicatie dus op een andere server niet openen, en een bewerkt bestand kan niemand tot beheerder maken. **Eén uitzondering:** het wachtwoord van een SMB-share staat
+  erin als de versleutelde blob die de database al bewaart, met `NASA_ENCRYPTION_KEY`; die sleutel staat niet in het bestand. Bewaar sleutel en bestand apart. Zet je terug op een installatie
+  met een andere sleutel, dan komt dat wachtwoord niet mee en zegt het scherm bij welke share je het opnieuw invoert.
+* **Wat er ook niet in staat:** de scanresultaten en de geschiedenis. Die zijn afgeleid van de bestanden op je NAS: na een herstel scan je opnieuw. Wil je ze wel bewaren, maak dan ook de
+  database-back-up hierboven. **Deze back-up vervangt `pg_dump` niet**; hij is je eigen kopie van je instellingen.
+* **Terugzetten** gaat in stappen. Je kiest het bestand; het wordt volledig gecontroleerd met dezelfde regels als wanneer je de gegevens met de hand invoert, **en er verandert niets**. Het
+  scherm zegt wat er gaat gebeuren: welke shares erbij komen, welke instellingen worden vervangen en welke shares **met al hun scangegevens verdwijnen** (die het bestand niet heeft). Pas
+  na jouw bevestiging begint het herstel, en dat loopt **op de server**: de pagina verlaten, herladen of de browser sluiten stopt niets, en het scherm pakt het weer op als je terugkomt.
+  Alles wordt in één transactie vervangen, dus een mislukking verandert niets.
+* **Wat blijft zoals het is:** accounts, wachtwoorden, passkeys, tweede factoren, het auditlog en de scangegevens van elke share die blijft. Een bestand dat precies is wat er nu staat, verandert niets.
+* **Zolang er een scan in de wachtrij staat of loopt, wordt een herstel geweigerd** (wacht tot hij klaar is, of annuleer hem; het gekozen bestand blijft staan). Veranderen de bestandstypen, dan
+  worden de scans op de achtergrond opnieuw ingedeeld.
+* **Op een nieuwe installatie** maak je eerst de eerste beheerder met de setup-wizard en zet je dan het bestand terug; het bestand maakt zelf geen accounts.
+* **Grootte:** een bestand is hooguit **8 MiB** (een echte is enkele tientallen kilobytes); wat ervoor staat moet een body van die grootte toelaten (zie
+  [`operations.md` §6](operations.md#6-limits-that-live-outside-the-repository); de standaard van nginx, 1 MiB, volstaat voor een gewone back-up). Het bestand staat tot je bevestigt hooguit een uur in de database.
+* Wat er gebeurt staat in het auditlog (`backup.create`, `backup.restore.start`, `backup.restore`, `backup.restore.failed`), met aantallen en zonder inhoud.
+
 ## 6. PostgreSQL afstellen
 
 De queries op de voorberekende aggregaten zijn snel zodra de actieve gegevens in het geheugen passen. Richtlijn:
@@ -567,6 +590,11 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   name (not an IP address) and https.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` stored separately. Without the key the
   stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
+* **Backup in the app:** *Settings → Backup* downloads everything you entered (shares, file types, everyone's display preferences) as one small JSON file and restores it.
+  The file never holds a password, passkey, authenticator secret, recovery code, session, account or role, and not the audit log; an SMB password is in it only as the ciphertext sealed
+  with `NASA_ENCRYPTION_KEY`, which is not in the file. Scan results are not in it: scan again after a restore. It does **not** replace `pg_dump` (§5). A restore is checked first
+  (nothing changes), shows what it will do (including shares that go with their scan data), runs on the server in one transaction, and is refused while a scan is queued or running.
+  At most 8 MiB per file; a proxy in front must allow a body that large.
 * **Users:** nobody chooses anyone else's password. An administrator (Settings → Users) makes an **invitation link**; the guest opens it and chooses their own password or a passkey. The link is shown once
   (revoke and make a new one if lost), works once and expires after 7 days; the token travels in the URL fragment, never in a path or query string, and never in the audit log. *New login link* brings back a user who cannot sign in:
   the old credentials are replaced only when the guest has finished, and every session of that user ends. Set `NASA_PUBLIC_URL` when the address you use differs from the one guests must use. Limits: 50 users (pending invitations count) and 50 open invitations.

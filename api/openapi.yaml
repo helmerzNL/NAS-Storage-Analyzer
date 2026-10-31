@@ -978,6 +978,98 @@ paths:
           description: The answer after the check.
           content: {application/json: {schema: {$ref: "#/components/schemas/UpdateStatus"}}}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup:
+    get:
+      tags: [admin]
+      operationId: downloadBackup
+      summary: Download everything you entered as one file (administrator)
+      description: |
+        The owner's own copy of what *they* entered: the shares (and their settings), the file-type map and each person's interface preferences. It **never**
+        holds a password, passkey, authenticator secret, recovery code, session, invitation, account or role, so a file that is mailed or kept in a cloud
+        drive cannot open the application on another server. The one exception is the SMB password of a share, and only as the ciphertext the database
+        already holds, sealed with `NASA_ENCRYPTION_KEY`, which is never in the file. Scan results are not in it either: they come back by scanning again.
+        It is not a replacement for a database dump (docs/deploy.md).
+      responses:
+        "200":
+          description: The backup, as a JSON download.
+          headers:
+            Content-Disposition: {schema: {type: string}, description: 'attachment; filename="nas-storage-analyzer-backup-YYYY-MM-DD.json"'}
+            Content-Length: {schema: {type: integer}, description: "Known before the body starts, so the screen can show how far the download is."}
+            Cache-Control: {schema: {type: string}, description: "no-store"}
+          content: {application/json: {schema: {$ref: "#/components/schemas/BackupFile"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/stage:
+    post:
+      tags: [admin]
+      operationId: stageBackup
+      summary: Upload a backup and have it checked (administrator)
+      description: |
+        The body is the file itself, at most 8 MB (whatever runs in front of the application has to allow that much). It is **fully checked** with the same
+        rules as typing the data in by hand, and **nothing changes**: the answer says what a restore would do, and a token to start it with. A refused file is
+        not kept. A person has one staged file at a time, and one that is not used is removed after an hour.
+        Refusals: `backup_not_backup`, `backup_newer` (the version that wrote it is in `params`), `backup_invalid` (with the `field` in the file),
+        `backup_too_many`, and 413 `backup_too_big`.
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object}}
+      responses:
+        "200":
+          description: The file is acceptable. Nothing has been changed yet.
+          content: {application/json: {schema: {$ref: "#/components/schemas/StagedBackup"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/stage/{token}:
+    delete:
+      tags: [admin]
+      operationId: unstageBackup
+      summary: Remove a staged backup the person changed their mind about (administrator)
+      parameters: [{name: token, in: path, required: true, schema: {type: string}}]
+      responses:
+        "204": {description: "Removed, or already gone."}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/jobs:
+    post:
+      tags: [admin]
+      operationId: startRestore
+      summary: Start the restore of a staged backup (administrator)
+      description: |
+        Answers at once and restores on the server: leaving the page, reloading or closing the browser stops nothing. The restore checks the file once more and
+        replaces everything in **one transaction**, so a failure changes nothing. It is refused with `409 already_running` while another restore runs, and with
+        `409 busy` while scans are queued or running; in both cases the staged file is **kept**, so the same token can be used again a moment later. (A scan
+        queued in the instant between this answer and the swap makes the job fail with the reason `busy`; nothing is changed then either.) The token works
+        once it has been accepted. Follow it with `GET /api/v1/backup/jobs/latest`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [token], properties: {token: {type: string, description: "The token of the staged file."}}}
+      responses:
+        "202":
+          description: Started.
+          content: {application/json: {schema: {$ref: "#/components/schemas/BackupJob"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/jobs/latest:
+    get:
+      tags: [admin]
+      operationId: latestRestore
+      summary: The running restore, or the last finished one that has not been dismissed (administrator)
+      description: The screen asks once a second while it is open. A running restore that has not moved for 15 minutes is given up as interrupted; nothing was changed then.
+      responses:
+        "200":
+          description: The job, or null when there is none.
+          content:
+            application/json:
+              schema: {type: object, required: [job], properties: {job: {allOf: [{$ref: "#/components/schemas/BackupJob"}], nullable: true}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/jobs/{id}:
+    delete:
+      tags: [admin]
+      operationId: dismissRestore
+      summary: Dismiss a finished restore once its outcome has been shown (administrator)
+      parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}]
+      responses:
+        "204": {description: Dismissed.}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/history:
     get:
       tags: [lists]
@@ -1143,8 +1235,9 @@ components:
         title: {type: string}
         status: {type: integer}
         detail: {type: string}
-        code: {type: string, description: "Stable reason, for example unauthenticated, mfa_required, enroll_required, forbidden, csrf, locked, invalid_request, conflict, already_active, busy, no_data."}
-        field: {type: string, description: "The form field a validation error is about."}
+        code: {type: string, description: "Stable reason, for example unauthenticated, mfa_required, enroll_required, forbidden, csrf, locked, invalid_request, conflict, already_active, busy, no_data, no_stage, already_running, backup_not_backup, backup_newer, backup_invalid, backup_too_many, backup_too_big."}
+        field: {type: string, description: "The form field a validation error is about; for a backup file, where in the file (for example `shares[2].cron`)."}
+        params: {type: object, additionalProperties: {type: string}, description: "Values a message needs (a version, a limit), for the screen to put in a sentence in the reader's language."}
         request_id: {type: string}
     Totals:
       type: object
@@ -1421,6 +1514,115 @@ components:
         error: {type: string, description: "The cause in words an administrator can act on, for example `HTTP 403 (rate limit)`; empty when the last attempt worked."}
         error_detail: {type: string, description: "The raw reason, also in the log."}
         repo: {type: string, example: "helmerzNL/NAS-Storage-Analyzer"}
+    BackupFile:
+      type: object
+      description: |
+        The backup file. A section that is absent is left as it is by a restore; one that is present but empty replaces what is there with nothing.
+        A file of an older `format_version` still restores; a newer one is refused with the version that wrote it.
+      required: [format, format_version, app_version, created_at, includes_files, shares, file_types, preferences]
+      properties:
+        format: {type: string, enum: [nas-storage-analyzer-backup]}
+        format_version: {type: integer, minimum: 1, example: 1}
+        app_version: {type: string, example: "0.1.0"}
+        created_at: {type: string, format: date-time}
+        includes_files: {type: boolean, description: "Always false: the application has no uploaded files, so a backup is one JSON file and never an archive."}
+        shares: {type: array, items: {$ref: "#/components/schemas/BackupShare"}}
+        file_types:
+          type: array
+          items:
+            type: object
+            required: [ext, category]
+            properties:
+              ext: {type: string, example: mkv}
+              category: {type: string, description: "The category key (video, audio, images, documents, archives, code, disk_images, other).", example: video}
+        preferences:
+          type: array
+          description: What each person chose for the interface, by user name. Nothing else about a person.
+          items:
+            type: object
+            required: [username, prefs]
+            properties:
+              username: {type: string}
+              prefs: {type: object, additionalProperties: {type: string}}
+    BackupShare:
+      type: object
+      required: [name, kind, excludes, workers, max_ops_per_sec, max_ops_day, day_start_hour, day_end_hour, cron, last_used_basis, full_scan_every, retention_scans, retention_days, snapshot_depth]
+      properties:
+        name: {type: string}
+        kind: {type: string, enum: [bind, nfs, smb]}
+        path: {type: string}
+        server: {type: string}
+        export: {type: string}
+        share: {type: string}
+        username: {type: string}
+        domain: {type: string}
+        version: {type: string}
+        mount_options: {type: string}
+        client_windows: {type: string}
+        client_posix: {type: string}
+        excludes: {type: array, items: {type: string}}
+        workers: {type: integer}
+        max_ops_per_sec: {type: integer}
+        max_ops_day: {type: integer}
+        day_start_hour: {type: integer}
+        day_end_hour: {type: integer}
+        cron: {type: string}
+        last_used_basis: {type: string, enum: [atime, mtime, max]}
+        full_scan_every: {type: integer}
+        retention_scans: {type: integer}
+        retention_days: {type: integer}
+        snapshot_depth: {type: integer}
+        secret: {type: string, format: byte, description: "The SMB password as the ciphertext the database holds (base64), sealed with the key in the environment. Never the password itself: a file that carries a `password` is refused."}
+    BackupChanges:
+      type: object
+      description: What a restore does to what is there now, or did.
+      required: [shares_added, shares_updated, shares_removed, file_types_changed, preferences_applied, preferences_skipped, passwords_unreadable, recategorize_shares]
+      properties:
+        shares_added: {type: array, items: {type: string}}
+        shares_updated: {type: array, items: {type: string}, description: "Shares that are in the file and whose settings differ from what is stored; the others are left alone, so a restore that changes nothing does not even move a schedule."}
+        shares_removed: {type: array, items: {type: string}, description: "Shares the file does not have: they go, **with all of their scan data**."}
+        file_types_changed: {type: integer, description: "Extensions added, moved to another category or removed."}
+        preferences_applied: {type: integer, description: "People whose preferences differ and are set; people who already have them are not counted."}
+        preferences_skipped: {type: array, items: {type: string}, description: "People the file names who have no account here."}
+        passwords_unreadable: {type: array, items: {type: string}, description: "Shares restored without their SMB password, because this installation's encryption key cannot open the one in the file."}
+        recategorize_shares: {type: integer, description: "How many shares are categorised again in the background because the file-type map changed."}
+    BackupSummary:
+      type: object
+      required: [format_version, app_version, created_at, counts, missing, changes, scans_active]
+      properties:
+        format_version: {type: integer}
+        app_version: {type: string}
+        created_at: {type: string, format: date-time}
+        counts:
+          type: object
+          required: [shares, file_types, preferences]
+          properties: {shares: {type: integer}, file_types: {type: integer}, preferences: {type: integer}}
+        missing: {type: array, items: {type: string, enum: [shares, file_types, preferences]}, description: "Sections the file does not have: a restore leaves them as they are."}
+        changes: {$ref: "#/components/schemas/BackupChanges"}
+        scans_active: {type: boolean, description: "Scans are queued or running: the restore is refused until they are done or cancelled."}
+    StagedBackup:
+      type: object
+      required: [token, summary]
+      properties:
+        token: {type: string, description: "32 hexadecimal characters; works once, for the person who staged the file."}
+        summary: {$ref: "#/components/schemas/BackupSummary"}
+    BackupJob:
+      type: object
+      required: [id, status, phase, step, steps, error_key, error_params, summary, checking_ms, replacing_ms, started_by, started_at, finished_at]
+      properties:
+        id: {type: integer, format: int64}
+        status: {type: string, enum: [running, done, failed]}
+        phase: {type: string, enum: [checking, replacing]}
+        step: {type: integer}
+        steps: {type: integer, description: "0 means it cannot be counted."}
+        error_key: {type: string, description: "Why it failed, as a key the screen words in the reader's language: invalid, busy, locked, interrupted or failed. `failed` always means nothing was changed.", example: ""}
+        error_params: {type: object, additionalProperties: {type: string}}
+        summary: {allOf: [{$ref: "#/components/schemas/BackupChanges"}], nullable: true}
+        checking_ms: {type: integer, nullable: true}
+        replacing_ms: {type: integer, nullable: true}
+        started_by: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
     AuthStatus:
       type: object
       required: [setup_required, authenticated, min_password_length, https_required]

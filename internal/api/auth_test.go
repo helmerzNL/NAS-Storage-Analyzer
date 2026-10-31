@@ -27,6 +27,7 @@ import (
 	apispec "github.com/helmerznl/nas-storage-analyzer/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
@@ -118,8 +119,10 @@ func newAuthEnv(t *testing.T, mut func(*api.Options)) *authEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(ro.Close)
-	opts := api.Options{Auth: svc, SetupToken: "setup-token-123", Queue: jobs.NewQueue(st.Pool),
-		Shares:  shares.NewService(st.Pool, box, shares.Options{}, time.UTC),
+	queue := jobs.NewQueue(st.Pool)
+	sharesSvc := shares.NewService(st.Pool, box, shares.Options{}, time.UTC)
+	opts := api.Options{Auth: svc, SetupToken: "setup-token-123", Queue: queue, Shares: sharesSvc,
+		Backup:  backup.New(st.Pool, sharesSvc, svc, queue, nil, "0.0.0"),
 		Updates: updates.New("0.0.0", false, nil)} // switched off: no test reaches out to GitHub unless it brings its own checker
 	if mut != nil {
 		mut(&opts)

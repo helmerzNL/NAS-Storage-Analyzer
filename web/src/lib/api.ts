@@ -7,18 +7,23 @@ export class ApiError extends Error {
   field?: string;
   detail?: string;
   retryAfter?: number;
-  constructor(status: number, title: string, code = '', detail = '', field = '', retryAfter = 0) {
+  /** Values a message needs (a version, a limit), for the screen to put in a sentence in the reader's language. */
+  params?: Record<string, string>;
+  constructor(status: number, title: string, code = '', detail = '', field = '', retryAfter = 0, params?: Record<string, string>) {
     super(detail ? `${title}: ${detail}` : title);
     this.status = status;
     this.code = code;
     this.field = field || undefined;
     this.detail = detail || undefined;
     this.retryAfter = retryAfter || undefined;
+    this.params = params;
   }
 }
 
 let csrf = '';
 export const setCsrf = (t: string) => { csrf = t; };
+/** The token a request that changes something must carry. A request made outside `api()` (an upload with progress) needs it too. */
+export const getCsrf = () => csrf;
 
 // Called when the server says the browser's session is missing or incomplete,
 // so the shell can switch to the sign-in screens.
@@ -50,7 +55,7 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   try { data = text ? JSON.parse(text) : undefined; } catch { /* not JSON */ }
   if (!res.ok) {
     const err = new ApiError(res.status, data?.title || res.statusText || 'error', data?.code || '', data?.detail || '', data?.field || '',
-      Number(res.headers.get('Retry-After')) || 0);
+      Number(res.headers.get('Retry-After')) || 0, data?.params);
     if (['unauthenticated', 'mfa_required', 'enroll_required'].includes(err.code) && !path.startsWith('/auth/')) onAuthProblem(err.code);
     throw err;
   }
@@ -148,3 +153,19 @@ export interface Passkey { id: string; name: string; created_at: string; last_us
 export interface AuditEntry { id: number; at: string; user_id: number | null; username: string; ip: string; action: string; target: string; detail: Record<string, unknown>; }
 export interface Job { id: number; kind: string; share_id: number; state: string; mode: string; trigger: string; requested_by: string; requested_at: string; started_at: string | null; finished_at: string | null; error: string | null; }
 export interface Category { id: number; key: string; }
+
+// ---- in-app backup and restore (backup-restore.md) ----
+export interface BackupChanges {
+  shares_added: string[]; shares_updated: string[]; shares_removed: string[]; file_types_changed: number;
+  preferences_applied: number; preferences_skipped: string[]; passwords_unreadable: string[]; recategorize_shares: number;
+}
+export interface BackupSummary {
+  format_version: number; app_version: string; created_at: string; counts: { shares: number; file_types: number; preferences: number };
+  missing: string[]; changes: BackupChanges; scans_active: boolean;
+}
+export interface StagedBackup { token: string; summary: BackupSummary }
+export interface BackupJob {
+  id: number; status: 'running' | 'done' | 'failed'; phase: 'checking' | 'replacing'; step: number; steps: number;
+  error_key: string; error_params: Record<string, string>; summary: BackupChanges | null; checking_ms: number | null; replacing_ms: number | null;
+  started_by: string; started_at: string; finished_at: string | null;
+}

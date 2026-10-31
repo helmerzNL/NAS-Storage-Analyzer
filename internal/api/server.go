@@ -283,7 +283,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 			"Narrow the filters (a smaller folder, a category, a size range) and try again.")
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
-	case s.authFail(w, r, err), s.adminFail(w, r, err):
+	case s.authFail(w, r, err), s.adminFail(w, r, err), s.backupFail(w, r, err):
 	default:
 		s.log.Error("request failed", "request_id", requestID(r), "path", r.URL.Path, "error", err)
 		s.problem(w, r, http.StatusInternalServerError, "internal error", "")
@@ -299,9 +299,13 @@ type problemBody struct {
 	// enroll_required, forbidden, csrf, locked, ...) the UI switches on.
 	Code string `json:"code,omitempty"`
 	// Field names the form field a validation error is about.
-	Field     string `json:"field,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
+	Field string `json:"field,omitempty"`
+	// Params are the values a message needs (a version, a limit), for the UI to put in a sentence in the reader's language.
+	Params    map[string]string `json:"params,omitempty"`
+	RequestID string            `json:"request_id,omitempty"`
 }
+
+func writeProblem(w http.ResponseWriter, p problemBody) { json.NewEncoder(w).Encode(p) }
 
 func (s *Server) problem(w http.ResponseWriter, r *http.Request, status int, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")

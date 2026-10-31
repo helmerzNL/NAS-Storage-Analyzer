@@ -22,6 +22,7 @@
     { title: 'settings.data', parts: [
       { href: '/admin/shares', label: 'nav.shares', icon: 'shares', admin: true, on: (p) => p.startsWith('/admin/shares') },
       { href: '/admin/extensions', label: 'nav.extensions', icon: 'types', admin: true, on: (p) => p.startsWith('/admin/extensions') },
+      { href: '/admin/backup', label: 'nav.backup', icon: 'backup', admin: true, on: (p) => p.startsWith('/admin/backup') },
     ] },
     { title: 'settings.admin', parts: [
       { href: '/admin/users', label: 'nav.users', icon: 'users', admin: true, on: (p) => p.startsWith('/admin/users') },
