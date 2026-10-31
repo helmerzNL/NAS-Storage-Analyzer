@@ -2,60 +2,146 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base32"
 	"errors"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
+	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 )
 
+// env returns the first non-empty variable; a VAR_FILE variant (Docker
+// secrets) wins over VAR.
+func env(name, def string) string {
+	if f := os.Getenv(name + "_FILE"); f != "" {
+		if b, err := os.ReadFile(f); err == nil {
+			return strings.TrimSpace(string(b))
+		}
+	}
+	if v := os.Getenv(name); v != "" {
+		return v
+	}
+	return def
+}
+
+func envBool(name string) bool {
+	v := strings.ToLower(env(name, ""))
+	return v == "1" || v == "true" || v == "yes"
+}
+
+func runGenKey(args []string) error {
+	fmt.Println(secrets.GenerateKey())
+	return nil
+}
+
+func randomToken() string {
+	b := make([]byte, 15)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
+}
+
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	listen := fs.String("listen", "127.0.0.1:8080", "address to listen on")
-	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN)")
-	remote := fs.Bool("allow-unauthenticated-remote", false, "allow binding to a non-loopback address although the API has no authentication yet")
+	listen := fs.String("listen", env("NASA_LISTEN", ":8080"), "address to listen on (env NASA_LISTEN)")
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN, or NASA_DB_HOST/PORT/NAME/USER/PASSWORD)")
 	migrate := fs.Bool("migrate", true, "apply database migrations before serving")
 	stmtTimeout := fs.Duration("statement-timeout", 10*time.Second, "abort any database statement that runs longer")
-	maxConns := fs.Int("max-conns", 20, "maximum database connections")
+	maxConns := fs.Int("max-conns", 20, "maximum database connections for queries")
 	csvRows := fs.Int("csv-max-rows", 1_000_000, "maximum rows of one CSV export")
 	fs.Parse(args)
 
 	if *dsn == "" {
-		return errors.New("no database: pass -db or set NASA_DB_DSN")
+		return errors.New("no database: set NASA_DB_DSN or NASA_DB_HOST/NASA_DB_PASSWORD")
 	}
-	if err := api.CheckListenAddr(*listen, *remote); err != nil {
+	box, err := secrets.FromEnv()
+	if err != nil {
+		return err
+	}
+	proxies, err := api.ParseTrustedProxies(env("NASA_TRUSTED_PROXIES", ""))
+	if err != nil {
 		return err
 	}
 	log := newLogger()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	rw, err := store.Open(ctx, *dsn)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer rw.Close()
 	if *migrate {
-		st, err := store.Open(ctx, *dsn)
-		if err != nil {
-			return fmt.Errorf("connect: %w", err)
-		}
-		err = st.Migrate(ctx)
-		st.Close()
-		if err != nil {
+		if err := rw.Migrate(ctx); err != nil {
 			return err
 		}
 	}
-	pool, err := store.OpenReadOnly(ctx, *dsn, int32(*maxConns), *stmtTimeout)
+	ro, err := store.OpenReadOnly(ctx, *dsn, int32(*maxConns), *stmtTimeout)
 	if err != nil {
 		return fmt.Errorf("connect (read-only): %w", err)
 	}
-	defer pool.Close()
+	defer ro.Close()
+
+	svc := auth.NewService(rw.Pool, box, auth.DefaultConfig())
+	opts := api.Options{
+		Auth:           svc,
+		TrustedProxies: proxies,
+		SetupToken:     env("NASA_SETUP_TOKEN", ""),
+		MetricsToken:   env("NASA_METRICS_TOKEN", ""),
+		RequireHTTPS:   envBool("NASA_REQUIRE_HTTPS"),
+	}
+	if id := env("NASA_RP_ID", ""); id != "" {
+		opts.RP = auth.RelyingParty{ID: id, Name: env("NASA_RP_NAME", "NAS Storage Analyzer")}
+		for _, o := range strings.Split(env("NASA_RP_ORIGINS", ""), ",") {
+			if o = strings.TrimSpace(o); o != "" {
+				opts.RP.Origins = append(opts.RP.Origins, o)
+			}
+		}
+		if len(opts.RP.Origins) == 0 {
+			return errors.New("NASA_RP_ID is set but NASA_RP_ORIGINS is empty (for example https://nas.example.com)")
+		}
+	} else {
+		log.Warn("NASA_RP_ID is not set: passkeys are bound to the address used in the browser. Set NASA_RP_ID and NASA_RP_ORIGINS in production.")
+	}
+	if n, err := svc.UserCount(ctx); err != nil {
+		return err
+	} else if n == 0 {
+		if opts.SetupToken == "" {
+			opts.SetupToken = randomToken()
+		}
+		log.Warn("no account exists yet: open the web interface and create the first administrator",
+			"setup_token", opts.SetupToken)
+	}
+
+	go func() {
+		t := time.NewTicker(10 * time.Minute)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				if err := svc.Maintain(ctx); err != nil && ctx.Err() == nil {
+					log.Error("maintenance failed", "error", err)
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           api.New(pool, log, api.Config{CSVMaxRows: *csvRows}),
+		Handler:           api.New(ro, log, api.Config{CSVMaxRows: *csvRows}, opts),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -63,7 +149,7 @@ func runServe(args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("api listening", "addr", *listen, "unauthenticated", true)
+	log.Info("listening", "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
 	select {
 	case err := <-errc:
 		return err

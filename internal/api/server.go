@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	apispec "github.com/helmerznl/nas-storage-analyzer/api"
+	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/query"
 )
 
@@ -41,13 +42,16 @@ type Server struct {
 	cfg  Config
 	m    *metrics
 	mux  *http.ServeMux
+	auth *auth.Service
+	opts Options
 
 	catMu sync.Mutex
 	cats  map[int16]string
 }
 
-// New builds the API on top of a read-only pool.
-func New(pool *pgxpool.Pool, log *slog.Logger, cfg Config) *Server {
+// New builds the API on top of a read-only pool. Pass Options to require
+// sign-in; without them every endpoint is open (tests and benchmarks only).
+func New(pool *pgxpool.Pool, log *slog.Logger, cfg Config, opts ...Options) *Server {
 	if cfg.QueryTimeout <= 0 {
 		cfg.QueryTimeout = 15 * time.Second
 	}
@@ -59,6 +63,9 @@ func New(pool *pgxpool.Pool, log *slog.Logger, cfg Config) *Server {
 	}
 	q := query.New(pool)
 	s := &Server{q: q, pool: pool, log: log, cfg: cfg, mux: http.NewServeMux()}
+	if len(opts) > 0 {
+		s.opts, s.auth = opts[0], opts[0].Auth
+	}
 	s.m = newMetrics(q, pool, log)
 	s.routes()
 	return s
@@ -72,38 +79,55 @@ func (s *Server) now() time.Time {
 }
 
 func (s *Server) routes() {
-	h := func(pattern string, fn func(http.ResponseWriter, *http.Request) error) {
-		s.mux.HandleFunc(pattern, s.handle(fn))
+	h := func(pattern string, lv level, fn func(http.ResponseWriter, *http.Request) error) {
+		s.mux.HandleFunc(pattern, s.guard(lv, fn))
 	}
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte("ok\n"))
 	})
 	s.mux.HandleFunc("GET /readyz", s.ready)
-	s.mux.Handle("GET /metrics", promhttp.HandlerFor(s.m.reg, promhttp.HandlerOpts{}))
+	metrics := promhttp.HandlerFor(s.m.reg, promhttp.HandlerOpts{})
+	s.mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		if s.auth != nil && !s.metricsAllowed(r) {
+			w.Header().Set("WWW-Authenticate", "Bearer")
+			s.problemCode(w, r, http.StatusUnauthorized, "unauthorized", "Send the metrics token as a Bearer token.", "unauthenticated")
+			return
+		}
+		metrics.ServeHTTP(w, r)
+	})
 	s.mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
 		w.Write(apispec.Spec)
 	})
 
 	const v = "/api/v1"
-	h("GET "+v+"/shares", s.listShares)
-	h("GET "+v+"/shares/{share}", s.getShare)
-	h("GET "+v+"/shares/{share}/scans", s.listScans)
-	h("GET "+v+"/shares/{share}/scans/{scan}/errors", s.listScanErrors)
-	h("GET "+v+"/shares/{share}/categories", s.shareCategories)
-	h("GET "+v+"/shares/{share}/extensions", s.shareExtensions)
-	h("GET "+v+"/shares/{share}/dirs/{dir}", s.getDir)
-	h("GET "+v+"/shares/{share}/dirs/{dir}/children", s.dirChildren)
-	h("GET "+v+"/shares/{share}/dirs/{dir}/treemap", s.dirTreemap)
-	h("GET "+v+"/shares/{share}/files", s.listFiles)
-	h("GET "+v+"/shares/{share}/top/files", s.topFiles)
-	h("GET "+v+"/shares/{share}/top/dirs", s.topDirs)
-	h("GET "+v+"/shares/{share}/cold/files", s.coldFiles)
-	h("GET "+v+"/shares/{share}/cold/dirs", s.coldDirs)
-	h("GET "+v+"/search", s.search)
-	h("GET "+v+"/categories", s.listCategories)
-	h("GET "+v+"/extension-map", s.listExtensionMap)
+	h("GET "+v+"/shares", lvViewer, s.listShares)
+	h("GET "+v+"/shares/{share}", lvViewer, s.getShare)
+	h("GET "+v+"/shares/{share}/scans", lvViewer, s.listScans)
+	h("GET "+v+"/shares/{share}/scans/{scan}/errors", lvViewer, s.listScanErrors)
+	h("GET "+v+"/shares/{share}/categories", lvViewer, s.shareCategories)
+	h("GET "+v+"/shares/{share}/extensions", lvViewer, s.shareExtensions)
+	h("GET "+v+"/shares/{share}/dirs/{dir}", lvViewer, s.getDir)
+	h("GET "+v+"/shares/{share}/dirs/{dir}/children", lvViewer, s.dirChildren)
+	h("GET "+v+"/shares/{share}/dirs/{dir}/treemap", lvViewer, s.dirTreemap)
+	h("GET "+v+"/shares/{share}/files", lvViewer, s.listFiles)
+	h("GET "+v+"/shares/{share}/top/files", lvViewer, s.topFiles)
+	h("GET "+v+"/shares/{share}/top/dirs", lvViewer, s.topDirs)
+	h("GET "+v+"/shares/{share}/cold/files", lvViewer, s.coldFiles)
+	h("GET "+v+"/shares/{share}/cold/dirs", lvViewer, s.coldDirs)
+	h("GET "+v+"/search", lvViewer, s.search)
+	h("GET "+v+"/categories", lvViewer, s.listCategories)
+	h("GET "+v+"/extension-map", lvViewer, s.listExtensionMap)
+	if s.auth != nil {
+		s.authRoutes(h, v)
+	}
+	if s.opts.Static != nil {
+		s.mux.HandleFunc(v+"/", func(w http.ResponseWriter, r *http.Request) {
+			s.problemCode(w, r, http.StatusNotFound, "not found", "", "not_found")
+		})
+		s.mux.Handle("/", s.opts.Static)
+	}
 }
 
 // ServeHTTP wraps the router with request ids, panic recovery, logging and metrics.
@@ -233,6 +257,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 			"Narrow the filters (a smaller folder, a category, a size range) and try again.")
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
+	case s.authFail(w, r, err):
 	default:
 		s.log.Error("request failed", "request_id", requestID(r), "path", r.URL.Path, "error", err)
 		s.problem(w, r, http.StatusInternalServerError, "internal error", "")
@@ -240,10 +265,13 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 type problemBody struct {
-	Type      string `json:"type"`
-	Title     string `json:"title"`
-	Status    int    `json:"status"`
-	Detail    string `json:"detail,omitempty"`
+	Type   string `json:"type"`
+	Title  string `json:"title"`
+	Status int    `json:"status"`
+	Detail string `json:"detail,omitempty"`
+	// Code is a stable machine-readable reason (unauthenticated, mfa_required,
+	// enroll_required, forbidden, csrf, locked, ...) the UI switches on.
+	Code      string `json:"code,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 }
 

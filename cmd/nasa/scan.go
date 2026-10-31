@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -29,11 +31,25 @@ func newLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, nil))
 }
 
+// dsnFromEnv returns NASA_DB_DSN, or builds a connection string from
+// NASA_DB_HOST, _PORT, _NAME, _USER, _PASSWORD (or _PASSWORD_FILE) and
+// _SSLMODE, which suits Docker Compose with a secret for the password.
 func dsnFromEnv() string {
 	if v := os.Getenv("NASA_DB_DSN"); v != "" {
 		return v
 	}
-	return ""
+	pass := env("NASA_DB_PASSWORD", "")
+	if pass == "" && os.Getenv("NASA_DB_HOST") == "" {
+		return ""
+	}
+	u := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(env("NASA_DB_USER", "nasa"), pass),
+		Host:     net.JoinHostPort(env("NASA_DB_HOST", "db"), env("NASA_DB_PORT", "5432")),
+		Path:     "/" + env("NASA_DB_NAME", "nasa"),
+		RawQuery: "sslmode=" + env("NASA_DB_SSLMODE", "disable"),
+	}
+	return u.String()
 }
 
 func runMigrate(args []string) error {

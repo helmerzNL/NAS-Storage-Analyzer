@@ -5,19 +5,20 @@ import (
 	"testing"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
 )
 
 var rp = auth.RelyingParty{ID: "nas.example.test", Name: "NAS", Origins: []string{"https://nas.example.test"}}
 
 const origin = "https://nas.example.test"
 
-func registerPasskey(t *testing.T, s *auth.Service, u *auth.User, va *virtualAuthenticator, name string) {
+func registerPasskey(t *testing.T, s *auth.Service, u *auth.User, va *ts.VirtualAuthenticator, name string) {
 	t.Helper()
 	creation, id, err := s.BeginPasskeyRegistration(ctx, rp, u)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.FinishPasskeyRegistration(ctx, rp, u, id, name, va.create(creation, origin)); err != nil {
+	if err := s.FinishPasskeyRegistration(ctx, rp, u, id, name, va.Create(creation, origin)); err != nil {
 		t.Fatalf("register: %v", err)
 	}
 }
@@ -25,7 +26,7 @@ func registerPasskey(t *testing.T, s *auth.Service, u *auth.User, va *virtualAut
 func TestPasskeyRegistrationAndManagement(t *testing.T) {
 	s, _ := newService(t)
 	u := mustAdmin(t, s, "alice")
-	va := newVirtualAuthenticator()
+	va := ts.NewVirtualAuthenticator()
 	registerPasskey(t, s, u, va, "Laptop")
 	list, err := s.ListPasskeys(ctx, u.ID)
 	if err != nil || len(list) != 1 || list[0].Name != "Laptop" {
@@ -53,7 +54,7 @@ func TestPasskeyRegistrationAndManagement(t *testing.T) {
 		t.Errorf("last factor deleted: %v", err)
 	}
 	// With a second passkey the first can go.
-	registerPasskey(t, s, u, newVirtualAuthenticator(), "Telefoon")
+	registerPasskey(t, s, u, ts.NewVirtualAuthenticator(), "Telefoon")
 	u, _ = s.GetUser(ctx, u.ID)
 	if err := s.DeletePasskey(ctx, u, list[0].ID); err != nil {
 		t.Errorf("delete: %v", err)
@@ -69,7 +70,7 @@ func TestPasskeyRegistrationAndManagement(t *testing.T) {
 func TestPasskeyAsSecondFactor(t *testing.T) {
 	s, _ := newService(t)
 	u := mustAdmin(t, s, "alice")
-	va := newVirtualAuthenticator()
+	va := ts.NewVirtualAuthenticator()
 	registerPasskey(t, s, u, va, "Laptop")
 	u, _ = s.GetUser(ctx, u.ID)
 
@@ -80,25 +81,25 @@ func TestPasskeyAsSecondFactor(t *testing.T) {
 	if len(assertion.Response.AllowedCredentials) != 1 {
 		t.Errorf("allowed credentials = %v", assertion.Response.AllowedCredentials)
 	}
-	if err := s.FinishPasskeySecondFactor(ctx, rp, u, id, va.get(assertion, origin)); err != nil {
+	if err := s.FinishPasskeySecondFactor(ctx, rp, u, id, va.Get(assertion, origin)); err != nil {
 		t.Fatalf("second factor: %v", err)
 	}
 	// The ceremony is single use.
-	if err := s.FinishPasskeySecondFactor(ctx, rp, u, id, va.get(assertion, origin)); err == nil {
+	if err := s.FinishPasskeySecondFactor(ctx, rp, u, id, va.Get(assertion, origin)); err == nil {
 		t.Error("ceremony reused")
 	}
 	// A passkey of another user does not satisfy this user's check.
 	bob, _ := s.CreateUser(ctx, "bob", "", goodPW, "viewer")
-	registerPasskey(t, s, bob, newVirtualAuthenticator(), "Bob")
+	registerPasskey(t, s, bob, ts.NewVirtualAuthenticator(), "Bob")
 	a2, id2, _ := s.BeginPasskeySecondFactor(ctx, rp, u)
-	bobVA := newVirtualAuthenticator()
-	if err := s.FinishPasskeySecondFactor(ctx, rp, u, id2, bobVA.get(a2, origin)); err == nil {
+	bobVA := ts.NewVirtualAuthenticator()
+	if err := s.FinishPasskeySecondFactor(ctx, rp, u, id2, bobVA.Get(a2, origin)); err == nil {
 		t.Error("unknown authenticator accepted")
 	}
 	// A ceremony started for one user cannot be finished as another.
 	bob, _ = s.GetUser(ctx, bob.ID)
 	a3, id3, _ := s.BeginPasskeySecondFactor(ctx, rp, u)
-	if err := s.FinishPasskeySecondFactor(ctx, rp, bob, id3, va.get(a3, origin)); err == nil {
+	if err := s.FinishPasskeySecondFactor(ctx, rp, bob, id3, va.Get(a3, origin)); err == nil {
 		t.Error("ceremony finished as another user")
 	}
 	// A user without passkeys gets a clear error.
@@ -110,7 +111,7 @@ func TestPasskeyAsSecondFactor(t *testing.T) {
 func TestPasswordlessPasskeyLogin(t *testing.T) {
 	s, _ := newService(t)
 	u := mustAdmin(t, s, "alice")
-	va := newVirtualAuthenticator()
+	va := ts.NewVirtualAuthenticator()
 	registerPasskey(t, s, u, va, "Laptop")
 
 	assertion, id, err := s.BeginPasskeyLogin(ctx, rp)
@@ -120,12 +121,12 @@ func TestPasswordlessPasskeyLogin(t *testing.T) {
 	if len(assertion.Response.AllowedCredentials) != 0 {
 		t.Error("a discoverable login must not list credentials (it would reveal usernames)")
 	}
-	got, err := s.FinishPasskeyLogin(ctx, rp, id, va.get(assertion, origin))
+	got, err := s.FinishPasskeyLogin(ctx, rp, id, va.Get(assertion, origin))
 	if err != nil || got.Username != "alice" {
 		t.Fatalf("passkey login: %v %v", got, err)
 	}
 	// Replay of the same ceremony fails.
-	if _, err := s.FinishPasskeyLogin(ctx, rp, id, va.get(assertion, origin)); err == nil {
+	if _, err := s.FinishPasskeyLogin(ctx, rp, id, va.Get(assertion, origin)); err == nil {
 		t.Error("ceremony replayed")
 	}
 	// A disabled account cannot sign in this way either.
@@ -135,7 +136,7 @@ func TestPasswordlessPasskeyLogin(t *testing.T) {
 		t.Fatal(err)
 	}
 	a2, id2, _ := s.BeginPasskeyLogin(ctx, rp)
-	if _, err := s.FinishPasskeyLogin(ctx, rp, id2, va.get(a2, origin)); err == nil {
+	if _, err := s.FinishPasskeyLogin(ctx, rp, id2, va.Get(a2, origin)); err == nil {
 		t.Error("disabled user signed in with a passkey")
 	}
 }
@@ -146,35 +147,35 @@ func TestPasskeyRejectsWrongOriginAndMissingUserVerification(t *testing.T) {
 
 	// Registration from a phishing origin.
 	creation, id, _ := s.BeginPasskeyRegistration(ctx, rp, u)
-	if err := s.FinishPasskeyRegistration(ctx, rp, u, id, "x", newVirtualAuthenticator().create(creation, "https://evil.example")); err == nil {
+	if err := s.FinishPasskeyRegistration(ctx, rp, u, id, "x", ts.NewVirtualAuthenticator().Create(creation, "https://evil.example")); err == nil {
 		t.Error("registration accepted from another origin")
 	}
 	// An authenticator that does not verify the user (no PIN / biometrics).
-	noUV := newVirtualAuthenticator()
-	noUV.uv = false
+	noUV := ts.NewVirtualAuthenticator()
+	noUV.UV = false
 	creation, id, _ = s.BeginPasskeyRegistration(ctx, rp, u)
-	if err := s.FinishPasskeyRegistration(ctx, rp, u, id, "x", noUV.create(creation, origin)); err == nil {
+	if err := s.FinishPasskeyRegistration(ctx, rp, u, id, "x", noUV.Create(creation, origin)); err == nil {
 		t.Error("registered a passkey without user verification")
 	}
 	// Login from the wrong origin.
-	va := newVirtualAuthenticator()
+	va := ts.NewVirtualAuthenticator()
 	registerPasskey(t, s, u, va, "Laptop")
 	assertion, lid, _ := s.BeginPasskeyLogin(ctx, rp)
-	if _, err := s.FinishPasskeyLogin(ctx, rp, lid, va.get(assertion, "https://evil.example")); err == nil {
+	if _, err := s.FinishPasskeyLogin(ctx, rp, lid, va.Get(assertion, "https://evil.example")); err == nil {
 		t.Error("login accepted from another origin")
 	}
 	// Login with a signature over a different challenge.
 	a1, lid1, _ := s.BeginPasskeyLogin(ctx, rp)
 	a2, _, _ := s.BeginPasskeyLogin(ctx, rp)
-	if _, err := s.FinishPasskeyLogin(ctx, rp, lid1, va.get(a2, origin)); err == nil {
+	if _, err := s.FinishPasskeyLogin(ctx, rp, lid1, va.Get(a2, origin)); err == nil {
 		t.Error("login accepted with a response to another challenge")
 	}
 	_ = a1
 	// A passkey login that does not verify the user is refused: that is what
 	// makes one passkey as strong as password plus second factor.
-	va.uv = false
+	va.UV = false
 	a3, lid3, _ := s.BeginPasskeyLogin(ctx, rp)
-	if _, err := s.FinishPasskeyLogin(ctx, rp, lid3, va.get(a3, origin)); err == nil {
+	if _, err := s.FinishPasskeyLogin(ctx, rp, lid3, va.Get(a3, origin)); err == nil {
 		t.Error("passwordless login accepted without user verification")
 	}
 }

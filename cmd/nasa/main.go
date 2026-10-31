@@ -13,7 +13,8 @@ Usage:
   nasa <command> [flags]
 
 Commands:
-  serve     run the read-only REST API (no authentication yet: loopback only)
+  serve     run the web interface and REST API
+  genkey    print a new encryption key for NASA_ENCRYPTION_KEY
   migrate   apply database migrations and seed default categories
   scan      scan a directory tree (read-only) and store the result
   recategorize  apply the current extension mapping to stored files (no rescan)
@@ -28,6 +29,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "genkey":
+		err = runGenKey(os.Args[2:])
 	case "serve":
 		err = runServe(os.Args[2:])
 	case "migrate":

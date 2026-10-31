@@ -315,3 +315,8 @@ func (s *Service) ResetSecondFactors(ctx context.Context, id int64) error {
 	}
 	return tx.Commit(ctx)
 }
+
+// CheckPassword verifies a user's current password (for sensitive changes).
+func (s *Service) CheckPassword(u *User, password string) bool {
+	return u.passwordHash != nil && VerifyPassword(password, *u.passwordHash)
+}

@@ -499,3 +499,19 @@ func (s *Service) AuditPage(ctx context.Context, before int64, limit int, action
 func randEncode(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 func randDecode(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) }
+
+// CheckIPLocked returns a *LockedError while a client address is locked out.
+func (s *Service) CheckIPLocked(ctx context.Context, ip string) error {
+	until, err := s.lockedUntil(ctx, "ip", ip, s.cfg.IPFailLimit)
+	if err != nil {
+		return err
+	}
+	if !until.IsZero() {
+		return &LockedError{Until: until}
+	}
+	return nil
+}
+
+// RecordIPFailure counts a failed attempt that has no user (a wrong setup
+// token, a failed passwordless passkey login).
+func (s *Service) RecordIPFailure(ctx context.Context, ip string) { s.recordFailure(ctx, "ip", ip) }
