@@ -312,6 +312,10 @@ from the scan. At most 2,000 files per script. Where your machines see the share
 the share form) and can be changed when the script is made. Files that cannot be addressed safely (odd characters, names Windows cannot open, names
 that differ only in case) are left out and listed in the script. See [ADR 0006](docs/adr/0006-delete-scripts.md).
 
+**Factory reset.** *Settings → System → Factory reset* (administrators) puts the installation back to new: every table of the database is emptied (accounts, shares with their scan data, edited file types, the audit log) and the
+setup wizard starts again. A session is not enough: you type `RESET` and prove who you are again, with a passkey or with your password and a code. It is refused while a scan runs, needs no restart, and leaves the environment
+(including `NASA_ENCRYPTION_KEY`) and the files on your NAS alone. Make a backup first if you are unsure. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
+
 **Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and Settings → System with *Check now*).
 It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,
 no user data) and never updates anything; switch it off with `NASA_UPDATE_CHECK=false`. A beta build is only told about stable releases.

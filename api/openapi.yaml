@@ -1070,6 +1070,46 @@ paths:
       responses:
         "204": {description: Dismissed.}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/system/reset:
+    get:
+      tags: [admin]
+      operationId: factoryResetInfo
+      summary: What the factory-reset form needs (administrator)
+      description: The word the administrator has to type (defined here, in one place) and which fresh proofs this person can give, so the form shows only the fields that apply. Changes nothing.
+      responses:
+        "200": {description: The word and the proofs., content: {application/json: {schema: {$ref: "#/components/schemas/ResetInfo"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [admin]
+      operationId: factoryReset
+      summary: Wipe the whole installation (administrator, with a fresh proof)
+      description: |
+        Deletes **everything the installation keeps in its database**: every account (the caller's too, who is signed out), every password, passkey and second factor, every
+        share with its scan data and history, the file types that were edited (the defaults come back), the audit log, work in progress and waiting backups. Afterwards the
+        application is a new installation and the setup wizard starts again. What stays lives outside the database: the environment variables (including
+        `NASA_ENCRYPTION_KEY`), the image, the host folder `DATA_PATH` itself, and the files on the NAS, which are only ever read.
+
+        A session is **not enough**. The body carries the word (`phrase`) and a fresh proof of who is asking: either the `password` with a `code` of the authenticator app (or a
+        `recovery_code`), or a `passkey` (the answer to the challenge of `POST /api/v1/system/reset/passkey`, with its `ceremony`). A wrong word wipes nothing and is not a failed
+        attempt; a wrong password, code or passkey counts toward the same lockout as signing in. It is refused with `409 busy` while a scan is queued or running. Everything is
+        one transaction: if anything fails, nothing is wiped. The audit log goes with the database, so the only record is one warning in the process log with the numbers of rows removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ResetRequest"}
+      responses:
+        "200": {description: Wiped., content: {application/json: {schema: {$ref: "#/components/schemas/ResetResult"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/system/reset/passkey:
+    post:
+      tags: [admin]
+      operationId: factoryResetPasskeyChallenge
+      summary: A one-time challenge for confirming a factory reset with a passkey (administrator)
+      description: The challenge is stored for this person and works once. A challenge that was not issued to the person who answers, one that has been used, and the passkey of somebody else are refused.
+      responses:
+        "200": {description: "WebAuthn request options for `navigator.credentials.get`.", content: {application/json: {schema: {$ref: "#/components/schemas/WebAuthnChallenge"}}}}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/history:
     get:
       tags: [lists]
@@ -1235,7 +1275,7 @@ components:
         title: {type: string}
         status: {type: integer}
         detail: {type: string}
-        code: {type: string, description: "Stable reason, for example unauthenticated, mfa_required, enroll_required, forbidden, csrf, locked, invalid_request, conflict, already_active, busy, no_data, no_stage, already_running, backup_not_backup, backup_newer, backup_invalid, backup_too_many, backup_too_big."}
+        code: {type: string, description: "Stable reason, for example unauthenticated, mfa_required, enroll_required, forbidden, csrf, locked, invalid_request, conflict, already_active, busy, no_data, no_stage, already_running, backup_not_backup, backup_newer, backup_invalid, backup_too_many, backup_too_big, reset_phrase, reauth_required."}
         field: {type: string, description: "The form field a validation error is about; for a backup file, where in the file (for example `shares[2].cron`)."}
         params: {type: object, additionalProperties: {type: string}, description: "Values a message needs (a version, a limit), for the screen to put in a sentence in the reader's language."}
         request_id: {type: string}
@@ -1623,6 +1663,36 @@ components:
         started_by: {type: string}
         started_at: {type: string, format: date-time}
         finished_at: {type: string, format: date-time, nullable: true}
+    ResetInfo:
+      type: object
+      required: [phrase, methods, scans_active]
+      properties:
+        phrase: {type: string, description: "The word to type.", example: RESET}
+        methods:
+          type: object
+          required: [password_and_code, recovery, passkey]
+          properties:
+            password_and_code: {type: boolean, description: "The password and a code of the authenticator app. A password alone is never enough."}
+            recovery: {type: boolean, description: "Unused recovery codes are left, so the code can be one of those."}
+            passkey: {type: boolean, description: "A passkey proves it alone."}
+        scans_active: {type: boolean, description: "A scan is queued or running: a reset is refused until it is done or cancelled."}
+    ResetRequest:
+      type: object
+      required: [phrase]
+      properties:
+        phrase: {type: string, description: "The word from `GET /api/v1/system/reset`, typed by the administrator."}
+        password: {type: string}
+        code: {type: string, description: "A code of the authenticator app."}
+        recovery_code: {type: string}
+        ceremony: {type: string, description: "The `ceremony` of the passkey challenge."}
+        passkey: {type: object, description: "The JSON form of the PublicKeyCredential that answers the challenge."}
+    ResetResult:
+      type: object
+      required: [reset, restarting, setup_token_configured]
+      properties:
+        reset: {type: boolean}
+        restarting: {type: boolean, description: "Always false: everything this installation keeps is in the database, and the running process picks the empty one up by itself. Nothing needs a restart policy."}
+        setup_token_configured: {type: boolean, description: "True when `NASA_SETUP_TOKEN` is set, which then stays the token of the setup wizard. False: a new token was made and written to the application log."}
     AuthStatus:
       type: object
       required: [setup_required, authenticated, min_password_length, https_required]

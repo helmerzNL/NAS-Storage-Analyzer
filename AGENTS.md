@@ -168,6 +168,10 @@ A pull request that raises a size, rate or timeout limit states the new value as
   (`internal/backup`, [ADR 0007](docs/adr/0007-in-app-backup-restore.md)): the file never holds anything that unlocks the application (no credential, session, invitation, account or role; an SMB password
   only as the ciphertext sealed with the key in the environment), and a file is refused whole rather than partly accepted; the restore is one transaction run by the server as a job; and **a new table
   or a new `shares` column is classified in `backup.Tables` / `backup.ShareColumns` in the same change**, with a seed and a round-trip test if the owner enters it (a test fails when it is not).
+- **The factory reset follows App-Guidance's [`factory-reset.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/factory-reset.md)**
+  (`internal/reset`, [ADR 0008](docs/adr/0008-factory-reset.md)): administrators only; the request carries the typed word **and** a fresh proof (a passkey, or the password with a code; never a password alone), wrong proofs
+  count against the sign-in lockout; it empties **every table** found in the catalog (not a list), in one transaction, refused while a scan runs; the only record is one log line with counts and no contents.
+  **A new table needs no change here, but `internal/reset`'s test must fill it** (it fails until it does), and a feature that keeps state outside the database has to be reached by the wipe.
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
   the installation; it never updates anything; and `NASA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.

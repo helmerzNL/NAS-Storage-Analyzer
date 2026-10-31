@@ -921,6 +921,75 @@ const expectText = async (page, sel, re, msg) => {
       await page.evaluate(() => { document.documentElement.style.removeProperty('--accent'); document.documentElement.style.removeProperty('--on-accent'); document.documentElement.dataset.theme = 'light'; });
     });
 
+    await step('factory reset: warned before any field, proved again, a last warning, then a new installation', async () => {
+      await page.goto(BASE + '/admin/system');
+      await page.waitForSelector('[data-testid=system-reset]');
+      // Rarely used and destructive: the card is folded, and a person who unfolds it meets the warning before any field.
+      if ((await page.getAttribute('[data-testid=fold-reset]', 'aria-expanded')) !== 'false') throw new Error('the reset card is not folded by default');
+      if (await page.isVisible('[data-testid=reset-phrase]')) throw new Error('the form shows while the card is folded');
+      await page.click('[data-testid=fold-reset]');
+      await page.waitForSelector('[data-testid=reset-phrase]');
+      const order = await page.evaluate(() => {
+        const w = document.querySelector('[data-testid=reset-warning]'), f = document.querySelector('[data-testid=reset-phrase]');
+        return !!(w && f && (w.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING));
+      });
+      if (!order) throw new Error('the warning does not come before the first field');
+      const warning = await page.textContent('[data-testid=reset-warning]');
+      for (const must of [/niet ongedaan/, /die van jou ook/, /Je wordt uitgelogd/, /NASA_ENCRYPTION_KEY/, /Een herstart is niet nodig/]) if (!must.test(warning)) throw new Error('the warning does not say ' + must);
+      if (!(await page.$('a[href="/admin/backup"]'))) throw new Error('no way to a backup first');
+      // The word comes from the server, and only the fields that apply to this person are shown (a password with a code, and a passkey).
+      if (!/RESET/.test(await page.textContent('[data-testid=system-reset] label'))) throw new Error('the word is not shown');
+      for (const id of ['reset-password', 'reset-code', 'reset-submit', 'reset-passkey']) if (!(await page.$(`[data-testid=${id}]`))) throw new Error('no field ' + id);
+      if (!(await page.$('[data-testid=reset-submit][disabled]')) || !(await page.$('[data-testid=reset-passkey][disabled]'))) throw new Error('the buttons work before the word is typed');
+      await shot('42-reset-form');
+
+      // A wrong password goes to the server, is refused there and wipes nothing; a last warning comes first, and cancelling it sends nothing.
+      await page.fill('[data-testid=reset-phrase]', 'RESET');
+      await page.fill('[data-testid=reset-password]', 'dit-is-niet-het-wachtwoord');
+      await page.fill('[data-testid=reset-code]', '123456');
+      await page.click('[data-testid=reset-submit]');
+      await page.waitForSelector('[data-testid=reset-last-confirm]');
+      await shot('43-reset-last-warning');
+      await page.click('[data-testid=reset-last-cancel]');
+      await page.waitForSelector('[data-testid=reset-last-confirm]', { state: 'hidden' });
+      await page.click('[data-testid=reset-submit]');
+      await page.click('[data-testid=reset-last-confirm]');
+      await expectText(page, '[data-testid=reset-error]', /wachtwoord|code/i, 'a wrong password at the reset');
+      const still = await page.evaluate(async () => (await fetch('/api/v1/shares')).status);
+      if (still !== 200) throw new Error('a refused reset signed the person out or wiped something: ' + still);
+
+      // The right way: a passkey signs the challenge, then the last warning, then everything goes and the installation starts over.
+      await page.fill('[data-testid=reset-phrase]', 'RESET');
+      await page.click('[data-testid=reset-passkey]');
+      await page.waitForSelector('[data-testid=reset-last-confirm]');
+      await page.click('[data-testid=reset-last-confirm]');
+      await page.waitForSelector('[data-testid=reset-done]');
+      // No restart: the page reloads by itself and finds a new installation, asking for the setup token.
+      await page.waitForSelector('[data-testid=setup-token]', { timeout: 15000 });
+      const status = await page.evaluate(async () => (await fetch('/api/v1/auth/status')).json());
+      if (!status.setup_required || status.authenticated) throw new Error('the application did not start over: ' + JSON.stringify(status));
+      await shot('44-after-reset');
+      // The log is the one record, and says counts: it holds the new setup token (made up, since none was configured) and no secret.
+      const log = fs.readFileSync(process.env.SERVE_LOG, 'utf8');
+      const tokens = [...log.matchAll(/"setup_token":"([^"]+)"/g)].map((m) => m[1]);
+      if (tokens.length < 2 || tokens.at(-1) === TOKEN) throw new Error('no new setup token in the log: ' + tokens);
+      const resetLine = log.split('\n').find((l) => l.includes('factory reset'));
+      if (!resetLine || !/"by":"helmer"/.test(resetLine) || !/"users":\d/.test(resetLine)) throw new Error('the record of the reset: ' + resetLine);
+      for (const secretValue of [PASSWORD, secret, ...codes]) if (secretValue && log.includes(secretValue)) throw new Error('a secret is in the log');
+      // The old token means nothing; the new one makes a new owner, with nothing of the old installation left.
+      await page.fill('[data-testid=setup-token]', TOKEN);
+      await page.fill('[data-testid=setup-username]', 'nieuw');
+      await page.fill('[data-testid=setup-password]', PASSWORD);
+      await page.fill('[data-testid=setup-confirm]', PASSWORD);
+      await page.click('[data-testid=setup-submit]');
+      await expectText(page, '[data-testid=auth-error]', /setup-token|setup token/i, 'the old setup token');
+      await page.fill('[data-testid=setup-token]', tokens.at(-1));
+      await page.click('[data-testid=setup-submit]');
+      await page.waitForSelector('text=Authenticator-app instellen');   // the first account of a new installation must enrol a second factor again
+      const owner = await page.evaluate(async () => (await (await fetch('/api/v1/auth/status')).json()).user?.username);
+      if (owner !== 'nieuw') throw new Error('the new owner is ' + owner);
+    });
+
     await step('no JavaScript errors occurred', async () => { if (errors.length) throw new Error(errors.join('\n')); });
   } catch (e) {
     await shot('failure').catch(() => {});

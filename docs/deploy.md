@@ -397,6 +397,25 @@ docker compose up -d
   [`operations.md` §6](operations.md#6-limits-that-live-outside-the-repository); de standaard van nginx, 1 MiB, volstaat voor een gewone back-up). Het bestand staat tot je bevestigt hooguit een uur in de database.
 * Wat er gebeurt staat in het auditlog (`backup.create`, `backup.restore.start`, `backup.restore`, `backup.restore.failed`), met aantallen en zonder inhoud.
 
+### Fabrieksreset: weer een nieuwe installatie
+
+*Instellingen → Systeem → Fabrieksreset* (alleen beheerders; de kaart is standaard opgevouwen) verwijdert **alles wat de installatie in de database bewaart** en laat de installatiewizard opnieuw beginnen. Handig na een
+mislukte inrichting, of voordat je een server aan iemand anders geeft. Je hoeft er geen mappen voor te verwijderen.
+
+* **Wat verdwijnt:** elk account (ook dat van jou; je wordt uitgelogd) met wachtwoorden, passkeys, tweede factoren en herstelcodes, alle shares met hun scangegevens en geschiedenis, de bestandstypen die je hebt
+  aangepast (de standaard komt terug), het auditlog, uitnodigingen en back-ups die op bevestiging wachtten. Het zijn **alle tabellen** van de database; een tabel die een latere versie toevoegt gaat vanzelf mee.
+* **Wat blijft:** de omgevingsvariabelen (ook `NASA_ENCRYPTION_KEY`), het image, de map `DATA_PATH` zelf en de bestanden op je NAS: de scanner leest alleen en wijzigt niets.
+* **Je moet het bewijzen, opnieuw:** een sessie is niet genoeg. Je typt het woord (`RESET`) **en** bewijst dat jij het bent, met een passkey, of met je wachtwoord plus een code uit je authenticator-app (of een
+  herstelcode). Een wachtwoord alleen is nooit genoeg. Foute pogingen tellen mee voor dezelfde vergrendeling als inloggen. Daarna volgt nog een laatste waarschuwing.
+* **Geen herstart nodig:** alles wat de installatie bewaart staat in PostgreSQL en de sleutel staat in je `.env`, dus het draaiende proces gebruikt de lege database meteen. Er is geen herstartbeleid voor nodig. De pagina
+  laadt opnieuw en je ziet de wizard.
+* **Het setup-token:** heb je `NASA_SETUP_TOKEN` ingesteld, dan blijft dat het token. Anders maakt de reset een **nieuw** token en schrijft het in het logboek van de app (`docker compose logs app`), net als bij de
+  eerste start; het oude is ongeldig.
+* **Het wordt geweigerd zolang er een scan in de wachtrij staat of loopt.** Annuleer of wacht eerst.
+* **Het enige spoor** is één waarschuwing in het logboek van de app (wie, vanaf welk adres, hoeveel tabellen en rijen), want het auditlog verdwijnt mee. Er staat nooit inhoud of een geheim in.
+* **Twijfel je? Maak eerst een back-up** (*Instellingen → Back-up*): die bewaart je shares, bestandstypen en voorkeuren, niet je accounts. Voor de hele database gebruik je `pg_dump` hierboven.
+* **Alle toegang kwijt?** Dan kun je de reset niet gebruiken (die vraagt een bewijs). Stop de stack, maak `DATA_PATH/postgres` leeg en start opnieuw: dat is dezelfde nieuwe installatie.
+
 ## 6. PostgreSQL afstellen
 
 De queries op de voorberekende aggregaten zijn snel zodra de actieve gegevens in het geheugen passen. Richtlijn:
@@ -599,6 +618,10 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   name (not an IP address) and https.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` stored separately. Without the key the
   stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
+* **Factory reset:** *Settings → System → Factory reset* (administrators; folded by default) deletes **every table** of the database (accounts, including yours, shares with their scan data, edited file types, the audit
+  log, invitations, waiting backups) and starts the setup wizard again; the environment (including `NASA_ENCRYPTION_KEY`), the image, `DATA_PATH` itself and the files on the NAS stay. A session is not enough: you type
+  `RESET` and prove who you are again with a passkey, or with the password and a code (a wrong proof counts against the sign-in lockout). Refused while a scan is queued or running. No restart is needed. A configured
+  `NASA_SETUP_TOKEN` stays; otherwise a new token is written to the app log. The only record is one warning in the app log (counts, never contents). Make a backup first if you are unsure.
 * **Backup in the app:** *Settings → Backup* downloads everything you entered (shares, file types, everyone's display preferences) as one small JSON file and restores it.
   The file never holds a password, passkey, authenticator secret, recovery code, session, account or role, and not the audit log; an SMB password is in it only as the ciphertext sealed
   with `NASA_ENCRYPTION_KEY`, which is not in the file. Scan results are not in it: scan again after a restore. It does **not** replace `pg_dump` (§5). A restore is checked first

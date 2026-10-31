@@ -30,6 +30,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
+	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
@@ -96,8 +97,18 @@ func validateExchange(t *testing.T, method, rawURL string, reqBody []byte, reqHd
 	}
 }
 
+// syncBuf is a log destination a test can read while the server writes to it.
+type syncBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuf) Write(p []byte) (int, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.b.Write(p) }
+func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(); return s.b.String() }
+
 type authEnv struct {
 	t    *testing.T
+	logs *syncBuf // what the server logged
 	st   *store.Store
 	svc  *auth.Service
 	srv  *httptest.Server
@@ -119,18 +130,20 @@ func newAuthEnv(t *testing.T, mut func(*api.Options)) *authEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(ro.Close)
+	logs := &syncBuf{}
+	logger := slog.New(slog.NewTextHandler(logs, nil))
 	queue := jobs.NewQueue(st.Pool)
 	sharesSvc := shares.NewService(st.Pool, box, shares.Options{}, time.UTC)
 	opts := api.Options{Auth: svc, SetupToken: "setup-token-123", Queue: queue, Shares: sharesSvc,
-		Backup:  backup.New(st.Pool, sharesSvc, svc, queue, nil, "0.0.0"),
+		Backup: backup.New(st.Pool, sharesSvc, svc, queue, nil, "0.0.0"), Reset: reset.New(st.Pool, logger),
 		Updates: updates.New("0.0.0", false, nil)} // switched off: no test reaches out to GitHub unless it brings its own checker
 	if mut != nil {
 		mut(&opts)
 	}
-	h := api.New(ro, slog.New(slog.NewTextHandler(io.Discard, nil)), api.Config{}, opts)
+	h := api.New(ro, logger, api.Config{}, opts)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &authEnv{t: t, st: st, svc: svc, srv: srv, opts: opts, routes: h.Routes}
+	return &authEnv{t: t, logs: logs, st: st, svc: svc, srv: srv, opts: opts, routes: h.Routes}
 }
 
 // client is a browser-like HTTP client: it keeps cookies and the CSRF token.

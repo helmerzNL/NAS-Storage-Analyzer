@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"errors"
 	"flag"
 	"fmt"
@@ -18,6 +16,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
@@ -61,14 +60,6 @@ func location() (*time.Location, error) {
 func runGenKey(args []string) error {
 	fmt.Println(secrets.GenerateKey())
 	return nil
-}
-
-func randomToken() string {
-	b := make([]byte, 15)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
 }
 
 func runServe(args []string) error {
@@ -129,18 +120,20 @@ func runServe(args []string) error {
 	}
 	sharesSvc := shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc)
 	opts := api.Options{
-		Backup:         backup.New(rw.Pool, sharesSvc, svc, queue, log, version),
-		Updates:        checker,
-		PublicURL:      env("NASA_PUBLIC_URL", ""),
-		Auth:           svc,
-		Shares:         sharesSvc,
-		Queue:          queue,
-		SharesRoot:     sharesRoot,
-		Static:         webui.Handler(),
-		TrustedProxies: proxies,
-		SetupToken:     env("NASA_SETUP_TOKEN", ""),
-		MetricsToken:   env("NASA_METRICS_TOKEN", ""),
-		RequireHTTPS:   envBool("NASA_REQUIRE_HTTPS"),
+		Backup:          backup.New(rw.Pool, sharesSvc, svc, queue, log, version),
+		Updates:         checker,
+		PublicURL:       env("NASA_PUBLIC_URL", ""),
+		Auth:            svc,
+		Shares:          sharesSvc,
+		Queue:           queue,
+		SharesRoot:      sharesRoot,
+		Static:          webui.Handler(),
+		TrustedProxies:  proxies,
+		SetupToken:      env("NASA_SETUP_TOKEN", ""),
+		SetupTokenFixed: env("NASA_SETUP_TOKEN", "") != "",
+		Reset:           reset.New(rw.Pool, log),
+		MetricsToken:    env("NASA_METRICS_TOKEN", ""),
+		RequireHTTPS:    envBool("NASA_REQUIRE_HTTPS"),
 	}
 	if id := env("NASA_RP_ID", ""); id != "" {
 		opts.RP = auth.RelyingParty{ID: id, Name: env("NASA_RP_NAME", "NAS Storage Analyzer")}
@@ -159,7 +152,7 @@ func runServe(args []string) error {
 		return err
 	} else if n == 0 {
 		if opts.SetupToken == "" {
-			opts.SetupToken = randomToken()
+			opts.SetupToken = auth.NewSetupToken()
 		}
 		log.Warn("no account exists yet: open the web interface and create the first administrator",
 			"setup_token", opts.SetupToken)

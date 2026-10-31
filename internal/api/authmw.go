@@ -15,6 +15,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 )
@@ -33,6 +34,9 @@ type Options struct {
 	// SetupToken must be presented by the setup wizard to create the first
 	// administrator, so that whoever reaches a fresh install first cannot take it.
 	SetupToken string
+	// SetupTokenFixed is true when the token was configured (NASA_SETUP_TOKEN) and not made up at start. After a factory reset a configured token
+	// stays; one that was made up is replaced, because the log it was printed in may have been read by the previous owner.
+	SetupTokenFixed bool
 	// MetricsToken is the bearer token for /metrics. Without one, /metrics is
 	// served to loopback clients only.
 	MetricsToken string
@@ -54,6 +58,8 @@ type Options struct {
 	Updates *updates.Checker
 	// Backup makes and restores the backup file from the settings screen (nil: the routes are not registered).
 	Backup *backup.Service
+	// Reset wipes the installation on an administrator's request (nil: the routes are not registered).
+	Reset *reset.Service
 }
 
 // ParseTrustedProxies parses a comma-separated list of CIDRs or addresses.
