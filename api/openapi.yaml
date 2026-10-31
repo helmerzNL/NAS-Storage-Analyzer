@@ -863,6 +863,44 @@ paths:
                   server_time: {type: string, format: date-time}
                   mount_supported: {type: boolean}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/fs/dirs:
+    get:
+      tags: [admin]
+      operationId: browseFolders
+      summary: List the sub-folders of a folder below the shares root (admin)
+      description: >-
+        For the folder picker of the share form. Lists folders only (never files) and never leaves the shares root:
+        a link is shown only when it points to a folder inside the root. A folder with more entries than the limits
+        (20,000 read, 1,000 returned) is cut off and `truncated` is true.
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: Absolute path inside the container, at or below `shares_root`. Default is the root itself.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The folder and its sub-folders, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [root, path, dirs, truncated]
+                properties:
+                  root: {type: string, description: The shares root; the picker cannot go above it.}
+                  path: {type: string, description: The folder that was listed.}
+                  parent: {type: string, description: The folder above this one. Absent at the root.}
+                  dirs:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, path]
+                      properties:
+                        name: {type: string}
+                        path: {type: string, description: "Full path inside the container, usable as the path of a share."}
+                        symlink: {type: boolean, description: A link to a folder inside the root.}
+                  truncated: {type: boolean}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/events:
     get:
       tags: [shares]

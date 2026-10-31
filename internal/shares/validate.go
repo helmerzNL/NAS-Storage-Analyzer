@@ -190,7 +190,7 @@ func validateBindPath(in *Input, opt Options) error {
 	in.Path = path.Clean(in.Path)
 	if opt.SharesRoot != "" {
 		root := path.Clean(opt.SharesRoot)
-		if in.Path != root && !strings.HasPrefix(in.Path, root+"/") {
+		if !inside(root, in.Path) {
 			return bad("path", "must be inside %s (mount your share there, see the README)", root)
 		}
 	}

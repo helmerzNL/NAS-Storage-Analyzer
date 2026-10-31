@@ -7,6 +7,7 @@ import { formatBytes, parseSize, formatPct, formatDuration, ago } from './format
 import { squarify } from './treemap';
 import { filtersToParams, filtersFromQuery, emptyFilters, activeFilterCount } from './filters';
 import { match } from './match';
+import { folderCrumbs, startFolder } from './folders';
 import { b64urlToBuf, bufToB64url } from './webauthn';
 import { nl } from './i18n/nl';
 import { en } from './i18n/en';
@@ -192,5 +193,29 @@ describe('scanChanged', () => {
   });
   it('stays quiet while nothing changes', () => {
     expect(scanChanged(st(3, 'succeeded'), st(3, 'succeeded'))).toBe(false);
+  });
+});
+
+describe('folder picker helpers', () => {
+  it('builds the breadcrumb from the shares root', () => {
+    expect(folderCrumbs('/mnt/user', '/mnt/user')).toEqual([{ name: '/mnt/user', path: '/mnt/user' }]);
+    expect(folderCrumbs('/mnt/user', '/mnt/user/media/Movies')).toEqual([
+      { name: '/mnt/user', path: '/mnt/user' }, { name: 'media', path: '/mnt/user/media' }, { name: 'Movies', path: '/mnt/user/media/Movies' },
+    ]);
+  });
+  it('tolerates a trailing slash and a root of /', () => {
+    expect(folderCrumbs('/mnt/user/', '/mnt/user/media/').map((c) => c.path)).toEqual(['/mnt/user', '/mnt/user/media']);
+    expect(folderCrumbs('/', '/mnt/x').map((c) => c.path)).toEqual(['/', '/mnt', '/mnt/x']);
+  });
+  it('does not mistake a sibling with the same stem for a sub-folder', () => {
+    expect(folderCrumbs('/mnt/user', '/mnt/userdata/a')).toEqual([{ name: '/mnt/user', path: '/mnt/user' }]);
+    expect(folderCrumbs('/mnt/user', '/etc')).toHaveLength(1);
+  });
+  it('opens where the form says, or at the root', () => {
+    expect(startFolder('/mnt/user/media/')).toBe('/mnt/user/media');
+    expect(startFolder('  /mnt/user  ')).toBe('/mnt/user');
+    expect(startFolder('')).toBe('');
+    expect(startFolder('media')).toBe('');
+    expect(startFolder('/')).toBe('/');
   });
 });

@@ -34,8 +34,8 @@ als `NASA_SETUP_TOKEN`, en ook in het log: `docker compose logs app`). Je maakt 
 stelt verplicht een tweede factor in (authenticator-app of passkey) en bewaart de herstelcodes. Er zijn geen
 standaardwachtwoorden.
 
-Daarna: **Shares → Share toevoegen**, kies het type *Gemount pad (aanbevolen)*, vul het pad in (bijvoorbeeld
-`/mnt/shares/media`) en klik op *Scan nu* op het dashboard.
+Daarna: **Shares → Share toevoegen**, kies het type *Gemount pad (aanbevolen)*, klik op **Bladeren…** en kies de map
+(of typ het pad, bijvoorbeeld `/mnt/shares/media`) en klik op *Scan nu* op het dashboard.
 
 Docker moet de image bouwen (Node, Go, Alpine; een paar minuten de eerste keer). Wil je op een andere machine
 deployen zonder te bouwen: `docker build -t nas-storage-analyzer .` op de ene, `docker save | docker load` of een
@@ -150,7 +150,7 @@ NASA_SHARES_DIR=/mnt/user
 NASA_SHARES_MOUNT=/mnt/user
 ```
 
-Voeg elke share apart toe (**Shares → Share toevoegen**, type *Gemount pad*): `media` wordt `/mnt/user/media`,
+Voeg elke share apart toe (**Shares → Share toevoegen**, type *Gemount pad*, daarna **Bladeren…**): `media` wordt `/mnt/user/media`,
 `backups` wordt `/mnt/user/backups`. Alleen wat je toevoegt wordt gescand, en alles is read-only. Een share die je later
 op Unraid aanmaakt staat al onder `/mnt/user`; je voegt hem alleen in de interface toe.
 
@@ -183,6 +183,23 @@ via SSH met `ls`. Controleer na het starten of de share zichtbaar is met `docker
 
 > Route (c) is getest tot en met de configuratie (`docker compose config`) en de pad-validatie in de unit tests, maar
 > niet op een echte Unraid- of andere NAS-machine, en niet met een draaiende container.
+
+### De mapkiezer
+
+Bij een share van het type *Gemount pad* opent **Bladeren…** een venster waarin je door de mappen onder
+`NASA_SHARES_MOUNT` klikt. Een map kies je met **Kies** achter de naam, of met **Deze map kiezen** voor de map waarin je
+staat. Het pad komt in het formulier; je kunt het daar nog aanpassen. Staat er al een pad in het formulier, dan opent de
+kiezer daar, en anders (of als die map niet bestaat) bij de share-map zelf.
+
+* Alleen **mappen** worden getoond; bestanden worden niet getoond, geopend of gestat.
+* Je kunt niet boven `NASA_SHARES_MOUNT` komen. Een symlink wordt alleen getoond (met `↪`) als hij naar een map wijst
+  die zelf binnen die map ligt; een link die naar buiten wijst, is niet te zien en niet te openen.
+* Alleen **beheerders** kunnen bladeren. De `app`-container leest de mapnamen, read-only, uit dezelfde bind-mount als
+  de worker.
+* Een map met meer dan 1.000 submappen wordt afgekapt (de kiezer zegt dat); typ dan het pad zelf. Een map met zeer veel
+  bestanden wordt na 20.000 gelezen items afgekapt. Op een trage of niet-reagerende netwerkmount kan het laden even duren.
+* Is de lijst bij de share-map leeg, dan is er niets gemount of staat `NASA_SHARES_DIR` verkeerd; zie
+  [problemen oplossen](#10-problemen-oplossen).
 
 ### Wat een share kan instellen
 
@@ -327,6 +344,11 @@ Zet de datadirectory van de database op SSD's. Dat is, meer dan elke parameter, 
   bereiken, of is volledig bezet met scans), `db` → `pg_isready`. `docker compose ps` toont `(healthy)`.
 * **Logs:** JSON naar stdout, `docker compose logs -f app worker`. Elke HTTP-aanvraag krijgt een `request_id` (ook
   in foutantwoorden), scans loggen start, einde en fouten per map.
+* **Auditlog:** de pagina *Auditlog* toont naast aanmeldingen en wijzigingen ook de uitkomst van elke scan, ook die van
+  het schema, onder de naam `worker`: `scan.finished` (gelukt), `scan.empty` (gelukt, maar **geen bestanden gevonden**),
+  `scan.errors` (gelukt, maar sommige mappen waren onleesbaar) en `scan.failed` (mislukt, met de reden). `scan.empty` en
+  `scan.errors` staan oranje, `scan.failed` rood. Een lege map is voor de scanner geen fout (een nieuwe share is ook
+  leeg), dus zonder deze regel merk je een niet-gemounte share of een verkeerde `NASA_SHARES_DIR` niet.
 * **Prometheus:** `/metrics`. Zonder `NASA_METRICS_TOKEN` antwoordt het alleen op loopback; zet een token en scrape met
   `Authorization: Bearer <token>`:
 
@@ -392,7 +414,8 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
 | Symptoom | Oorzaak en oplossing |
 |---|---|
 | `docker compose up` meldt "is mounted on / but it is not a shared or slave mount" | `NASA_SHARES_PROPAGATION` staat op `rslave` (of je gebruikt een oudere versie van dit bestand waar dat de standaard was). Zet het op `rprivate` of haal de regel weg, en haal de laatste versie van de repository op. |
-| De scan vindt niets, of de share-map is leeg | `NASA_SHARES_DIR` is niet gezet (dan is het `./shares` in de stackmap) of wijst niet naar de map met je mounts. Gebruik een absoluut pad op de host. |
+| **Bladeren…** toont "Geen mappen gevonden" | De share-map is leeg in de container: er is niets gemount, of `NASA_SHARES_DIR` wijst naar een andere map dan je denkt. Zie de rij hieronder. |
+| De scan vindt niets, of de share-map is leeg | Het auditlog toont dan `scan.empty`. `NASA_SHARES_DIR` is niet gezet (dan is het `./shares` in de stackmap) of wijst niet naar de map met je mounts. Gebruik een absoluut pad op de host. |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASA_SETUP_TOKEN` in `.env`. |
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASA_RP_ID` in. |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
@@ -417,6 +440,12 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
   share by its path (`/mnt/user/media`). `/mnt/user` is a FUSE layer and slower on millions of files; passing `/mnt`
   allows `/mnt/disk1/...` and `/mnt/cache/...` directly (a share spread over several disks is then one scan per disk).
   Verified up to the configuration and the path validation, not on a real NAS.
+* **Audit log:** besides sign-ins and changes it records the outcome of every scan, scheduled ones too, as `worker`:
+  `scan.finished`, `scan.empty` (finished but found no files: an unmounted share or a wrong `NASA_SHARES_DIR`),
+  `scan.errors` (finished, some folders unreadable) and `scan.failed` (with the reason).
+* **Folder picker:** in the share form, *Browse…* (administrators only) lists the folders below `NASA_SHARES_MOUNT` so you
+  can click to a folder instead of typing its path. Folders only, never above that folder; links are shown only when they
+  point to a folder inside it; a folder with more than 1,000 sub-folders is cut off.
 * **Shares, route a:** `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d` lets the worker
   mount NFS/SMB itself, at the cost of root and `CAP_SYS_ADMIN` in the worker container only. This route is
   verified up to the privileges; it could not be tested against a real NFS/SMB server in the development sandbox.

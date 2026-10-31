@@ -53,7 +53,8 @@ const expectText = async (page, sel, re, msg) => {
   await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
   const errors = [];
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
-  page.on('console', (m) => { if (m.type() === 'error' && !/401|403|409|400/.test(m.text())) errors.push('console: ' + m.text()); });
+  // The folder picker asks for a typed path that may not exist yet (404) and then falls back to the root: expected.
+  page.on('console', (m) => { if (m.type() === 'error' && !/401|403|409|400/.test(m.text()) && !m.location().url.includes('/api/v1/fs/dirs')) errors.push('console: ' + m.text()); });
   const apiLog = []; // every API call with its status, for the failure report
   page.on('response', (r) => { if (r.url().includes('/api/') && !r.url().includes('/events')) apiLog.push(`${r.request().method()} ${new URL(r.url()).pathname}${new URL(r.url()).search.slice(0, 40)} -> ${r.status()}`); });
   const apiFailures = [];
@@ -104,7 +105,47 @@ const expectText = async (page, sel, re, msg) => {
       await page.click('a[href="/admin/shares"]');
       await page.click('[data-testid=add-share]');
       await page.fill('[data-testid=f-name]', 'Media');
-      await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'media'));
+
+      // Browse to the folder instead of typing its path.
+      // 1. A typed path that does not exist yet: the picker opens at the root and says nothing is wrong.
+      await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'not-there-yet'));
+      await page.click('[data-testid=f-browse]');
+      await page.waitForSelector('[data-testid=folder-picker] [data-testid=folder-media]');
+      const crumbsAtRoot = await page.$$eval('[data-testid=folder-crumbs] button, [data-testid=folder-crumbs] span.mono', (els) => els.length);
+      if (crumbsAtRoot !== 1) throw new Error('a missing typed path must open the picker at the shares root, got ' + crumbsAtRoot + ' crumbs');
+      if (await page.$('[data-testid=folder-picker] .alert.bad')) throw new Error('a missing typed path must not show an error');
+      if (await page.$('[data-testid=folder-up]')) throw new Error('the root has no "up"');
+      await shot('04a-folder-picker-root');
+      // 2. Go into the folder: sub-folders are listed (folders only, never files), "up" and the breadcrumb appear.
+      await page.click('[data-testid=folder-media]');
+      await page.waitForSelector('[data-testid=folder-video]');
+      const subfolders = await page.$$eval('[data-testid=folder-list] li button[data-testid^=folder-]:not([data-testid=folder-up])', (els) => els.map((e) => e.textContent.replace(/[›↪]/g, '').trim()).sort());
+      if (subfolders.join(',') !== 'audio,docs,photos,video') throw new Error('sub-folders: ' + subfolders.join(','));
+      if (await page.$('[data-testid=folder-list] :text("film.mkv")')) throw new Error('files must not be listed');
+      await shot('04b-folder-picker-media');
+      // 3. Up, and choose "media" from the row.
+      await page.click('[data-testid=folder-up]');
+      await page.waitForSelector('[data-testid=folder-media]');
+      await page.click('[data-testid=pick-media]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=folder-picker]')?.closest('dialog')?.open);
+      const picked = await page.inputValue('[data-testid=f-path]');
+      if (picked !== path.join(SHARE_APP_PATH, 'media')) throw new Error('the picked path is "' + picked + '"');
+      // 4. Reopen: it starts where the form says, and "choose this folder" takes the current folder.
+      await page.click('[data-testid=f-browse]');
+      await page.waitForSelector('[data-testid=folder-video]');
+      await page.click('[data-testid=folder-video]');
+      await page.waitForSelector('[data-testid=folder-up]');
+      await page.click('[data-testid=folder-choose]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=folder-picker]')?.closest('dialog')?.open);
+      if ((await page.inputValue('[data-testid=f-path]')) !== path.join(SHARE_APP_PATH, 'media/video')) throw new Error('"choose this folder" did not take the current folder');
+      // The share to scan is the whole media folder: pick it again.
+      await page.click('[data-testid=f-browse]');
+      await page.waitForSelector('[data-testid=folder-up]');
+      await page.click('[data-testid=folder-up]');
+      await page.waitForSelector('[data-testid=folder-video]');
+      await page.click('[data-testid=folder-choose]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=folder-picker]')?.closest('dialog')?.open);
+      if ((await page.inputValue('[data-testid=f-path]')) !== path.join(SHARE_APP_PATH, 'media')) throw new Error('re-picking media failed: ' + await page.inputValue('[data-testid=f-path]'));
       await page.fill('[data-testid=f-cron]', 'not a cron');
       await page.click('[data-testid=f-save]');
       await page.waitForSelector('dialog[open] .field-error, dialog[open] .alert.bad');
@@ -296,7 +337,7 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'user.create', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'user.create', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
     });
 
@@ -320,6 +361,31 @@ const expectText = async (page, sel, re, msg) => {
       await page.goto(BASE + '/admin/extensions');
       await page.waitForSelector('[data-testid=ext-mkv]');
       await moved('→ Video');
+    });
+
+    await step('a scan that finds nothing is flagged in the audit log', async () => {
+      // A wrong NASA_SHARES_DIR or an unmounted share is an empty folder: the scan succeeds, and used to leave no trace.
+      fs.mkdirSync(path.join(SHARE_DIR, 'leeg'), { recursive: true });
+      await page.goto(BASE + '/admin/shares');
+      await page.click('[data-testid=add-share]');
+      await page.fill('[data-testid=f-name]', 'Leeg');
+      await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'leeg'));
+      await page.click('[data-testid=f-save]');
+      await page.waitForSelector('[data-testid=share-row]:has-text("Leeg")');
+      await page.click('[data-testid=share-row]:has-text("Leeg") >> text=Scan nu');
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        await page.goto(BASE + '/admin/audit');
+        await page.waitForSelector('[data-testid=audit-table] tbody tr');
+        row = await page.$('[data-testid=audit-table] tbody tr:has-text("scan.empty")');
+        if (!row) await page.waitForTimeout(500);
+      }
+      if (!row) throw new Error('no scan.empty entry in the audit log');
+      const text = (await row.textContent()).replace(/\s+/g, ' ');
+      if (!text.includes('Leeg') || !text.includes('worker') || !/mounted/.test(text)) throw new Error('the entry does not say what to check: ' + text);
+      if (!(await row.$('.badge.warn'))) throw new Error('an empty scan must stand out (amber badge)');
+      if (!(await page.$('[data-testid=audit-table] tbody tr:has-text("scan.finished"):has-text("Media")'))) throw new Error('the scan of Media is missing as scan.finished');
+      await shot('14-audit-empty-scan');
     });
 
     await step('no JavaScript errors occurred', async () => { if (errors.length) throw new Error(errors.join('\n')); });

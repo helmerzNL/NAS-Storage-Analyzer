@@ -2,9 +2,11 @@ package worker_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -312,5 +314,122 @@ func TestHealthyWhileThePollLoopReachesTheQueue(t *testing.T) {
 	clock.Add(int64(2 * time.Minute))
 	if err := e.w.Healthy(); err == nil {
 		t.Fatal("a worker that stopped polling must report unhealthy")
+	}
+}
+
+// auditRow is one entry of the audit log as the interface shows it.
+type auditRow struct {
+	Action, Target, Username string
+	Detail                   map[string]any
+}
+
+func (e *env) audit(t *testing.T) []auditRow {
+	t.Helper()
+	rows, err := e.st.Pool.Query(ctx, `SELECT action, target, username, detail FROM audit_log ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []auditRow
+	for rows.Next() {
+		var r auditRow
+		var raw []byte
+		if err := rows.Scan(&r.Action, &r.Target, &r.Username, &raw); err != nil {
+			t.Fatal(err)
+		}
+		json.Unmarshal(raw, &r.Detail)
+		out = append(out, r)
+	}
+	return out
+}
+
+func (e *env) scan(t *testing.T, id int64, mode, trigger string) jobs.Job {
+	t.Helper()
+	j, err := e.q.Enqueue(ctx, jobs.KindScan, id, mode, trigger, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.waitJob(t, j.ID, jobs.StateDone, jobs.StateFailed)
+}
+
+func only(t *testing.T, rows []auditRow, action string) auditRow {
+	t.Helper()
+	var got []auditRow
+	for _, r := range rows {
+		if r.Action == action {
+			got = append(got, r)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("want exactly one %q entry in the audit log, got %d: %+v", action, len(got), rows)
+	}
+	return got[0]
+}
+
+// The outcome of every scan, including the ones nobody started by hand, is in the audit log.
+func TestAScanThatFindsNothingIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	id := e.share(t, t.TempDir(), nil) // an empty folder: a wrong NASA_SHARES_DIR looks exactly like this
+	if j := e.scan(t, id, "auto", "schedule"); j.State != jobs.StateDone {
+		t.Fatalf("job = %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.empty")
+	if r.Target != "media" || r.Username != "worker" || r.Detail["trigger"] != "schedule" || r.Detail["files"] != float64(0) {
+		t.Errorf("entry = %+v", r)
+	}
+	if hint, _ := r.Detail["hint"].(string); !strings.Contains(hint, "mounted") {
+		t.Errorf("the entry must say what to check: %+v", r.Detail)
+	}
+}
+
+func TestAScanThatSucceedsIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	root := t.TempDir()
+	ts.Write(t, root+"/video/a.mkv", 5000)
+	ts.Write(t, root+"/docs/b.pdf", 100)
+	id := e.share(t, root, nil)
+	e.scan(t, id, "auto", "manual")
+	rows := e.audit(t)
+	r := only(t, rows, "scan.finished")
+	if r.Detail["files"] != float64(2) || r.Detail["bytes"] != float64(5100) || r.Detail["errors"] != float64(0) || r.Detail["trigger"] != "manual" || r.Detail["requested_by"] != "alice" {
+		t.Errorf("entry = %+v", r)
+	}
+	if len(rows) != 1 {
+		t.Errorf("a good scan writes one entry, got %+v", rows)
+	}
+}
+
+func TestAFailedScanIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	id := e.share(t, "/nonexistent/path", nil)
+	j := e.scan(t, id, "auto", "manual")
+	if j.State != jobs.StateFailed {
+		t.Fatalf("job = %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.failed")
+	if msg, _ := r.Detail["error"].(string); r.Target != "media" || !strings.Contains(msg, "mounted into the container") {
+		t.Errorf("entry = %+v", r)
+	}
+}
+
+// A share that held files and is suddenly empty (an unmounted NAS) is refused, and that must show.
+func TestARefusedEmptyScanIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	root := t.TempDir()
+	for i := 0; i < 120; i++ {
+		ts.Write(t, fmt.Sprintf("%s/d/f%03d.txt", root, i), 10)
+	}
+	id := e.share(t, root, nil)
+	e.scan(t, id, "auto", "manual")
+	if err := os.RemoveAll(root + "/d"); err != nil {
+		t.Fatal(err)
+	}
+	j := e.scan(t, id, "full", "schedule")
+	if j.State != jobs.StateFailed {
+		t.Fatalf("an emptied share must be refused: %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.failed")
+	if msg, _ := r.Detail["error"].(string); !strings.Contains(msg, "still mounted") || r.Detail["trigger"] != "schedule" {
+		t.Errorf("entry = %+v", r)
 	}
 }

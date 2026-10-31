@@ -143,7 +143,9 @@ Ontwerpkeuzes:
 - **Rollen:** `admin` (shares, schema's, gebruikers, extensiemapping) en `viewer` (alleen lezen); autorisatie in
   middleware per route, in de OpenAPI-spec per operatie gemarkeerd.
 - **Audit log:** logins (ook mislukt), MFA-wijzigingen, scanstart/-annulering, share- en configuratiewijzigingen,
-  gebruikersbeheer; append-only tabel, doorzoekbaar in de UI voor admins.
+  gebruikersbeheer, en de uitkomst van elke scan (door de worker, ook bij een schema: `scan.finished`, `scan.empty` voor een
+  scan zonder bestanden, `scan.errors` bij onleesbare mappen, `scan.failed` met de reden); append-only tabel, doorzoekbaar
+  in de UI voor admins.
 - **Geheimen:** `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
   TOTP-secrets worden met AES-256-GCM versleuteld (key-id in het ciphertext-formaat voor latere rotatie).
 - **OIDC later:** `users.auth_source` + `external_subject` en een `IdentityProvider`-interface in `internal/auth`;

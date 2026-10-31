@@ -74,6 +74,7 @@ inside the app. These are the app's limits as numbers; **whatever is in front mu
 | Live scan status (`GET /api/v1/events`, server-sent events) | stays open while a page is open; a status event on change, otherwise a `: ping` at least every **15 s** | Response buffering off; read timeout of at least **60 s**; no maximum connection lifetime (the browser reconnects by itself if it drops). |
 | Sign-in attempts | 5 failed attempts per user and 30 per client address in an hour, then a lockout | The app must see the real client address: set `NASA_TRUSTED_PROXIES` to the proxy, or all clients share the proxy's address and its 30-attempt budget. |
 | Session | idle after **12 h**, absolute after **7 days** | — |
+| Folder picker (`GET /api/v1/fs/dirs`) | reads at most **20,000** directory entries and returns at most **1,000** folders, within the 15 s of one JSON request; an ordinary JSON response, about 100 KB for 1,000 folders with ordinary names | Nothing beyond the JSON request row above. |
 | Scan of one directory | **10 min** (`DirTimeout`); a slower directory counts as an error and the scan goes on | Not applicable (the worker talks to the NAS, not through a proxy). |
 
 Nothing else in front of the app constrains it. Examples of the proxy settings that follow from this table (Caddy, nginx,

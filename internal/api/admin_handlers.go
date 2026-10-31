@@ -26,6 +26,7 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("PUT "+v+"/extension-map/{ext}", lvAdmin, s.putExtension)
 		h("DELETE "+v+"/extension-map/{ext}", lvAdmin, s.deleteExtension)
 		h("GET "+v+"/settings", lvViewer, s.getSettings)
+		h("GET "+v+"/fs/dirs", lvAdmin, s.browseFolders)
 	}
 	h("GET "+v+"/shares/{share}/history", lvViewer, s.history)
 	h("GET "+v+"/shares/{share}/dirs/{dir}/history", lvViewer, s.dirHistory)
@@ -43,6 +44,8 @@ func (s *Server) adminFail(w http.ResponseWriter, r *http.Request, err error) bo
 			Detail: ve.Msg, Code: "invalid_request", Field: ve.Field, RequestID: requestID(r)})
 	case errors.Is(err, shares.ErrNotFound):
 		s.problemCode(w, r, http.StatusNotFound, "not found", "", "not_found")
+	case errors.Is(err, shares.ErrNoSharesRoot):
+		s.problemCode(w, r, http.StatusConflict, "no shares folder is configured", "Set NASA_SHARES_DIR (see docs/deploy.md).", "not_configured")
 	case errors.Is(err, shares.ErrConflict):
 		s.problemCode(w, r, http.StatusConflict, "a share with this name already exists", "", "conflict")
 	case errors.Is(err, shares.ErrBusy):
@@ -257,6 +260,32 @@ func (s *Server) deleteExtension(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.audit(r, "extension.delete", ext, nil)
 	return writeJSON(w, map[string]any{"ext": ext, "recategorize_jobs": n})
+}
+
+// browseFolders lists the sub-folders of a folder below the shares root, for the folder
+// picker in the share form. Administrators only: it shows the layout of the file system.
+func (s *Server) browseFolders(w http.ResponseWriter, r *http.Request) error {
+	type result struct {
+		l   *shares.Listing
+		err error
+	}
+	p := r.URL.Query().Get("path")
+	done := make(chan result, 1)
+	// A hung network mount blocks readdir for as long as the kernel waits; answer on time
+	// and leave the goroutine to finish on its own.
+	go func() {
+		l, err := shares.Browse(s.opts.SharesRoot, p)
+		done <- result{l, err}
+	}()
+	select {
+	case <-r.Context().Done():
+		return r.Context().Err()
+	case res := <-done:
+		if res.err != nil {
+			return res.err
+		}
+		return writeJSON(w, res.l)
+	}
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) error {
