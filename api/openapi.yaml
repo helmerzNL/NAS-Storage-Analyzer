@@ -1,0 +1,675 @@
+openapi: "3.0.3"
+info:
+  title: NAS Storage Analyzer API
+  version: "1.0.0"
+  description: |
+    Read-only API over the results of the latest completed scan of each share.
+    The API never queries the file system; everything comes from the database.
+
+    **There is no authentication yet** (it arrives in a later release). `nasa serve` therefore only
+    listens on loopback by default.
+
+    Sizes are bytes (`size` is the logical size, `alloc` the allocated size, `st_blocks * 512`).
+    Hardlinked files are counted once. Lists use keyset pagination: pass the returned `next_cursor`
+    as `cursor` to get the next page; a cursor only works with the same `sort` and `order`.
+
+    The filter parameters (`category`, `ext`, `min_size`, ...) restrict which *files* count. In
+    directory listings a folder's size is then the size of its matching files. With no filter the
+    pre-computed directory totals are used, with only a `category` filter the per-category totals;
+    other filters are aggregated live and may be slower on very large shares.
+    The `X-Query-Tier` response header of the children endpoint shows which of the three was used.
+
+    Every list endpoint can return CSV: use `format=csv` or `Accept: text/csv`. Exports page
+    through the whole result (up to the server's row limit, header `X-Max-Rows`). Text cells that
+    start with `=`, `+`, `-`, `@`, tab or CR are prefixed with `'` so spreadsheets do not run them
+    as formulas.
+servers:
+  - url: /
+tags:
+  - {name: shares}
+  - {name: browse}
+  - {name: lists}
+  - {name: reference}
+  - {name: operations}
+
+paths:
+  /healthz:
+    get:
+      tags: [operations]
+      summary: Liveness probe
+      responses:
+        "200": {description: "The process is up.", content: {text/plain: {schema: {type: string}}}}
+  /readyz:
+    get:
+      tags: [operations]
+      summary: Readiness probe (database reachable)
+      responses:
+        "200": {description: "Ready.", content: {text/plain: {schema: {type: string}}}}
+        "503": {$ref: "#/components/responses/Problem"}
+  /metrics:
+    get:
+      tags: [operations]
+      summary: Prometheus metrics
+      responses:
+        "200": {description: "Prometheus text exposition format.", content: {text/plain: {schema: {type: string}}}}
+  /openapi.yaml:
+    get:
+      tags: [operations]
+      summary: This document
+      responses:
+        "200": {description: "The OpenAPI document.", content: {application/yaml: {schema: {type: string}}}}
+
+  /api/v1/shares:
+    get:
+      tags: [shares]
+      operationId: listShares
+      summary: List shares with the state of their latest scans
+      parameters: [{$ref: "#/components/parameters/Format"}]
+      responses:
+        "200":
+          description: All shares.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/ShareInfo"}}}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}:
+    get:
+      tags: [shares]
+      operationId: getShare
+      summary: One share
+      parameters: [{$ref: "#/components/parameters/Share"}]
+      responses:
+        "200": {description: "The share.", content: {application/json: {schema: {$ref: "#/components/schemas/ShareInfo"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/scans:
+    get:
+      tags: [shares]
+      operationId: listScans
+      summary: Scan history of a share, newest first
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {name: before, in: query, description: "Only scans with a smaller id (paging).", schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        "200": {description: "A page of scans.", content: {application/json: {schema: {$ref: "#/components/schemas/ScanPage"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/scans/{scan}/errors:
+    get:
+      tags: [shares]
+      operationId: listScanErrors
+      summary: Errors logged during a scan (permission denied, vanished files, timeouts)
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: scan, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+        - {name: kind, in: query, schema: {type: string, enum: [permission, vanished, timeout, io, other]}}
+        - {name: after, in: query, description: "Only errors with a larger id (paging).", schema: {type: integer, format: int64, minimum: 0}}
+        - {$ref: "#/components/parameters/Limit"}
+      responses:
+        "200": {description: "A page of errors.", content: {application/json: {schema: {$ref: "#/components/schemas/ScanErrorPage"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /api/v1/shares/{share}/categories:
+    get:
+      tags: [browse]
+      operationId: shareCategories
+      summary: Size per file category for the share or a folder
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: dir, in: query, description: "Folder id or `root`. Default root.", schema: {type: string}}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: Categories, largest first.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/CategoryTotal"}}}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/extensions:
+    get:
+      tags: [browse]
+      operationId: shareExtensions
+      summary: Size per file extension for the share
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {$ref: "#/components/parameters/Category"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: Extensions, largest first.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/ExtensionTotal"}}}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /api/v1/shares/{share}/dirs/{dir}:
+    get:
+      tags: [browse]
+      operationId: getDir
+      summary: A folder with breadcrumb, totals and category breakdown
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {$ref: "#/components/parameters/Dir"}
+        - {$ref: "#/components/parameters/Category"}
+        - {$ref: "#/components/parameters/Ext"}
+        - {$ref: "#/components/parameters/MinSize"}
+        - {$ref: "#/components/parameters/MaxSize"}
+        - {$ref: "#/components/parameters/ModifiedBefore"}
+        - {$ref: "#/components/parameters/ModifiedAfter"}
+        - {$ref: "#/components/parameters/UsedBefore"}
+        - {$ref: "#/components/parameters/UsedAfter"}
+        - {$ref: "#/components/parameters/UnusedDays"}
+      responses:
+        "200": {description: "The folder.", content: {application/json: {schema: {$ref: "#/components/schemas/DirDetail"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/dirs/{dir}/children:
+    get:
+      tags: [browse]
+      operationId: listChildren
+      summary: Subfolders of a folder with size, share of the parent and file count
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {$ref: "#/components/parameters/Dir"}
+        - {$ref: "#/components/parameters/Category"}
+        - {$ref: "#/components/parameters/Ext"}
+        - {$ref: "#/components/parameters/MinSize"}
+        - {$ref: "#/components/parameters/MaxSize"}
+        - {$ref: "#/components/parameters/ModifiedBefore"}
+        - {$ref: "#/components/parameters/ModifiedAfter"}
+        - {$ref: "#/components/parameters/UsedBefore"}
+        - {$ref: "#/components/parameters/UsedAfter"}
+        - {$ref: "#/components/parameters/UnusedDays"}
+        - {name: sort, in: query, description: "Default `size`.", schema: {type: string, enum: [size, files, name, mtime, used]}}
+        - {$ref: "#/components/parameters/Order"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: A page of subfolders.
+          headers:
+            X-Query-Tier: {description: "1 pre-computed folder totals, 2 per-category totals, 3 live aggregation.", schema: {type: string}}
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/ChildPage"}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/dirs/{dir}/treemap:
+    get:
+      tags: [browse]
+      operationId: getTreemap
+      summary: Nested size tree of a folder for treemap/sunburst charts
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {$ref: "#/components/parameters/Dir"}
+        - {$ref: "#/components/parameters/Category"}
+        - {name: depth, in: query, description: "Levels below the folder (1-3, default 2).", schema: {type: integer, minimum: 1, maximum: 3}}
+        - {name: max_children, in: query, description: "Largest subfolders shown per level (1-100, default 20); the rest is folded into an `other` node.", schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        "200": {description: "The tree.", content: {application/json: {schema: {$ref: "#/components/schemas/TreeNode"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /api/v1/shares/{share}/files:
+    get:
+      tags: [lists]
+      operationId: listFiles
+      summary: Files of the share or of a folder
+      description: Without `dir` the whole share is searched. With `dir` only that folder, unless `recursive=true`.
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: dir, in: query, description: "Folder id or `root`.", schema: {type: string}}
+        - {name: recursive, in: query, schema: {type: boolean}}
+        - {name: counted_only, in: query, description: "Hide the second and later hardlinks of an inode.", schema: {type: boolean, default: false}}
+        - {$ref: "#/components/parameters/Category"}
+        - {$ref: "#/components/parameters/Ext"}
+        - {$ref: "#/components/parameters/MinSize"}
+        - {$ref: "#/components/parameters/MaxSize"}
+        - {$ref: "#/components/parameters/ModifiedBefore"}
+        - {$ref: "#/components/parameters/ModifiedAfter"}
+        - {$ref: "#/components/parameters/UsedBefore"}
+        - {$ref: "#/components/parameters/UsedAfter"}
+        - {$ref: "#/components/parameters/UnusedDays"}
+        - {$ref: "#/components/parameters/Q"}
+        - {name: sort, in: query, description: "Default `size`.", schema: {type: string, enum: [size, name, mtime, used, ext]}}
+        - {$ref: "#/components/parameters/Order"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: A page of files.
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/FilePage"}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/top/files:
+    get:
+      tags: [lists]
+      operationId: topFiles
+      summary: Largest files
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: dir, in: query, description: "Only below this folder (id or `root`).", schema: {type: string}}
+        - {$ref: "#/components/parameters/Category"}
+        - {$ref: "#/components/parameters/Ext"}
+        - {$ref: "#/components/parameters/MinSize"}
+        - {$ref: "#/components/parameters/MaxSize"}
+        - {$ref: "#/components/parameters/ModifiedBefore"}
+        - {$ref: "#/components/parameters/ModifiedAfter"}
+        - {$ref: "#/components/parameters/UsedBefore"}
+        - {$ref: "#/components/parameters/UsedAfter"}
+        - {$ref: "#/components/parameters/UnusedDays"}
+        - {$ref: "#/components/parameters/Q"}
+        - {name: sort, in: query, schema: {type: string, enum: [size, name, mtime, used, ext]}}
+        - {$ref: "#/components/parameters/Order"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: A page of files, hardlinks counted once.
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/FilePage"}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/cold/files:
+    get:
+      tags: [lists]
+      operationId: coldFiles
+      summary: Largest files that have not been used for a long time
+      description: Like top/files, restricted to files whose last use is older than `unused_days` (default 365) or `used_before`. "Last used" follows the share's basis (atime, mtime or the later of both).
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: dir, in: query, schema: {type: string}}
+        - {$ref: "#/components/parameters/Category"}
+        - {$ref: "#/components/parameters/Ext"}
+        - {$ref: "#/components/parameters/MinSize"}
+        - {$ref: "#/components/parameters/MaxSize"}
+        - {$ref: "#/components/parameters/ModifiedBefore"}
+        - {$ref: "#/components/parameters/ModifiedAfter"}
+        - {$ref: "#/components/parameters/UsedBefore"}
+        - {$ref: "#/components/parameters/UsedAfter"}
+        - {$ref: "#/components/parameters/UnusedDays"}
+        - {$ref: "#/components/parameters/Q"}
+        - {name: sort, in: query, schema: {type: string, enum: [size, name, mtime, used, ext]}}
+        - {$ref: "#/components/parameters/Order"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: A page of files.
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/FilePage"}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/top/dirs:
+    get:
+      tags: [lists]
+      operationId: topDirs
+      summary: Largest folders
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: dir, in: query, description: "Only below this folder.", schema: {type: string}}
+        - {$ref: "#/components/parameters/DirBy"}
+        - {$ref: "#/components/parameters/MinDepth"}
+        - {name: sort, in: query, schema: {type: string, enum: [size, used]}}
+        - {$ref: "#/components/parameters/Order"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: A page of folders.
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/DirPage"}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/cold/dirs:
+    get:
+      tags: [lists]
+      operationId: coldDirs
+      summary: Largest folders in which nothing has been used for a long time
+      parameters:
+        - {$ref: "#/components/parameters/Share"}
+        - {name: dir, in: query, schema: {type: string}}
+        - {$ref: "#/components/parameters/DirBy"}
+        - {$ref: "#/components/parameters/MinDepth"}
+        - {$ref: "#/components/parameters/UnusedDays"}
+        - {$ref: "#/components/parameters/UsedBefore"}
+        - {name: maximal, in: query, description: "Skip a cold folder whose parent is cold as well (default true).", schema: {type: boolean, default: true}}
+        - {name: sort, in: query, schema: {type: string, enum: [size, used]}}
+        - {$ref: "#/components/parameters/Order"}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: A page of folders.
+          content:
+            application/json: {schema: {$ref: "#/components/schemas/DirPage"}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /api/v1/search:
+    get:
+      tags: [lists]
+      operationId: search
+      summary: Search file and folder names (case-insensitive substring), largest first
+      parameters:
+        - {name: q, in: query, required: true, description: "At least 3 characters.", schema: {type: string, minLength: 3}}
+        - {name: share, in: query, description: "Limit to one share.", schema: {type: integer, format: int64, minimum: 1}}
+        - {name: kind, in: query, schema: {type: string, enum: [all, files, dirs]}}
+        - {name: limit, in: query, description: "Up to 200.", schema: {type: integer, minimum: 1, maximum: 200}}
+        - {$ref: "#/components/parameters/Format"}
+      responses:
+        "200":
+          description: Matches.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/SearchHit"}}}}
+            text/csv: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+
+  /api/v1/categories:
+    get:
+      tags: [reference]
+      operationId: listCategories
+      summary: File categories
+      responses:
+        "200":
+          description: Categories.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Category"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/extension-map:
+    get:
+      tags: [reference]
+      operationId: listExtensionMap
+      summary: Which category each extension belongs to
+      responses:
+        "200":
+          description: The mapping.
+          content:
+            application/json:
+              schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/ExtensionMapping"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+
+components:
+  responses:
+    Problem:
+      description: An error (RFC 9457 problem details). 400 invalid input, 404 unknown share or folder, 409 share not scanned yet, 503 query too slow or database down.
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  parameters:
+    Share: {name: share, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}
+    Dir: {name: dir, in: path, required: true, description: "Folder id or `root`.", schema: {type: string}}
+    Limit: {name: limit, in: query, description: "Page size (default 100, at most 1000). `n` is accepted as an alias.", schema: {type: integer, minimum: 1, maximum: 1000}}
+    Cursor: {name: cursor, in: query, description: "The `next_cursor` of the previous page.", schema: {type: string}}
+    Order: {name: order, in: query, description: "Default `desc`, except for `name` and `ext` which default to `asc`.", schema: {type: string, enum: [asc, desc]}}
+    Format: {name: format, in: query, description: "Use `csv` for a CSV export (same as `Accept text/csv`).", schema: {type: string, enum: [json, csv]}}
+    Category: {name: category, in: query, description: "Category ids or keys (video, audio, images, documents, archives, code, disk_images, other); comma-separated or repeated.", schema: {type: string}}
+    Ext: {name: ext, in: query, description: "Extensions without dot, comma-separated or repeated. `none` matches files without extension.", schema: {type: string}}
+    MinSize: {name: min_size, in: query, description: "Minimum file size in bytes.", schema: {type: integer, format: int64, minimum: 0}}
+    MaxSize: {name: max_size, in: query, description: "Maximum file size in bytes.", schema: {type: integer, format: int64, minimum: 0}}
+    ModifiedBefore: {name: modified_before, in: query, description: "mtime before this RFC 3339 time or YYYY-MM-DD date.", schema: {type: string}}
+    ModifiedAfter: {name: modified_after, in: query, description: "mtime at or after this time.", schema: {type: string}}
+    UsedBefore: {name: used_before, in: query, description: "Last used before this time (basis of the share: atime, mtime or the later of both).", schema: {type: string}}
+    UsedAfter: {name: used_after, in: query, description: "Last used at or after this time.", schema: {type: string}}
+    UnusedDays: {name: unused_days, in: query, description: "Shortcut for `used_before` = now minus this many days. Default 365 on the cold endpoints.", schema: {type: integer, minimum: 0, maximum: 36500}}
+    Q: {name: q, in: query, description: "Case-insensitive substring of the file name.", schema: {type: string}}
+    DirBy: {name: by, in: query, description: "`total` ranks by the whole subtree (default), `direct` by files directly inside, which avoids listing every ancestor of a big folder.", schema: {type: string, enum: [total, direct]}}
+    MinDepth: {name: min_depth, in: query, description: "Skip folders above this depth (the share root is depth 0; default 1).", schema: {type: integer, minimum: 0}}
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        request_id: {type: string}
+    Totals:
+      type: object
+      required: [size, alloc, files]
+      properties:
+        size: {type: integer, format: int64}
+        alloc: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+    ScanInfo:
+      type: object
+      required: [id, share_id, status, mode, trigger, started_at, finished_at, dirs, reused_dirs, files, bytes, alloc_bytes, error_count, fs_total_bytes, fs_free_bytes, atime_quality, error]
+      properties:
+        id: {type: integer, format: int64}
+        share_id: {type: integer, format: int64}
+        status: {type: string, enum: [running, succeeded, failed, cancelled]}
+        mode: {type: string, enum: [full, incremental]}
+        trigger: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+        dirs: {type: integer, format: int64}
+        reused_dirs: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+        bytes: {type: integer, format: int64}
+        alloc_bytes: {type: integer, format: int64}
+        error_count: {type: integer, format: int64}
+        fs_total_bytes: {type: integer, format: int64, nullable: true}
+        fs_free_bytes: {type: integer, format: int64, nullable: true}
+        atime_quality:
+          type: object
+          nullable: true
+          description: Can "last used" be based on atime? `verdict` is reliable, doubtful or unreliable; `reasons` are machine keys.
+          properties:
+            verdict: {type: string, enum: [reliable, doubtful, unreliable]}
+            reasons: {type: array, items: {type: string}, nullable: true}
+            sample_files: {type: integer, format: int64}
+            pct_equal_mtime: {type: number}
+            pct_before_mtime: {type: number}
+            carried_over: {type: boolean}
+            mount:
+              type: object
+              properties:
+                mount_point: {type: string}
+                fs_type: {type: string}
+                options: {type: array, items: {type: string}}
+        error: {type: string, nullable: true}
+    ShareInfo:
+      type: object
+      required: [id, name, kind, last_used_basis, excludes, workers, max_ops_per_sec, created_at, root_dir_id, last_scan, latest_scan]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        kind: {type: string, enum: [bind, nfs, smb]}
+        last_used_basis: {type: string, enum: [atime, mtime, max]}
+        excludes: {type: array, items: {type: string}}
+        workers: {type: integer}
+        max_ops_per_sec: {type: integer}
+        created_at: {type: string, format: date-time}
+        root_dir_id: {type: integer, format: int64, nullable: true}
+        last_scan:
+          nullable: true
+          description: The scan whose data is published.
+          allOf: [{$ref: "#/components/schemas/ScanInfo"}]
+        latest_scan:
+          nullable: true
+          description: The most recent attempt, which may be running or have failed.
+          allOf: [{$ref: "#/components/schemas/ScanInfo"}]
+    ScanPage:
+      type: object
+      required: [items, next_before]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/ScanInfo"}}
+        next_before: {type: integer, format: int64, nullable: true}
+    ScanErrorPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, path, kind, message, at]
+            properties:
+              id: {type: integer, format: int64}
+              path: {type: string}
+              kind: {type: string}
+              message: {type: string}
+              at: {type: string, format: date-time}
+        next_after: {type: integer, format: int64, nullable: true}
+    CategoryTotal:
+      type: object
+      required: [id, key, size, alloc, files, pct]
+      properties:
+        id: {type: integer}
+        key: {type: string}
+        size: {type: integer, format: int64}
+        alloc: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+        pct: {type: number, description: "Share of the scope's total size, 0-100."}
+    ExtensionTotal:
+      type: object
+      required: [ext, category_id, size, alloc, files, pct]
+      properties:
+        ext: {type: string, description: "Empty for files without extension."}
+        category_id: {type: integer}
+        size: {type: integer, format: int64}
+        alloc: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+        pct: {type: number}
+    Category:
+      type: object
+      required: [id, key]
+      properties:
+        id: {type: integer}
+        key: {type: string}
+    ExtensionMapping:
+      type: object
+      required: [ext, category_id]
+      properties:
+        ext: {type: string}
+        category_id: {type: integer}
+    Child:
+      type: object
+      required: [id, name, size, alloc, files, dirs, pct, oldest_mtime, newest_mtime, oldest_atime, newest_atime]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        size: {type: integer, format: int64, description: "Size of the matching files below this folder."}
+        alloc: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+        dirs: {type: integer, format: int64, description: "Subfolders below, regardless of the filter."}
+        pct: {type: number, description: "Share of the parent's matching size, 0-100."}
+        oldest_mtime: {type: string, format: date-time, nullable: true}
+        newest_mtime: {type: string, format: date-time, nullable: true}
+        oldest_atime: {type: string, format: date-time, nullable: true}
+        newest_atime: {type: string, format: date-time, nullable: true}
+    ChildPage:
+      type: object
+      required: [items, parent, tier]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/Child"}}
+        next_cursor: {type: string}
+        parent: {$ref: "#/components/schemas/Totals"}
+        tier: {type: integer, enum: [1, 2, 3]}
+    Crumb:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string, description: "Empty for the share root."}
+    DirDetail:
+      type: object
+      required: [id, parent_id, name, depth, path, breadcrumb, total, direct, dirs, dirs_direct, oldest_mtime, newest_mtime, oldest_atime, newest_atime, categories]
+      properties:
+        id: {type: integer, format: int64}
+        parent_id: {type: integer, format: int64, nullable: true}
+        name: {type: string}
+        depth: {type: integer}
+        path: {type: string, description: "Path below the share root with a leading slash; empty for the root."}
+        breadcrumb: {type: array, items: {$ref: "#/components/schemas/Crumb"}}
+        total: {$ref: "#/components/schemas/Totals"}
+        direct: {$ref: "#/components/schemas/Totals"}
+        dirs: {type: integer, format: int64}
+        dirs_direct: {type: integer, format: int64}
+        oldest_mtime: {type: string, format: date-time, nullable: true}
+        newest_mtime: {type: string, format: date-time, nullable: true}
+        oldest_atime: {type: string, format: date-time, nullable: true}
+        newest_atime: {type: string, format: date-time, nullable: true}
+        matching:
+          allOf: [{$ref: "#/components/schemas/Totals"}]
+          description: Present when a filter was given.
+        categories: {type: array, items: {$ref: "#/components/schemas/CategoryTotal"}}
+    DirRow:
+      type: object
+      required: [id, name, path, size, alloc, files, dirs, size_direct, files_direct, oldest_mtime, newest_mtime, oldest_atime, newest_atime]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        path: {type: string}
+        size: {type: integer, format: int64}
+        alloc: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+        dirs: {type: integer, format: int64}
+        size_direct: {type: integer, format: int64}
+        files_direct: {type: integer, format: int64}
+        oldest_mtime: {type: string, format: date-time, nullable: true}
+        newest_mtime: {type: string, format: date-time, nullable: true}
+        oldest_atime: {type: string, format: date-time, nullable: true}
+        newest_atime: {type: string, format: date-time, nullable: true}
+    DirPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/DirRow"}}
+        next_cursor: {type: string}
+    TreeNode:
+      type: object
+      required: [name, size, files, kind]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        size: {type: integer, format: int64}
+        files: {type: integer, format: int64}
+        kind: {type: string, enum: [dir, files, other], description: "`files` = files directly inside the parent, `other` = the remaining small subfolders."}
+        children: {type: array, items: {$ref: "#/components/schemas/TreeNode"}}
+    File:
+      type: object
+      required: [id, dir_id, name, path, ext, category_id, size, alloc, mtime, atime, ctime, nlink, counted]
+      properties:
+        id: {type: integer, format: int64}
+        dir_id: {type: integer, format: int64}
+        name: {type: string}
+        path: {type: string, description: "Path below the share root with a leading slash."}
+        ext: {type: string}
+        category_id: {type: integer}
+        size: {type: integer, format: int64}
+        alloc: {type: integer, format: int64}
+        mtime: {type: string, format: date-time}
+        atime: {type: string, format: date-time}
+        ctime: {type: string, format: date-time}
+        nlink: {type: integer}
+        counted: {type: boolean, description: "False for extra hardlinks of an inode, whose size is not added to any total."}
+    FilePage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/File"}}
+        next_cursor: {type: string}
+    SearchHit:
+      type: object
+      required: [share_id, kind, id, dir_id, name, path, size, mtime]
+      properties:
+        share_id: {type: integer, format: int64}
+        kind: {type: string, enum: [file, dir]}
+        id: {type: integer, format: int64}
+        dir_id: {type: integer, format: int64}
+        name: {type: string}
+        path: {type: string}
+        size: {type: integer, format: int64}
+        mtime: {type: string, format: date-time, nullable: true}

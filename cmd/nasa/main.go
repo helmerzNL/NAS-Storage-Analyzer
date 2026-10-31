@@ -13,6 +13,7 @@ Usage:
   nasa <command> [flags]
 
 Commands:
+  serve     run the read-only REST API (no authentication yet: loopback only)
   migrate   apply database migrations and seed default categories
   scan      scan a directory tree (read-only) and store the result
   recategorize  apply the current extension mapping to stored files (no rescan)
@@ -27,6 +28,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "serve":
+		err = runServe(os.Args[2:])
 	case "migrate":
 		err = runMigrate(os.Args[2:])
 	case "scan":

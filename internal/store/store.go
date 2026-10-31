@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -149,4 +150,34 @@ func ExcludesHash(patterns []string) string {
 	sort.Strings(p)
 	sum := sha256.Sum256([]byte(strings.Join(p, "\x00")))
 	return hex.EncodeToString(sum[:8])
+}
+
+// OpenReadOnly opens a pool for the API. Every session is read-only and every
+// statement is bounded by statementTimeout, so a runaway filter cannot hold a
+// connection hostage and a bug in a handler cannot write.
+func OpenReadOnly(ctx context.Context, dsn string, maxConns int32, statementTimeout time.Duration) (*pgxpool.Pool, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, err
+	}
+	if maxConns > 0 {
+		cfg.MaxConns = maxConns
+	}
+	if cfg.ConnConfig.RuntimeParams == nil {
+		cfg.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	cfg.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	cfg.ConnConfig.RuntimeParams["application_name"] = "nasa-api"
+	if statementTimeout > 0 {
+		cfg.ConnConfig.RuntimeParams["statement_timeout"] = strconv.FormatInt(statementTimeout.Milliseconds(), 10)
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+	return pool, nil
 }
