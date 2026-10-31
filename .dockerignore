@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+.env
+secrets
+shares
+**/node_modules
+web/e2e
+internal/webui/dist
+bin
+nasa
+nasabench
+*.test
+*.out
+docs
+*.md
+!README.md
