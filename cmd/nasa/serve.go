@@ -16,6 +16,7 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
@@ -126,11 +127,13 @@ func runServe(args []string) error {
 	if base := env("NASA_UPDATE_BASE_URL", ""); base != "" {
 		checker.BaseURL = base // a mirror, or a test double
 	}
+	sharesSvc := shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc)
 	opts := api.Options{
+		Backup:         backup.New(rw.Pool, sharesSvc, svc, queue, log, version),
 		Updates:        checker,
 		PublicURL:      env("NASA_PUBLIC_URL", ""),
 		Auth:           svc,
-		Shares:         shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc),
+		Shares:         sharesSvc,
 		Queue:          queue,
 		SharesRoot:     sharesRoot,
 		Static:         webui.Handler(),

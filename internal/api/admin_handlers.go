@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -28,6 +27,7 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("GET "+v+"/settings", lvViewer, s.getSettings)
 		h("GET "+v+"/fs/dirs", lvAdmin, s.browseFolders)
 	}
+	s.backupRoutes(h, v)
 	if s.opts.Updates != nil {
 		// The administrator is told that a newer release exists; nobody else, and nothing is updated or downloaded.
 		h("GET "+v+"/system/update", lvAdmin, s.updateStatus)
@@ -207,8 +207,6 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, items[jobs.Job]{Items: list})
 }
 
-var extRE = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
-
 // scheduleRecategorize queues a re-categorisation of every share that has data.
 func (s *Server) scheduleRecategorize(ctx context.Context, by string) (int, error) {
 	list, err := s.q.Shares(ctx)
@@ -231,7 +229,7 @@ func (s *Server) scheduleRecategorize(ctx context.Context, by string) (int, erro
 
 func (s *Server) putExtension(w http.ResponseWriter, r *http.Request) error {
 	ext := strings.ToLower(strings.TrimPrefix(r.PathValue("ext"), "."))
-	if !extRE.MatchString(ext) {
+	if !shares.ValidExt(ext) {
 		return bad("an extension is 1-16 letters or digits, without a dot")
 	}
 	var in struct {
@@ -255,7 +253,7 @@ func (s *Server) putExtension(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) deleteExtension(w http.ResponseWriter, r *http.Request) error {
 	ext := strings.ToLower(strings.TrimPrefix(r.PathValue("ext"), "."))
-	if !extRE.MatchString(ext) {
+	if !shares.ValidExt(ext) {
 		return bad("an extension is 1-16 letters or digits, without a dot")
 	}
 	if err := s.opts.Shares.DeleteExtension(r.Context(), ext); err != nil {

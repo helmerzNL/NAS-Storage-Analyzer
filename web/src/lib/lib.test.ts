@@ -170,6 +170,7 @@ describe('translations', () => {
       'cat.': ['video', 'audio', 'images', 'documents', 'archives', 'code', 'disk_images', 'other'],
       'kind.': ['bind', 'nfs', 'smb'], 'mode.': ['full', 'incremental'], 'role.': ['admin', 'viewer'],
       'sort.': ['size', 'name', 'mtime', 'used', 'ext'], 'mfa.use.': ['totp', 'passkey', 'recovery'],
+      'backup.section.': ['shares', 'file_types', 'preferences'],
       'atime.reason.': ['mount_noatime', 'network_fs', 'small_sample', 'atime_equals_mtime_majority', 'atime_equals_mtime_many', 'atime_before_mtime_majority'],
     };
     for (const p of prefixes) if (p in need) for (const s of need[p]) expect(p + s in nl, p + s).toBe(true);
@@ -265,5 +266,59 @@ describe('the invitation link', () => {
   it('is built from the configured address, else from the address in use', () => {
     expect(inviteLink({ url: 'https://nas.example.com/#invite=abc', token: 'abc' })).toBe('https://nas.example.com/#invite=abc');
     expect(inviteLink({ url: '', token: token }, 'https://nas.lan:8080')).toBe(`https://nas.lan:8080/#invite=${token}`);
+  });
+});
+
+describe('backup and restore', () => {
+  it('words the progress: filled only when the total is known, and says you can leave only for the server job', async () => {
+    const b = await import('./backup.svelte');
+    expect(b.jobView({ phase: 'checking', step: 0, steps: 0 }).value).toBeNull();          // cannot be counted: the bar moves, it does not lie
+    const v = b.jobView({ phase: 'replacing', step: 2, steps: 4 });
+    expect([v.value, v.max]).toEqual([2, 4]);
+    expect(v.note).toContain(nl['backup.p.leave']);
+    expect(b.readingView().value).toBeNull();                                               // the upload is complete, the server is working
+    expect(b.makingView().value).toBeNull();
+    expect(b.downloadView(10, 0, 'en').value).toBeNull();                                   // no Content-Length: only the amount received
+    expect(b.downloadView(10, 40, 'en').value).toBe(10);
+    expect(b.uploadView(5, 20, 'en').max).toBe(20);
+    expect(b.makingView().note).not.toContain(nl['backup.p.leave']);                        // a download is not a server job: nothing to leave
+  });
+  it('maps a refusal to the sentence, with its parameters, and an unknown key to the generic one', async () => {
+    const b = await import('./backup.svelte');
+    const { ApiError } = await import('./api');
+    expect(b.refusal(new ApiError(400, 'x', 'backup_newer', 'd', 'format_version', 0, { app_version: '7.0.0' }))).toEqual({
+      key: 'newer', params: { app_version: '7.0.0', detail: 'd', field: 'format_version' } });
+    expect(b.refusal(new ApiError(409, 'x', 'already_running')).key).toBe('running');
+    expect(b.refusal(new ApiError(404, 'x', 'no_stage')).key).toBe('no_stage');
+    expect(b.refusal(new Error('boom')).key).toBe('failed');
+    expect(b.failureText('newer', { app_version: '7.0.0' })).toContain('7.0.0');
+    expect(b.failureText('invalid', { detail: 'bad cron', field: 'shares[0].cron' })).toContain('shares[0].cron');   // where in the file
+    expect(b.failureText('invalid', { detail: 'something about the whole file', field: '' })).not.toContain('()');
+    expect(b.failureText('no-such-key')).toBe(nl['backup.err.failed']);
+  });
+  it('words every reason the server can give for a refused file or a failed restore, in both languages', () => {
+    // The sentences are looked up by key at run time ('backup.err.' + key), which the check of keys in the source cannot see.
+    for (const k of ['not_backup', 'newer', 'too_big', 'too_many', 'invalid', 'invalid_nofield', 'no_stage', 'running', 'network', 'busy', 'locked', 'interrupted', 'failed']) {
+      expect('backup.err.' + k in nl, 'nl ' + k).toBe(true);
+      expect('backup.err.' + k in en, 'en ' + k).toBe(true);
+    }
+  });
+  it('shortens a long list of names and tells when a restore changes nothing', async () => {
+    const b = await import('./backup.svelte');
+    expect(b.nameList(['a', 'b'])).toBe('a, b');
+    expect(b.nameList(Array.from({ length: 12 }, (_, i) => 'n' + i), 3)).toContain('9');
+    const none = { shares_added: [], shares_updated: ['a'], shares_removed: [], file_types_changed: 0, preferences_applied: 0, preferences_skipped: [], passwords_unreadable: [], recategorize_shares: 0 };
+    expect(b.changesNothing(none)).toBe(true);                    // updating a share with its own settings is not a change worth confirming
+    expect(b.changesNothing({ ...none, shares_removed: ['x'] })).toBe(false);
+    expect(b.changesNothing({ ...none, file_types_changed: 1 })).toBe(false);
+    expect(b.changesNothing(none, true)).toBe(true);
+  });
+  it('formats sizes and seconds for the reader', async () => {
+    const b = await import('./backup.svelte');
+    expect(b.size(512, 'en')).toBe('512 B');
+    expect(b.size(2048, 'en')).toBe('2 kB');
+    expect(b.size(5 * 1024 * 1024, 'en')).toBe('5 MB');
+    expect(b.seconds(1234, 'en')).toBe('1.2 s');
+    expect(b.seconds(1234, 'nl')).toBe('1,2 s');
   });
 });

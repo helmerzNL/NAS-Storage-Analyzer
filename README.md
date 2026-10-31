@@ -300,6 +300,11 @@ files is refused, so a dropped mount does not erase your history.
 passkey. The link is shown once, works once, expires after 7 days and is never stored (only its hash); *Nieuwe inlog-link* brings back a user who cannot sign in. `NASA_PUBLIC_URL` is the address the links point at.
 Details: [`docs/deploy.md` §4b](docs/deploy.md#4b-gebruikers-uitnodigen).
 
+**Backup and restore.** *Settings → Backup* (administrators) downloads what you entered (shares, file types, everyone's display preferences) as one small JSON file and puts it back.
+It never holds a password, passkey, authenticator secret, recovery code, account or role; an SMB password is in it only encrypted with `NASA_ENCRYPTION_KEY`, which stays outside the file.
+Scan results are not in it (scan again after a restore), and it does not replace a database dump. A restore is checked first and changes nothing until you confirm; then the server does it
+in one transaction, also if you leave the page. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
+
 **Delete scripts.** An administrator can tick files in the file lists (Folders → Files, Lists) and get one script (`.ps1`, `.cmd` or `.sh`)
 that deletes exactly those files, to run on a PC that sees the share over SMB or on the NAS itself. **The application deletes nothing**: it
 writes the text and you run it. The script prints a summary, needs `DELETE <count>` to be typed, and keeps any file whose size or time differs

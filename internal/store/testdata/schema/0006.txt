@@ -1,0 +1,430 @@
+# Schema of a database after migration 0006, from pg_catalog (PostgreSQL 16).
+# Written by TestSchemaSnapshots; never edited once the migration has shipped.
+extension ltree
+extension pg_trgm
+extension plpgsql
+sequence audit_log_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence backup_jobs_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence dir_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence file_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence invitations_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence jobs_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence login_failures_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence recovery_codes_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence scan_errors_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence scans_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence shares_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence users_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+table app_settings
+  column key | text | NOT NULL |  |  |
+  column value | jsonb | NOT NULL |  |  |
+  constraint app_settings_pkey | PRIMARY KEY (key)
+  index CREATE UNIQUE INDEX app_settings_pkey ON public.app_settings USING btree (key)
+table audit_log
+  column id | bigint | NOT NULL | nextval('audit_log_id_seq'::regclass) |  |
+  column at | timestamp with time zone | NOT NULL | now() |  |
+  column user_id | bigint | NULL |  |  |
+  column username | text | NOT NULL | ''::text |  |
+  column ip | text | NOT NULL | ''::text |  |
+  column action | text | NOT NULL |  |  |
+  column target | text | NOT NULL | ''::text |  |
+  column detail | jsonb | NOT NULL | '{}'::jsonb |  |
+  constraint audit_log_pkey | PRIMARY KEY (id)
+  index CREATE INDEX audit_log_at_idx ON public.audit_log USING btree (at DESC, id DESC)
+  index CREATE UNIQUE INDEX audit_log_pkey ON public.audit_log USING btree (id)
+table backup_jobs
+  column id | bigint | NOT NULL | nextval('backup_jobs_id_seq'::regclass) |  |
+  column status | text | NOT NULL | 'running'::text |  |
+  column phase | text | NOT NULL | 'checking'::text |  |
+  column step | integer | NOT NULL | 0 |  |
+  column steps | integer | NOT NULL | 0 |  |
+  column error_key | text | NOT NULL | ''::text |  |
+  column error_params | jsonb | NOT NULL | '{}'::jsonb |  |
+  column summary | jsonb | NULL |  |  |
+  column checking_ms | integer | NULL |  |  |
+  column replacing_ms | integer | NULL |  |  |
+  column started_by | text | NOT NULL |  |  |
+  column started_at | timestamp with time zone | NOT NULL | now() |  |
+  column updated_at | timestamp with time zone | NOT NULL | now() |  |
+  column finished_at | timestamp with time zone | NULL |  |  |
+  column dismissed | boolean | NOT NULL | false |  |
+  constraint backup_jobs_phase_check | CHECK ((phase = ANY (ARRAY['checking'::text, 'replacing'::text])))
+  constraint backup_jobs_pkey | PRIMARY KEY (id)
+  constraint backup_jobs_status_check | CHECK ((status = ANY (ARRAY['running'::text, 'done'::text, 'failed'::text])))
+  index CREATE UNIQUE INDEX backup_jobs_one_running_idx ON public.backup_jobs USING btree ((true)) WHERE (status = 'running'::text)
+  index CREATE UNIQUE INDEX backup_jobs_pkey ON public.backup_jobs USING btree (id)
+table backup_stages
+  column token | text | NOT NULL |  |  |
+  column created_by | text | NOT NULL |  |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  column size | integer | NOT NULL |  |  |
+  column data | bytea | NOT NULL |  |  |
+  constraint backup_stages_pkey | PRIMARY KEY (token)
+  constraint backup_stages_token_check | CHECK ((token ~ '^[0-9a-f]{32}$'::text))
+  index CREATE INDEX backup_stages_created_idx ON public.backup_stages USING btree (created_at)
+  index CREATE UNIQUE INDEX backup_stages_pkey ON public.backup_stages USING btree (token)
+table categories
+  column id | smallint | NOT NULL |  |  |
+  column key | text | NOT NULL |  |  |
+  constraint categories_key_key | UNIQUE (key)
+  constraint categories_pkey | PRIMARY KEY (id)
+  index CREATE UNIQUE INDEX categories_key_key ON public.categories USING btree (key)
+  index CREATE UNIQUE INDEX categories_pkey ON public.categories USING btree (id)
+table dir_category_agg partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column dir_id | bigint | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  column size_direct | bigint | NOT NULL | 0 |  |
+  column alloc_direct | bigint | NOT NULL | 0 |  |
+  column files_direct | bigint | NOT NULL | 0 |  |
+  column size_total | bigint | NOT NULL | 0 |  |
+  column alloc_total | bigint | NOT NULL | 0 |  |
+  column files_total | bigint | NOT NULL | 0 |  |
+  constraint dir_category_agg_pkey | PRIMARY KEY (share_id, dir_id, category_id)
+  index CREATE INDEX dir_category_agg_cat_idx ON ONLY public.dir_category_agg USING btree (share_id, category_id, size_total DESC)
+  index CREATE UNIQUE INDEX dir_category_agg_pkey ON ONLY public.dir_category_agg USING btree (share_id, dir_id, category_id)
+table dirs partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column id | bigint | NOT NULL |  |  |
+  column parent_id | bigint | NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column depth | integer | NOT NULL |  |  |
+  column path | ltree | NOT NULL |  |  |
+  column mtime | timestamp with time zone | NOT NULL |  |  |
+  column entry_count | integer | NOT NULL |  |  |
+  column last_seen_scan | bigint | NOT NULL |  |  |
+  column size_direct | bigint | NOT NULL | 0 |  |
+  column alloc_direct | bigint | NOT NULL | 0 |  |
+  column files_direct | bigint | NOT NULL | 0 |  |
+  column dirs_direct | bigint | NOT NULL | 0 |  |
+  column d_oldest_mtime | timestamp with time zone | NULL |  |  |
+  column d_newest_mtime | timestamp with time zone | NULL |  |  |
+  column d_oldest_atime | timestamp with time zone | NULL |  |  |
+  column d_newest_atime | timestamp with time zone | NULL |  |  |
+  column size_total | bigint | NOT NULL | 0 |  |
+  column alloc_total | bigint | NOT NULL | 0 |  |
+  column files_total | bigint | NOT NULL | 0 |  |
+  column dirs_total | bigint | NOT NULL | 0 |  |
+  column oldest_mtime | timestamp with time zone | NULL |  |  |
+  column newest_mtime | timestamp with time zone | NULL |  |  |
+  column oldest_atime | timestamp with time zone | NULL |  |  |
+  column newest_atime | timestamp with time zone | NULL |  |  |
+  constraint dirs_pkey | PRIMARY KEY (share_id, id)
+  index CREATE INDEX dirs_children_idx ON ONLY public.dirs USING btree (share_id, parent_id, size_total DESC)
+  index CREATE INDEX dirs_depth_idx ON ONLY public.dirs USING btree (share_id, depth, parent_id)
+  index CREATE INDEX dirs_name_trgm ON ONLY public.dirs USING gin (name gin_trgm_ops)
+  index CREATE INDEX dirs_path_idx ON ONLY public.dirs USING gist (path)
+  index CREATE INDEX dirs_top_idx ON ONLY public.dirs USING btree (share_id, size_total DESC)
+  index CREATE UNIQUE INDEX dirs_pkey ON ONLY public.dirs USING btree (share_id, id)
+table extension_map
+  column ext | text | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  constraint extension_map_category_id_fkey | FOREIGN KEY (category_id) REFERENCES categories(id)
+  constraint extension_map_ext_check | CHECK (((ext = lower(ext)) AND (ext <> ''::text)))
+  constraint extension_map_pkey | PRIMARY KEY (ext)
+  index CREATE UNIQUE INDEX extension_map_pkey ON public.extension_map USING btree (ext)
+table files partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column id | bigint | NOT NULL | nextval('file_id_seq'::regclass) |  |
+  column dir_id | bigint | NOT NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column ext | text | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column alloc | bigint | NOT NULL |  |  |
+  column mtime | timestamp with time zone | NOT NULL |  |  |
+  column atime | timestamp with time zone | NOT NULL |  |  |
+  column ctime | timestamp with time zone | NOT NULL |  |  |
+  column nlink | integer | NOT NULL | 1 |  |
+  column dev | bigint | NULL |  |  |
+  column ino | bigint | NULL |  |  |
+  column counted | boolean | NOT NULL | true |  |
+  constraint files_pkey | PRIMARY KEY (share_id, id)
+  index CREATE INDEX files_atime_idx ON ONLY public.files USING btree (share_id, atime)
+  index CREATE INDEX files_cat_size_idx ON ONLY public.files USING btree (share_id, category_id, size DESC)
+  index CREATE INDEX files_dir_idx ON ONLY public.files USING btree (share_id, dir_id)
+  index CREATE INDEX files_ext_size_idx ON ONLY public.files USING btree (share_id, ext, size DESC)
+  index CREATE INDEX files_link_idx ON ONLY public.files USING btree (share_id, dev, ino) WHERE (nlink > 1)
+  index CREATE INDEX files_mtime_idx ON ONLY public.files USING btree (share_id, mtime)
+  index CREATE INDEX files_name_trgm ON ONLY public.files USING gin (name gin_trgm_ops)
+  index CREATE INDEX files_size_idx ON ONLY public.files USING btree (share_id, size DESC)
+  index CREATE UNIQUE INDEX files_pkey ON ONLY public.files USING btree (share_id, id)
+table invitations
+  column id | bigint | NOT NULL | nextval('invitations_id_seq'::regclass) |  |
+  column token_hash | bytea | NOT NULL |  |  |
+  column kind | text | NOT NULL |  |  |
+  column user_id | bigint | NULL |  |  |
+  column username | text | NOT NULL | ''::text |  |
+  column role | text | NOT NULL |  |  |
+  column created_by | bigint | NULL |  |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  column expires_at | timestamp with time zone | NOT NULL |  |  |
+  constraint invitations_check | CHECK (((kind = 'reset'::text) = (user_id IS NOT NULL)))
+  constraint invitations_created_by_fkey | FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+  constraint invitations_kind_check | CHECK ((kind = ANY (ARRAY['new'::text, 'reset'::text])))
+  constraint invitations_pkey | PRIMARY KEY (id)
+  constraint invitations_role_check | CHECK ((role = ANY (ARRAY['admin'::text, 'viewer'::text])))
+  constraint invitations_token_hash_key | UNIQUE (token_hash)
+  constraint invitations_user_id_fkey | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  index CREATE INDEX invitations_expires_idx ON public.invitations USING btree (expires_at)
+  index CREATE UNIQUE INDEX invitations_new_name_idx ON public.invitations USING btree (lower(username)) WHERE ((kind = 'new'::text) AND (username <> ''::text))
+  index CREATE UNIQUE INDEX invitations_pkey ON public.invitations USING btree (id)
+  index CREATE UNIQUE INDEX invitations_reset_user_idx ON public.invitations USING btree (user_id) WHERE (kind = 'reset'::text)
+  index CREATE UNIQUE INDEX invitations_token_hash_key ON public.invitations USING btree (token_hash)
+table jobs
+  column id | bigint | NOT NULL | nextval('jobs_id_seq'::regclass) |  |
+  column kind | text | NOT NULL |  |  |
+  column share_id | bigint | NOT NULL |  |  |
+  column state | text | NOT NULL | 'queued'::text |  |
+  column mode | text | NOT NULL | 'auto'::text |  |
+  column trigger | text | NOT NULL | 'manual'::text |  |
+  column requested_by | text | NOT NULL | ''::text |  |
+  column requested_at | timestamp with time zone | NOT NULL | now() |  |
+  column started_at | timestamp with time zone | NULL |  |  |
+  column finished_at | timestamp with time zone | NULL |  |  |
+  column locked_by | text | NULL |  |  |
+  column heartbeat_at | timestamp with time zone | NULL |  |  |
+  column cancel_requested | boolean | NOT NULL | false |  |
+  column scan_id | bigint | NULL |  |  |
+  column error | text | NULL |  |  |
+  constraint jobs_kind_check | CHECK ((kind = ANY (ARRAY['scan'::text, 'recategorize'::text])))
+  constraint jobs_mode_check | CHECK ((mode = ANY (ARRAY['auto'::text, 'full'::text])))
+  constraint jobs_pkey | PRIMARY KEY (id)
+  constraint jobs_share_id_fkey | FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE
+  constraint jobs_state_check | CHECK ((state = ANY (ARRAY['queued'::text, 'running'::text, 'done'::text, 'failed'::text, 'cancelled'::text])))
+  index CREATE INDEX jobs_queue_idx ON public.jobs USING btree (id) WHERE (state = 'queued'::text)
+  index CREATE UNIQUE INDEX jobs_one_active_idx ON public.jobs USING btree (share_id, kind) WHERE (state = ANY (ARRAY['queued'::text, 'running'::text]))
+  index CREATE UNIQUE INDEX jobs_pkey ON public.jobs USING btree (id)
+table login_failures
+  column id | bigint | NOT NULL | nextval('login_failures_id_seq'::regclass) |  |
+  column scope | text | NOT NULL |  |  |
+  column key | text | NOT NULL |  |  |
+  column at | timestamp with time zone | NOT NULL | now() |  |
+  constraint login_failures_pkey | PRIMARY KEY (id)
+  constraint login_failures_scope_check | CHECK ((scope = ANY (ARRAY['user'::text, 'ip'::text])))
+  index CREATE INDEX login_failures_key_idx ON public.login_failures USING btree (scope, key, at DESC)
+  index CREATE UNIQUE INDEX login_failures_pkey ON public.login_failures USING btree (id)
+table recovery_codes
+  column id | bigint | NOT NULL | nextval('recovery_codes_id_seq'::regclass) |  |
+  column user_id | bigint | NOT NULL |  |  |
+  column code_hash | bytea | NOT NULL |  |  |
+  column used_at | timestamp with time zone | NULL |  |  |
+  constraint recovery_codes_pkey | PRIMARY KEY (id)
+  constraint recovery_codes_user_id_fkey | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  index CREATE INDEX recovery_codes_user_idx ON public.recovery_codes USING btree (user_id)
+  index CREATE UNIQUE INDEX recovery_codes_pkey ON public.recovery_codes USING btree (id)
+table scan_errors
+  column id | bigint | NOT NULL | nextval('scan_errors_id_seq'::regclass) |  |
+  column scan_id | bigint | NOT NULL |  |  |
+  column path | text | NOT NULL |  |  |
+  column kind | text | NOT NULL |  |  |
+  column message | text | NOT NULL |  |  |
+  column at | timestamp with time zone | NOT NULL |  |  |
+  constraint scan_errors_pkey | PRIMARY KEY (id)
+  constraint scan_errors_scan_id_fkey | FOREIGN KEY (scan_id) REFERENCES scans(id) ON DELETE CASCADE
+  index CREATE INDEX scan_errors_scan_idx ON public.scan_errors USING btree (scan_id)
+  index CREATE UNIQUE INDEX scan_errors_pkey ON public.scan_errors USING btree (id)
+table scans
+  column id | bigint | NOT NULL | nextval('scans_id_seq'::regclass) |  |
+  column share_id | bigint | NOT NULL |  |  |
+  column status | text | NOT NULL | 'running'::text |  |
+  column mode | text | NOT NULL |  |  |
+  column trigger | text | NOT NULL | 'manual'::text |  |
+  column started_at | timestamp with time zone | NOT NULL | now() |  |
+  column finished_at | timestamp with time zone | NULL |  |  |
+  column excludes_hash | text | NOT NULL | ''::text |  |
+  column dirs | bigint | NOT NULL | 0 |  |
+  column reused_dirs | bigint | NOT NULL | 0 |  |
+  column files | bigint | NOT NULL | 0 |  |
+  column bytes | bigint | NOT NULL | 0 |  |
+  column alloc_bytes | bigint | NOT NULL | 0 |  |
+  column error_count | bigint | NOT NULL | 0 |  |
+  column atime_quality | jsonb | NULL |  |  |
+  column error | text | NULL |  |  |
+  column fs_total_bytes | bigint | NULL |  |  |
+  column fs_free_bytes | bigint | NULL |  |  |
+  column progress | jsonb | NULL |  |  |
+  constraint scans_mode_check | CHECK ((mode = ANY (ARRAY['full'::text, 'incremental'::text])))
+  constraint scans_pkey | PRIMARY KEY (id)
+  constraint scans_share_id_fkey | FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE
+  constraint scans_status_check | CHECK ((status = ANY (ARRAY['running'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])))
+  index CREATE INDEX scans_share_started_idx ON public.scans USING btree (share_id, started_at DESC)
+  index CREATE UNIQUE INDEX scans_one_running_idx ON public.scans USING btree (share_id) WHERE (status = 'running'::text)
+  index CREATE UNIQUE INDEX scans_pkey ON public.scans USING btree (id)
+table schema_migrations
+  column version | integer | NOT NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column applied_at | timestamp with time zone | NOT NULL | now() |  |
+  constraint schema_migrations_pkey | PRIMARY KEY (version)
+  index CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (version)
+table sessions
+  column token_hash | bytea | NOT NULL |  |  |
+  column user_id | bigint | NOT NULL |  |  |
+  column stage | text | NOT NULL |  |  |
+  column csrf_token | text | NOT NULL |  |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  column last_seen_at | timestamp with time zone | NOT NULL | now() |  |
+  column idle_expires_at | timestamp with time zone | NOT NULL |  |  |
+  column absolute_expires_at | timestamp with time zone | NOT NULL |  |  |
+  column ip | text | NOT NULL | ''::text |  |
+  column user_agent | text | NOT NULL | ''::text |  |
+  constraint sessions_pkey | PRIMARY KEY (token_hash)
+  constraint sessions_stage_check | CHECK ((stage = ANY (ARRAY['pending'::text, 'enroll'::text, 'active'::text])))
+  constraint sessions_user_id_fkey | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  index CREATE INDEX sessions_user_idx ON public.sessions USING btree (user_id)
+  index CREATE UNIQUE INDEX sessions_pkey ON public.sessions USING btree (token_hash)
+table share_ext_agg partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column ext | text | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column alloc | bigint | NOT NULL |  |  |
+  column files | bigint | NOT NULL |  |  |
+  constraint share_ext_agg_pkey | PRIMARY KEY (share_id, ext)
+  index CREATE UNIQUE INDEX share_ext_agg_pkey ON ONLY public.share_ext_agg USING btree (share_id, ext)
+table shares
+  column id | bigint | NOT NULL | nextval('shares_id_seq'::regclass) |  |
+  column name | text | NOT NULL |  |  |
+  column kind | text | NOT NULL |  |  |
+  column config | jsonb | NOT NULL | '{}'::jsonb |  |
+  column excludes | text[] | NOT NULL | '{}'::text[] |  |
+  column workers | integer | NOT NULL | 16 |  |
+  column max_ops_per_sec | integer | NOT NULL | 0 |  |
+  column last_used_basis | text | NOT NULL | 'atime'::text |  |
+  column last_scan_id | bigint | NULL |  |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  column secret_enc | bytea | NULL |  |  |
+  column cron | text | NOT NULL | ''::text |  |
+  column next_run_at | timestamp with time zone | NULL |  |  |
+  column last_run_at | timestamp with time zone | NULL |  |  |
+  column full_scan_every | integer | NOT NULL | 7 |  |
+  column max_ops_day | integer | NOT NULL | 0 |  |
+  column day_start_hour | integer | NOT NULL | 8 |  |
+  column day_end_hour | integer | NOT NULL | 22 |  |
+  column retention_scans | integer | NOT NULL | 104 |  |
+  column retention_days | integer | NOT NULL | 0 |  |
+  column snapshot_depth | integer | NOT NULL | 4 |  |
+  constraint shares_day_end_hour_check | CHECK (((day_end_hour >= 0) AND (day_end_hour <= 24)))
+  constraint shares_day_start_hour_check | CHECK (((day_start_hour >= 0) AND (day_start_hour <= 23)))
+  constraint shares_full_scan_every_check | CHECK ((full_scan_every >= 0))
+  constraint shares_kind_check | CHECK ((kind = ANY (ARRAY['bind'::text, 'nfs'::text, 'smb'::text])))
+  constraint shares_last_used_basis_check | CHECK ((last_used_basis = ANY (ARRAY['atime'::text, 'mtime'::text, 'max'::text])))
+  constraint shares_max_ops_day_check | CHECK ((max_ops_day >= 0))
+  constraint shares_max_ops_per_sec_check | CHECK ((max_ops_per_sec >= 0))
+  constraint shares_name_key | UNIQUE (name)
+  constraint shares_pkey | PRIMARY KEY (id)
+  constraint shares_retention_days_check | CHECK ((retention_days >= 0))
+  constraint shares_retention_scans_check | CHECK ((retention_scans >= 0))
+  constraint shares_snapshot_depth_check | CHECK (((snapshot_depth >= 1) AND (snapshot_depth <= 12)))
+  constraint shares_workers_check | CHECK (((workers >= 1) AND (workers <= 256)))
+  index CREATE UNIQUE INDEX shares_name_key ON public.shares USING btree (name)
+  index CREATE UNIQUE INDEX shares_pkey ON public.shares USING btree (id)
+table snapshot_category
+  column scan_id | bigint | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column files | bigint | NOT NULL |  |  |
+  constraint snapshot_category_pkey | PRIMARY KEY (scan_id, category_id)
+  constraint snapshot_category_scan_id_fkey | FOREIGN KEY (scan_id) REFERENCES snapshots(scan_id) ON DELETE CASCADE
+  index CREATE UNIQUE INDEX snapshot_category_pkey ON public.snapshot_category USING btree (scan_id, category_id)
+table snapshot_dir
+  column scan_id | bigint | NOT NULL |  |  |
+  column dir_id | bigint | NOT NULL |  |  |
+  column path | text | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column files | bigint | NOT NULL |  |  |
+  constraint snapshot_dir_pkey | PRIMARY KEY (scan_id, dir_id)
+  constraint snapshot_dir_scan_id_fkey | FOREIGN KEY (scan_id) REFERENCES snapshots(scan_id) ON DELETE CASCADE
+  index CREATE INDEX snapshot_dir_dir_idx ON public.snapshot_dir USING btree (dir_id, scan_id)
+  index CREATE UNIQUE INDEX snapshot_dir_pkey ON public.snapshot_dir USING btree (scan_id, dir_id)
+table snapshot_ext
+  column scan_id | bigint | NOT NULL |  |  |
+  column ext | text | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column files | bigint | NOT NULL |  |  |
+  constraint snapshot_ext_pkey | PRIMARY KEY (scan_id, ext)
+  constraint snapshot_ext_scan_id_fkey | FOREIGN KEY (scan_id) REFERENCES snapshots(scan_id) ON DELETE CASCADE
+  index CREATE UNIQUE INDEX snapshot_ext_pkey ON public.snapshot_ext USING btree (scan_id, ext)
+table snapshots
+  column scan_id | bigint | NOT NULL |  |  |
+  column share_id | bigint | NOT NULL |  |  |
+  column taken_at | timestamp with time zone | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column alloc | bigint | NOT NULL |  |  |
+  column files | bigint | NOT NULL |  |  |
+  column dirs | bigint | NOT NULL |  |  |
+  constraint snapshots_pkey | PRIMARY KEY (scan_id)
+  constraint snapshots_scan_id_fkey | FOREIGN KEY (scan_id) REFERENCES scans(id) ON DELETE CASCADE
+  constraint snapshots_share_id_fkey | FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE
+  index CREATE INDEX snapshots_share_idx ON public.snapshots USING btree (share_id, taken_at)
+  index CREATE UNIQUE INDEX snapshots_pkey ON public.snapshots USING btree (scan_id)
+table users
+  column id | bigint | NOT NULL | nextval('users_id_seq'::regclass) |  |
+  column username | text | NOT NULL |  |  |
+  column display_name | text | NOT NULL | ''::text |  |
+  column password_hash | text | NULL |  |  |
+  column role | text | NOT NULL |  |  |
+  column auth_source | text | NOT NULL | 'local'::text |  |
+  column external_subject | text | NULL |  |  |
+  column totp_secret_enc | bytea | NULL |  |  |
+  column totp_enabled | boolean | NOT NULL | false |  |
+  column totp_last_step | bigint | NOT NULL | 0 |  |
+  column disabled | boolean | NOT NULL | false |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  column last_login_at | timestamp with time zone | NULL |  |  |
+  column prefs | jsonb | NOT NULL | '{}'::jsonb |  |
+  constraint users_pkey | PRIMARY KEY (id)
+  constraint users_role_check | CHECK ((role = ANY (ARRAY['admin'::text, 'viewer'::text])))
+  constraint users_username_check | CHECK ((username ~ '^[A-Za-z0-9._@-]{3,64}$'::text))
+  index CREATE UNIQUE INDEX users_external_idx ON public.users USING btree (auth_source, external_subject) WHERE (external_subject IS NOT NULL)
+  index CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)
+  index CREATE UNIQUE INDEX users_username_idx ON public.users USING btree (lower(username))
+table webauthn_ceremonies
+  column id | text | NOT NULL |  |  |
+  column user_id | bigint | NULL |  |  |
+  column kind | text | NOT NULL |  |  |
+  column data | jsonb | NOT NULL |  |  |
+  column expires_at | timestamp with time zone | NOT NULL |  |  |
+  constraint webauthn_ceremonies_pkey | PRIMARY KEY (id)
+  constraint webauthn_ceremonies_user_id_fkey | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  index CREATE UNIQUE INDEX webauthn_ceremonies_pkey ON public.webauthn_ceremonies USING btree (id)
+table webauthn_credentials
+  column credential_id | bytea | NOT NULL |  |  |
+  column user_id | bigint | NOT NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column public_key | bytea | NOT NULL |  |  |
+  column attestation_type | text | NOT NULL | ''::text |  |
+  column aaguid | bytea | NOT NULL | '\x'::bytea |  |
+  column sign_count | bigint | NOT NULL | 0 |  |
+  column transports | text[] | NOT NULL | '{}'::text[] |  |
+  column backup_eligible | boolean | NOT NULL | false |  |
+  column backup_state | boolean | NOT NULL | false |  |
+  column user_verified | boolean | NOT NULL | false |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  column last_used_at | timestamp with time zone | NULL |  |  |
+  constraint webauthn_credentials_pkey | PRIMARY KEY (credential_id)
+  constraint webauthn_credentials_user_id_fkey | FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  index CREATE INDEX webauthn_credentials_user_idx ON public.webauthn_credentials USING btree (user_id)
+  index CREATE UNIQUE INDEX webauthn_credentials_pkey ON public.webauthn_credentials USING btree (credential_id)
+function
+  CREATE OR REPLACE FUNCTION public.drop_share_partitions(p_share bigint)
+   RETURNS void
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE t text;
+  BEGIN
+      FOREACH t IN ARRAY ARRAY['dirs', 'files', 'dir_category_agg', 'share_ext_agg'] LOOP
+          EXECUTE format('DROP TABLE IF EXISTS %I', t || '_s' || p_share);
+      END LOOP;
+  END $function$
+function
+  CREATE OR REPLACE FUNCTION public.ensure_share_partitions(p_share bigint)
+   RETURNS void
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE t text;
+  BEGIN
+      FOREACH t IN ARRAY ARRAY['dirs', 'files', 'dir_category_agg', 'share_ext_agg'] LOOP
+          EXECUTE format('CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES IN (%s)',
+                         t || '_s' || p_share, t, p_share);
+      END LOOP;
+  END $function$

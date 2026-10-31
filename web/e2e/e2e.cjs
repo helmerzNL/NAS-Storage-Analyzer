@@ -675,11 +675,103 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('.settings-nav a[href="/admin/system"] .update-dot', { timeout: 5000 }).catch(() => { throw new Error('no dot on the System entry of the menu'); });
     });
 
+    await step('backup and restore: a file the owner holds, checked first, restored by the server, refused when wrong', async () => {
+      // Whatever a test changes through the API, with the CSRF token of the signed-in session, as the interface does.
+      const api = (method, p, body) => page.evaluate(async ([m, p, b]) => {
+        const st = await (await fetch('/api/v1/auth/status')).json();
+        const r = await fetch('/api/v1' + p, { method: m, headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': st.csrf_token }, body: b ? JSON.stringify(b) : undefined });
+        const t = await r.text(); return [r.status, t ? JSON.parse(t) : null];
+      }, [method, p, body ?? null]);
+      await page.goto(BASE + '/admin/backup');
+      await page.waitForSelector('[data-testid=backup-download]');
+      await page.waitForFunction(() => !document.querySelector('.tools a.badge'), null, { timeout: 30000 });   // no scan is running: a restore waits for them
+
+      // The download is a file, said to be one, with the server's and the download's time shown after it.
+      const [dl] = await Promise.all([page.waitForEvent('download'), page.click('[data-testid=backup-download]')]);
+      if (!/^nas-storage-analyzer-backup-\d{4}-\d\d-\d\d\.json$/.test(dl.suggestedFilename())) throw new Error('file name ' + dl.suggestedFilename());
+      const file = path.join(SHOTS, 'backup.json');
+      await dl.saveAs(file);
+      const text = fs.readFileSync(file, 'utf8');
+      const backup = JSON.parse(text);
+      if (backup.format !== 'nas-storage-analyzer-backup' || backup.includes_files !== false || !backup.shares.some((x) => x.name === 'Media')) throw new Error('the file: ' + text.slice(0, 200));
+      for (const w of [PASSWORD, 'argon2', 'totp', 'recovery', 'webauthn', 'credential', 'password', '"role"', 'csrf', 'session']) if (text.toLowerCase().includes(w.toLowerCase())) throw new Error('the backup holds "' + w + '"');
+      await page.waitForSelector('[data-testid=backup-timing]');
+      if (!/Server: [\d,]+ s, download: [\d,]+ s/.test(await page.textContent('[data-testid=backup-timing]'))) throw new Error('where the time went is not shown');
+
+      // Change what the file covers.
+      const made = await api('POST', '/shares', { name: 'Tijdelijk', kind: 'bind', path: SHARE_APP_PATH + '/media' });
+      if (made[0] !== 201) throw new Error('could not add a share: ' + JSON.stringify(made));
+      if ((await api('PUT', '/extension-map/zzz', { category_id: 1 }))[0] !== 200) throw new Error('could not add a file type');
+
+      // A file that is not a backup is refused with the reason, and nothing is changed or kept.
+      const junk = path.join(SHOTS, 'junk.json');
+      fs.writeFileSync(junk, '{"hello": 1}');
+      await page.setInputFiles('[data-testid=backup-file]', junk);
+      await expectText(page, '[data-testid=backup-error]', /geen back-upbestand/, 'a file that is not a backup');
+      if (await page.$('[data-testid=backup-confirm]')) throw new Error('a refused file got a confirmation');
+      // A backup with one bad share is refused as a whole, and says where.
+      const bad = JSON.parse(text); bad.shares[0].cron = 'elke dag';
+      const badFile = path.join(SHOTS, 'bad.json');
+      fs.writeFileSync(badFile, JSON.stringify(bad));
+      await page.setInputFiles('[data-testid=backup-file]', badFile);
+      await expectText(page, '[data-testid=backup-error]', /shares\[0\]\.cron/, 'a bad share');
+      // A file from a newer version is refused with the version that made it.
+      const newer = path.join(SHOTS, 'newer.json');
+      fs.writeFileSync(newer, JSON.stringify({ format: 'nas-storage-analyzer-backup', format_version: 2, app_version: '7.0.0' }));
+      await page.setInputFiles('[data-testid=backup-file]', newer);
+      await expectText(page, '[data-testid=backup-error]', /nieuwere versie \(7\.0\.0\)/, 'a newer file');
+      const afterRefusals = await api('GET', '/shares');
+      if (!JSON.stringify(afterRefusals[1]).includes('Tijdelijk')) throw new Error('a refused file changed the shares');
+
+      // A good file is checked first and the confirmation says what will happen, including what is lost.
+      await page.setInputFiles('[data-testid=backup-file]', file);
+      await page.waitForSelector('[data-testid=backup-confirm]');
+      const removed = await page.textContent('[data-testid=backup-removed]');
+      if (!/Tijdelijk/.test(removed) || !/scangegevens/.test(removed)) throw new Error('what is removed: ' + removed);
+      if (!(await page.$('[data-testid=backup-types]'))) throw new Error('the file-type change is not said');
+      if (!/accounts, wachtwoorden, passkeys/.test(await page.textContent('[data-testid=backup-confirm]'))) throw new Error('what stays is not said');
+      if ((await api('GET', '/shares'))[1].items.length < 2) throw new Error('choosing the file changed something');
+      await shot('40-backup-confirm');
+      // Changing one's mind removes the staged file and changes nothing.
+      await page.click('[data-testid=backup-cancel]');
+      await page.waitForSelector('[data-testid=backup-confirm]', { state: 'detached' });
+      if (!JSON.stringify((await api('GET', '/shares'))[1]).includes('Tijdelijk')) throw new Error('cancelling changed something');
+
+      // Confirm: the server restores, the page reloads and says so. Scan data of the share that stays is still there.
+      await page.setInputFiles('[data-testid=backup-file]', file);
+      await page.waitForSelector('[data-testid=backup-confirm]');
+      await page.click('[data-testid=backup-start]');
+      // The changes above queued the worker's re-categorising, and a restore waits for scans: if it says so, the file is kept and the same button
+      // works a moment later. Either way it ends in the outcome.
+      for (const until = Date.now() + 30000; Date.now() < until;) {
+        const state = await page.evaluate(() => document.querySelector('[data-testid=backup-outcome]') ? 'done' : document.querySelector('[data-testid=backup-dialog-error]') ? 'busy' : 'wait').catch(() => 'wait');
+        if (state === 'done') break;
+        if (state === 'busy') { await page.waitForTimeout(400); await page.click('[data-testid=backup-start]').catch(() => {}); } else await page.waitForTimeout(200);
+      }
+      await expectText(page, '[data-testid=backup-outcome]', /teruggezet/, 'the outcome after the restore');
+      if (!/controleren op de server [\d,]+ s, vervangen [\d,]+ s/.test(await page.textContent('[data-testid=backup-outcome]'))) throw new Error('where the time went after a restore');
+      await shot('41-backup-done');
+      const shares = (await api('GET', '/shares'))[1].items;
+      if (shares.some((x) => x.name === 'Tijdelijk')) throw new Error('the share that is not in the file is still there');
+      if (!shares.find((x) => x.name === 'Media')?.last_scan) throw new Error('the share that stays lost its scan data');
+      if (JSON.stringify((await api('GET', '/extension-map'))[1]).includes('"zzz"')) throw new Error('the file type that is not in the file is still there');
+      // Restoring what is already there asks for nothing.
+      await page.setInputFiles('[data-testid=backup-file]', file);
+      await page.waitForSelector('[data-testid=backup-nothing]');
+      if (!(await page.$('[data-testid=backup-start][disabled]'))) throw new Error('a restore that changes nothing can be started');
+      await page.click('[data-testid=backup-cancel]');
+      // Both ends are in the audit log, with counts and no content.
+      await page.goto(BASE + '/admin/audit');
+      await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=backup.restore');
+      const audit = await page.textContent('[data-testid=audit-table]');
+      for (const a of ['backup.create', 'backup.restore.start', 'backup.restore']) if (!audit.includes(a)) throw new Error('missing ' + a);
+    });
+
     await step('settings menu: grouped parts with icons, the open part marked by more than colour', async () => {
       await page.goto(BASE + '/account');
       await page.waitForSelector('.settings-nav');
       const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
-      const want = [['Persoonlijk', ['/account', '/account/security']], ['Gegevens', ['/admin/shares', '/admin/extensions']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
+      const want = [['Persoonlijk', ['/account', '/account/security']], ['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
       if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
       for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
       const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));
@@ -799,7 +891,7 @@ const expectText = async (page, sel, re, msg) => {
           throw new Error(`${name} is ${wide}px wider than a phone screen: ${who.join(' ')}`);
         }
       };
-      for (const [where, name] of [['/admin/audit', 'audit'], ['/account', 'appearance'], ['/', 'dashboard']]) {
+      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/account', 'appearance'], ['/', 'dashboard']]) {
         await page.goto(BASE + where);
         await page.waitForSelector('main');
         await page.waitForTimeout(350);

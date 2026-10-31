@@ -18,6 +18,7 @@
   import Account from './routes/Account.svelte';
   import Appearance from './routes/Appearance.svelte';
   import System from './routes/System.svelte';
+  import Backup from './routes/Backup.svelte';
   import Invite from './routes/Invite.svelte';
   import { invite } from './lib/invite.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
@@ -93,6 +94,7 @@
       {:else if route.path.startsWith('/search')}<Search />
       {:else if route.path.startsWith('/admin/shares') && isAdmin()}<SettingsLayout><Shares /></SettingsLayout>
       {:else if route.path.startsWith('/admin/extensions') && isAdmin()}<SettingsLayout><Extensions /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/backup') && isAdmin()}<SettingsLayout><Backup /></SettingsLayout>
       {:else if route.path.startsWith('/admin/users') && isAdmin()}<SettingsLayout><Users /></SettingsLayout>
       {:else if route.path.startsWith('/admin/audit') && isAdmin()}<SettingsLayout><Audit /></SettingsLayout>
       {:else if route.path.startsWith('/admin/system') && isAdmin()}<SettingsLayout><System /></SettingsLayout>

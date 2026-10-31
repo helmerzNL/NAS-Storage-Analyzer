@@ -190,6 +190,14 @@ td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }  
 .nav a, .settings-nav a { position: relative; }   /* a screen-reader-only text inside a link stays inside it: otherwise it sits where the page ends and widens it */
 .table-title { text-align: left; font-weight: 700; padding: 14px 16px 6px; font-size: 1.05rem; caption-side: top; }
 
+/* Backup and restore: one block for whatever is slow (backup-restore.md). The bar is only filled when it knows its total; otherwise it moves. */
+.bk-status:empty { display: none; }
+.bk-progress { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border: 1px solid var(--lijn); border-radius: var(--radius-sm); background: var(--surface-field); }
+.bk-label { font-weight: 600; }
+.bk-progress progress { width: 100%; height: 10px; accent-color: var(--accent); }
+.bk-list { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+.bk-bad { color: var(--danger); }
+
 /* Delete scripts: the tick box column of the file lists, the bar that follows the screen while files are ticked, and the command to run */
 .selcell { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -8px -4px; cursor: pointer; }   /* a 44 px target around a small box */
 th.sel, td.sel { width: 1%; padding-left: 4px; padding-right: 0; }

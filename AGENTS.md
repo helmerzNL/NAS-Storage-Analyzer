@@ -164,6 +164,10 @@ A pull request that raises a size, rate or timeout limit states the new value as
   (`internal/auth/invitations.go`, [ADR 0006](docs/adr/0006-invitation-links.md)): no route lets an administrator choose or learn a credential; an invitation is a 32-byte token of which
   only the SHA-256 is stored, shown once, usable once, valid seven days, carried in the URL fragment and never logged or audited; every bad token is one and the same answer; a reset replaces credentials only
   in the transaction that stores the new ones; the role is the administrator's choice at the moment the link is made; and a passkey goes through the same registration ceremony as any other.
+- **In-app backup follows App-Guidance's [`backup-restore.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/backup-restore.md)**
+  (`internal/backup`, [ADR 0007](docs/adr/0007-in-app-backup-restore.md)): the file never holds anything that unlocks the application (no credential, session, invitation, account or role; an SMB password
+  only as the ciphertext sealed with the key in the environment), and a file is refused whole rather than partly accepted; the restore is one transaction run by the server as a job; and **a new table
+  or a new `shares` column is classified in `backup.Tables` / `backup.ShareColumns` in the same change**, with a seed and a round-trip test if the owner enters it (a test fails when it is not).
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
   the installation; it never updates anything; and `NASA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.
