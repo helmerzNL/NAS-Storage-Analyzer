@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { session, refreshSession, initPrefs, isAdmin, isActive, signOut, setPref, prefs } from './lib/session.svelte';
+  import { session, refreshSession, initPrefs, isAdmin, isActive, setPref, prefs } from './lib/session.svelte';
   import { route, match, link, navigate } from './lib/router.svelte';
   import { t, i18n } from './lib/i18n.svelte';
   import { live, startLive, stopLive } from './lib/live.svelte';
@@ -18,11 +18,13 @@
   import Account from './routes/Account.svelte';
   import Appearance from './routes/Appearance.svelte';
   import System from './routes/System.svelte';
+  import About from './routes/About.svelte';
+  import UserMenu from './components/UserMenu.svelte';
   import Backup from './routes/Backup.svelte';
   import Invite from './routes/Invite.svelte';
   import { invite } from './lib/invite.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
-  import { update, loadUpdate, resetUpdate, bannerVisible, dismissedState } from './lib/updates.svelte';
+  import { loadUpdate, resetUpdate } from './lib/updates.svelte';
   import SettingsLayout from './components/SettingsLayout.svelte';
 
   initPrefs();
@@ -34,15 +36,16 @@
   $effect(() => { if (isActive()) { startLive(); return () => stopLive(); } });
   // An update is the administrator's business: ask once after an administrator signs in (the server remembers the answer), nobody else.
   $effect(() => { if (isAdmin()) void loadUpdate(); else resetUpdate(); });
-  const updateDot = $derived(isAdmin() && bannerVisible(update.status, dismissedState.version));
 
-  const inSettings = $derived(route.path.startsWith('/account') || route.path.startsWith('/admin/'));
+  // Settings are the application's own (shares, file types, backup, users, audit log, system): administrators only. What belongs to the signed-in
+  // person (appearance and language, security) and About live in the user menu, so a viewer has no Settings entry at all.
+  const inSettings = $derived(route.path.startsWith('/admin/'));
   const nav = $derived([
     { href: '/', label: t('nav.dashboard'), on: route.path === '/' },
     { href: '/browse', label: t('nav.browse'), on: route.path.startsWith('/browse') },
     { href: '/lists', label: t('nav.lists'), on: route.path.startsWith('/lists') },
     { href: '/search', label: t('nav.search'), on: route.path.startsWith('/search') },
-    { href: '/account', label: t('nav.settings'), on: inSettings },
+    ...(isAdmin() ? [{ href: '/admin/shares', label: t('nav.settings'), on: inSettings }] : []),
   ]);
   const browse = $derived(match('/browse/:share?/:dir?', route.path));
   const toggleTheme = () => setPref('theme', prefs.theme === 'dark' ? 'light' : prefs.theme === 'light' ? 'system' : 'dark');
@@ -67,7 +70,7 @@
           <BetaBadge />
         </a>
         <nav class="nav" aria-label={t('nav.main')}>
-          {#each nav as n}<a href={n.href} use:link class:active={n.on} aria-current={n.on ? 'page' : undefined}>{n.label}{#if n.href === '/account' && updateDot}<span class="update-dot" title={t('update.dot')}></span><span class="sr-only"> ({t('update.dot')})</span>{/if}</a>{/each}
+          {#each nav as n}<a href={n.href} use:link class:active={n.on} aria-current={n.on ? 'page' : undefined}>{n.label}</a>{/each}
         </nav>
         <div class="tools">
         {#if live.running > 0}<a class="badge info" href="/" use:link title={t('live.running')}>⟳ {t('live.running.n', { n: live.running })}</a>{/if}
@@ -81,8 +84,7 @@
             {:else if prefs.theme === 'light'}<circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
             {:else}<circle cx="12" cy="12" r="9" /><path d="M12 3v18" fill="currentColor" />{/if}
           </svg></button>
-        <a class="btn small ghost" href="/account" use:link data-testid="account-link">{session.user?.username}</a>
-        <button class="btn small" onclick={async () => { await signOut(); }} data-testid="signout">{t('auth.signout')}</button>
+        <UserMenu />
         </div>
       </div>
     </header>
@@ -92,14 +94,15 @@
       {:else if browse}<Browse shareId={browse.share} dirId={browse.dir} />
       {:else if route.path.startsWith('/lists')}<Lists />
       {:else if route.path.startsWith('/search')}<Search />
-      {:else if route.path.startsWith('/admin/shares') && isAdmin()}<SettingsLayout><Shares /></SettingsLayout>
-      {:else if route.path.startsWith('/admin/extensions') && isAdmin()}<SettingsLayout><Extensions /></SettingsLayout>
-      {:else if route.path.startsWith('/admin/backup') && isAdmin()}<SettingsLayout><Backup /></SettingsLayout>
-      {:else if route.path.startsWith('/admin/users') && isAdmin()}<SettingsLayout><Users /></SettingsLayout>
-      {:else if route.path.startsWith('/admin/audit') && isAdmin()}<SettingsLayout><Audit /></SettingsLayout>
-      {:else if route.path.startsWith('/admin/system') && isAdmin()}<SettingsLayout><System /></SettingsLayout>
-      {:else if route.path.startsWith('/account/security')}<SettingsLayout><Account /></SettingsLayout>
-      {:else if route.path === '/account' || route.path === '/account/'}<SettingsLayout><Appearance /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/shares') && isAdmin()}<SettingsLayout scope="settings"><Shares /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/extensions') && isAdmin()}<SettingsLayout scope="settings"><Extensions /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/backup') && isAdmin()}<SettingsLayout scope="settings"><Backup /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/users') && isAdmin()}<SettingsLayout scope="settings"><Users /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/audit') && isAdmin()}<SettingsLayout scope="settings"><Audit /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/system') && isAdmin()}<SettingsLayout scope="settings"><System /></SettingsLayout>
+      {:else if route.path.startsWith('/about')}<About />
+      {:else if route.path.startsWith('/account/security')}<SettingsLayout scope="account"><Account /></SettingsLayout>
+      {:else if route.path === '/account' || route.path === '/account/'}<SettingsLayout scope="account"><Appearance /></SettingsLayout>
       {:else}<div class="card"><h1>404</h1><p class="muted">{t('app.notfound')}</p><a href="/" use:link>{t('nav.dashboard')}</a></div>{/if}
     </main>
   </div>

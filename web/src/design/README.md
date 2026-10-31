@@ -28,8 +28,8 @@ The icons in the settings menu are Material Design Icons paths (`lib/icons.ts`, 
    as *no preference*, so a later change of the brand colour reaches everyone who never chose one.
 4. **Page header.** The starter's `.page-head` is sticky; here it is sticky only on a wide screen, under the top bar, and static on a phone
    (two stuck bars would eat a fifth of the screen). Inside the settings layout the title is plain, because the menu already sits beside it.
-5. **Phone top bar** takes two rows (brand and controls, then the swipeable navigation); the units choice and the user name leave the bar there
-   (units live under Settings → Appearance and language).
+5. **Phone top bar** takes two rows (brand and controls, then the swipeable navigation); the units choice leaves the bar there (it lives under the user menu → Appearance and language) and the user name collapses to the
+   person icon, which still opens the menu (Sign out is in it).
 6. **Targets are 44 px**, also the small buttons in a table row; a row's actions wrap instead of widening the table.
 7. Status badges (`.badge.ok|warn|bad|info`) are drawn like the starter's `.pill`: a dot and a tint from `--tone-*`, never from the accent.
 

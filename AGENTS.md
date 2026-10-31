@@ -172,6 +172,10 @@ A pull request that raises a size, rate or timeout limit states the new value as
   (`internal/reset`, [ADR 0008](docs/adr/0008-factory-reset.md)): administrators only; the request carries the typed word **and** a fresh proof (a passkey, or the password with a code; never a password alone), wrong proofs
   count against the sign-in lockout; it empties **every table** found in the catalog (not a list), in one transaction, refused while a scan runs; the only record is one log line with counts and no contents.
   **A new table needs no change here, but `internal/reset`'s test must fill it** (it fails until it does), and a feature that keeps state outside the database has to be reached by the wipe.
+- **Navigation** ([ADR 0009](docs/adr/0009-navigation-user-menu-settings-about.md)): what belongs to the signed-in person (appearance and language, security) and *About* and *Sign out* are in the user menu (the name in the
+  top bar); *Settings* are the application's own, for administrators, and a part the person may not use is not shown (courtesy: the server stays the control). **About** is where the version, the release channel
+  (with the beta label) and, for administrators, the update status are shown. A new settings part goes in `SettingsLayout` under a group named for what is in it, with an icon and a label, and a new
+  personal screen goes in the user menu; the browser test checks both menus.
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
   the installation; it never updates anything; and `NASA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.

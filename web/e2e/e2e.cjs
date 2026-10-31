@@ -32,6 +32,8 @@ async function step(name, fn) {
   try { await fn(); results.push(['ok', name, Date.now() - t0]); console.log(`ok   ${name} (${Date.now() - t0} ms)`); }
   catch (e) { failures++; results.push(['FAIL', name, e.message]); console.log(`FAIL ${name}\n     ${e.message.split('\n')[0]}`); throw e; }
 }
+// Signing out is an item of the user menu (the name in the top bar): open it, then choose it.
+const signOutOf = async (pg) => { await pg.click('[data-testid=user-menu]'); await pg.click('[data-testid=signout]'); };
 const expectText = async (page, sel, re, msg) => {
   await page.waitForSelector(sel, { timeout: 15000 });
   await page.waitForFunction(([s, r]) => new RegExp(r).test(document.querySelector(s)?.textContent ?? ''), [sel, re.source], { timeout: 15000 })
@@ -390,14 +392,14 @@ const expectText = async (page, sel, re, msg) => {
       await page.click('[data-testid=add-passkey]');
       await page.waitForSelector('[data-testid=passkey-list] >> text=Testlaptop');
       await shot('11-security');
-      await page.click('[data-testid=signout]');
+      await signOutOf(page);
       await page.waitForSelector('[data-testid=login-passkey]');
       await page.click('[data-testid=login-passkey]');
-      await page.waitForSelector('[data-testid=account-link]');
+      await page.waitForSelector('[data-testid=user-menu]');
     });
 
     await step('password + authenticator code sign-in; wrong code is refused', async () => {
-      await page.click('[data-testid=signout]');
+      await signOutOf(page);
       await page.fill('[data-testid=login-username]', 'helmer');
       await page.fill('[data-testid=login-password]', PASSWORD);
       await page.click('[data-testid=login-submit]');
@@ -408,11 +410,11 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=auth-error]');
       await page.fill('[data-testid=mfa-code]', totp(secret, 1));
       await page.click('[data-testid=mfa-submit]');
-      await page.waitForSelector('[data-testid=account-link]');
+      await page.waitForSelector('[data-testid=user-menu]');
     });
 
     await step('a recovery code works exactly once', async () => {
-      await page.click('[data-testid=signout]');
+      await signOutOf(page);
       for (const attempt of [1, 2]) {
         await page.fill('[data-testid=login-username]', 'helmer');
         await page.fill('[data-testid=login-password]', PASSWORD);
@@ -421,14 +423,14 @@ const expectText = async (page, sel, re, msg) => {
         await page.click('[data-testid=mfa-use-recovery]');
         await page.fill('[data-testid=mfa-code]', codes[0]);
         await page.click('[data-testid=mfa-submit]');
-        if (attempt === 1) { await page.waitForSelector('[data-testid=account-link]'); await page.click('[data-testid=signout]'); }
+        if (attempt === 1) { await page.waitForSelector('[data-testid=user-menu]'); await signOutOf(page); }
         else await page.waitForSelector('[data-testid=auth-error]');
       }
       // Sign in again normally for the remaining steps.
       await page.click('text=Annuleren');
       await page.fill('[data-testid=login-username]', 'helmer');
       await page.click('[data-testid=login-passkey]');
-      await page.waitForSelector('[data-testid=account-link]');
+      await page.waitForSelector('[data-testid=user-menu]');
     });
 
     await step('users: add a viewer who must enrol a second factor; viewers cannot administer', async () => {
@@ -486,6 +488,7 @@ const expectText = async (page, sel, re, msg) => {
       if (![401, 403].includes(viewerScript)) throw new Error('a viewer can ask for a delete script: ' + viewerScript);
       await vp.goto(BASE + '/admin/users');
       if (await vp.$('[data-testid=user-table]')) throw new Error('a viewer reached the user list');
+      if (await vp.$('.nav a[href="/admin/shares"]')) throw new Error('a viewer has a Settings entry: it holds nothing a viewer may use');
       await vp.goto(BASE + '/account');
       await vp.waitForSelector('.settings-nav');
       const viewerParts = await vp.$$eval('.settings-nav a', (as) => as.map((a) => a.getAttribute('href')));
@@ -637,7 +640,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=update-banner]');
       const banner = (await page.textContent('[data-testid=update-banner]')).replace(/\s+/g, ' ');
       if (!/v9\.9\.9/.test(banner) || !/v0\.1\.0/.test(banner)) throw new Error('the banner does not say which versions: ' + banner);
-      if (!(await page.$('.nav a .update-dot'))) throw new Error('no dot on the Settings entry');
+      if (!(await page.$('[data-testid=user-menu] .update-dot'))) throw new Error('no dot on the user menu, which holds About');
       await shot('30-update-banner');
       // What GitHub was sent: a fixed User-Agent, no cookie, no token, no query string, no version.
       const sent = await gh('/__last');
@@ -651,28 +654,33 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=share-Media]');
       await page.waitForTimeout(500);
       if (await page.$('[data-testid=update-banner]')) throw new Error('a dismissed banner came back on a page load');
-      if (await page.$('.nav a .update-dot')) throw new Error('the dot stays after the banner was dismissed');
+      if (await page.$('[data-testid=user-menu] .update-dot')) throw new Error('the dot stays after the banner was dismissed');
       await page.evaluate(() => localStorage.setItem('nasa.update.dismissed', '9.9.8'));
       await page.reload();
       await page.waitForSelector('[data-testid=update-banner]');
-      // View opens Settings > System, which says which state it is in and links to the release notes, built from the repository.
+      // View opens About, which says which state it is in and links to the release notes, built from the repository.
       await page.click('[data-testid=update-view]');
       await page.waitForSelector('[data-testid=system-update]');
       if ((await page.getAttribute('[data-testid=update-state]', 'data-state')) !== 'available') throw new Error('state is not "available"');
-      if ((await page.textContent('[data-testid=update-latest]')).trim() !== '9.9.9' || (await page.textContent('[data-testid=update-current]')).trim() !== '0.1.0') throw new Error('versions on the System page');
+      if ((await page.textContent('[data-testid=update-latest]')).trim() !== '9.9.9' || (await page.textContent('[data-testid=update-current]')).trim() !== '0.1.0') throw new Error('versions on the About page');
       const notes = await page.getAttribute('[data-testid=update-notes]', 'href');
       if (notes !== process.env.FAKE_GITHUB + '/helmerzNL/NAS-Storage-Analyzer/releases/tag/v9.9.9') throw new Error('release notes link: ' + notes);
-      if (!(await page.$('.settings-nav a[aria-current=page][href="/admin/system"]'))) throw new Error('System is not the open settings part');
-      await shot('31-system');
+      if (new URL(page.url()).pathname !== '/about') throw new Error('View did not open About: ' + page.url());
+      if ((await page.textContent('[data-testid=about-version]')).trim() !== '0.1.0') throw new Error('the version on About');
+      if (!(await page.$('[data-testid=user-menu].in-menu'))) throw new Error('the user menu does not show that About is open');
+      await shot('31-about');
       // Check now inside the floor of 30 seconds does not call GitHub again (nor does a page view): the answer is remembered.
       const before = (await gh('/__hits')).hits;
       await page.click('[data-testid=update-check-now]');
       await page.waitForTimeout(400);
       for (let i = 0; i < 3; i++) await page.goto(BASE + '/');
       if ((await gh('/__hits')).hits !== before) throw new Error('GitHub was asked again within the floor: ' + before + ' -> ' + (await gh('/__hits')).hits);
-      // Under every settings page the administrator also finds System.
+      // On every page the user menu tells the administrator that About has news, and the About entry inside it carries the dot too.
       await page.goto(BASE + '/admin/users');
-      await page.waitForSelector('.settings-nav a[href="/admin/system"] .update-dot', { timeout: 5000 }).catch(() => { throw new Error('no dot on the System entry of the menu'); });
+      await page.waitForSelector('[data-testid=user-menu] .update-dot', { timeout: 5000 }).catch(() => { throw new Error('no dot on the user menu'); });
+      await page.click('[data-testid=user-menu]');
+      if (!(await page.$('[data-testid=menu-about] .update-dot'))) throw new Error('no dot on the About entry of the menu');
+      await page.keyboard.press('Escape');
     });
 
     await step('backup and restore: a file the owner holds, checked first, restored by the server, refused when wrong', async () => {
@@ -767,20 +775,71 @@ const expectText = async (page, sel, re, msg) => {
       for (const a of ['backup.create', 'backup.restore.start', 'backup.restore']) if (!audit.includes(a)) throw new Error('missing ' + a);
     });
 
-    await step('settings menu: grouped parts with icons, the open part marked by more than colour', async () => {
-      await page.goto(BASE + '/account');
+    await step('settings (for administrators) and the user menu (for everybody): grouped parts, a menu that behaves like one', async () => {
+      // Settings are the application's own: the top bar entry leads to them, and Users and the audit log are among them. What belongs to the person
+      // is in the user menu, so the groups here are Data and Administration only.
+      await page.goto(BASE + '/');
+      await page.click('.nav a:has-text("Instellingen")');
       await page.waitForSelector('.settings-nav');
+      if (new URL(page.url()).pathname !== '/admin/shares') throw new Error('Settings opened ' + page.url());
       const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
-      const want = [['Persoonlijk', ['/account', '/account/security']], ['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
+      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
       if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
       for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
       const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));
       if (open.length !== 1) throw new Error('exactly one open part, got ' + open);
       const bar = await page.$eval('.settings-nav a[aria-current=page]', (a) => getComputedStyle(a).boxShadow + '|' + getComputedStyle(a).fontWeight);
       if (!/inset/.test(bar) || Number(bar.split('|')[1]) < 600) throw new Error('the open part is marked by colour alone: ' + bar);
+      if (!(await page.$('.nav a.active:has-text("Instellingen")'))) throw new Error('the Settings entry does not show that Settings are open');
       await page.click('[data-testid=settings-admin-users]');
       await page.waitForSelector('[data-testid=user-table]');
       if (!(await page.$('.settings-nav a[aria-current=page][href="/admin/users"]'))) throw new Error('the open part follows the page');
+      await page.click('[data-testid=settings-admin-audit]');
+      await page.waitForSelector('[data-testid=audit-table]');
+
+      // The user menu: closed it is a button with the name, and it says so for a screen reader.
+      const trigger = page.locator('[data-testid=user-menu]');
+      if ((await trigger.getAttribute('aria-expanded')) !== 'false' || !/helmer/.test(await trigger.textContent())) throw new Error('the menu button');
+      if (await page.$('[data-testid=user-menu-panel]')) throw new Error('the menu is open before it is asked for');
+      await trigger.click();
+      await page.waitForSelector('[data-testid=user-menu-panel]');
+      if ((await trigger.getAttribute('aria-expanded')) !== 'true') throw new Error('the open menu is not announced');
+      const entries = await page.$$eval('[data-testid=user-menu-panel] a, [data-testid=user-menu-panel] button', (es) => es.map((e) => (e.getAttribute('href') ?? 'button') + '|' + e.textContent.trim().replace(/ \(Update beschikbaar\)$/, '')));   // an update adds a spoken hint to About
+      if (JSON.stringify(entries) !== JSON.stringify(['/account|Weergave en taal', '/account/security|Beveiliging', '/about|Over', 'button|Afmelden'])) throw new Error('menu entries: ' + JSON.stringify(entries));
+      for (const e of await page.$$('[data-testid=user-menu-panel] a, [data-testid=user-menu-panel] button')) {
+        if (!(await e.$('svg.icon'))) throw new Error('a menu entry has no icon');
+        const box = await e.boundingBox();
+        if (!box || box.height < 44) throw new Error('a menu entry is not a 44 px target: ' + JSON.stringify(box));
+      }
+      await shot('45-user-menu');
+      // Escape closes it and puts the focus back on the button; so does a click elsewhere; the arrow keys walk the entries.
+      await page.keyboard.press('ArrowDown');
+      if ((await page.evaluate(() => document.activeElement?.getAttribute('href'))) !== '/account') throw new Error('ArrowDown does not go to the first entry');
+      await page.keyboard.press('End');
+      if (!/Afmelden/.test(await page.evaluate(() => document.activeElement?.textContent ?? ''))) throw new Error('End does not go to the last entry');
+      await page.keyboard.press('Escape');
+      await page.waitForSelector('[data-testid=user-menu-panel]', { state: 'detached' });
+      if (!(await page.evaluate(() => document.activeElement?.getAttribute('data-testid') === 'user-menu'))) throw new Error('Escape did not return the focus to the button');
+      await trigger.click();
+      await page.mouse.click(5, 400);
+      await page.waitForSelector('[data-testid=user-menu-panel]', { state: 'detached' });
+      // Tab out of the menu closes it too.
+      await trigger.focus(); await page.keyboard.press('Enter');
+      await page.waitForSelector('[data-testid=user-menu-panel]');
+      for (let i = 0; i < 6; i++) await page.keyboard.press('Tab');
+      await page.waitForSelector('[data-testid=user-menu-panel]', { state: 'detached', timeout: 3000 }).catch(() => { throw new Error('Tab out of the menu did not close it'); });
+
+      // Choosing an entry goes there and closes the menu. The person's own screens have the same grouped menu, with only what is theirs.
+      await trigger.click();
+      await page.click('[data-testid=menu-account]');
+      await page.waitForSelector('.settings-nav');
+      if (await page.$('[data-testid=user-menu-panel]')) throw new Error('the menu stays open after choosing an entry');
+      const mine = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
+      if (JSON.stringify(mine) !== JSON.stringify([['Persoonlijk', ['/account', '/account/security']]])) throw new Error('account groups: ' + JSON.stringify(mine));
+      if (!(await page.$('[data-testid=user-menu].in-menu')) || (await page.$('.nav a.active:has-text("Instellingen")'))) throw new Error('the top bar does not show where the person is');
+      await trigger.click();
+      if ((await page.getAttribute('[data-testid=menu-account]', 'aria-current')) !== 'page') throw new Error('the menu does not mark the open entry');
+      await page.keyboard.press('Escape');
     });
 
     await step('a rarely used card folds away and the choice is remembered', async () => {
@@ -854,7 +913,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=accent-0f766e]');
       await page.focus('[data-testid=accent-0f766e]');
       await page.keyboard.press('Tab');
-      for (const sel of ['[data-testid=accent-0f766e]', '.settings-nav a[aria-current=page]', '[data-testid=pref-units]']) {
+      for (const sel of ['[data-testid=accent-0f766e]', '.settings-nav a[aria-current=page]', '[data-testid=pref-units]', '[data-testid=user-menu]']) {
         await page.focus(sel);
         await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');   // arrive by keyboard so :focus-visible applies
         await page.waitForTimeout(300);   // the field's ring fades in (a 150 ms transition): measure the end state, not the first frame
@@ -891,17 +950,32 @@ const expectText = async (page, sel, re, msg) => {
           throw new Error(`${name} is ${wide}px wider than a phone screen: ${who.join(' ')}`);
         }
       };
-      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/account', 'appearance'], ['/', 'dashboard']]) {
+      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/account', 'appearance'], ['/about', 'about'], ['/', 'dashboard']]) {
         await page.goto(BASE + where);
         await page.waitForSelector('main');
         await page.waitForTimeout(350);
         await noWide(name);
-        if (where !== '/') {
+        if (where !== '/' && where !== '/about') {
           const visible = await page.$eval('.settings-nav a[aria-current=page]', (a) => { const r = a.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; });
           if (!visible) throw new Error('the open settings part is not scrolled into view on a phone');
         }
         await shot('23-phone-' + name);
       }
+      // On a phone the name collapses to the person icon, and the menu behind it (with Sign out) has to stay reachable and inside the screen.
+      await page.goto(BASE + '/');
+      await page.waitForSelector('[data-testid=user-menu]');
+      const tb = await page.locator('[data-testid=user-menu]').boundingBox();
+      if (!tb || tb.height < 44 || tb.x < 0 || tb.x + tb.width > 390) throw new Error('the menu button on a phone: ' + JSON.stringify(tb));
+      const nameBox = await page.locator('[data-testid=user-name]').boundingBox();   // visually hidden, still the button's accessible name
+      if (nameBox && nameBox.width > 4) throw new Error('the name takes room on a phone: ' + JSON.stringify(nameBox));
+      if (!/helmer/.test(await page.getAttribute('[data-testid=user-menu]', 'aria-label') ?? await page.textContent('[data-testid=user-menu]'))) throw new Error('the menu button lost its name');
+      await page.click('[data-testid=user-menu]');
+      const pb = await page.locator('[data-testid=user-menu-panel]').boundingBox();
+      if (!pb || pb.x < 0 || pb.x + pb.width > 390) throw new Error('the menu panel does not fit a phone: ' + JSON.stringify(pb));
+      await noWide('the open user menu');
+      await page.waitForTimeout(300);   // the chevron turns over 150 ms: look at it once it has
+      await shot('23-phone-user-menu');
+      await page.keyboard.press('Escape');
       // The tick boxes, the bar and the dialog of the delete scripts fit a phone too, and the box is a 44 px target.
       await page.goto(BASE + '/browse/1?view=files&rec=1');
       await page.waitForSelector('[data-testid=file-row]');

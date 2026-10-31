@@ -322,3 +322,26 @@ describe('backup and restore', () => {
     expect(b.seconds(1234, 'nl')).toBe('1,2 s');
   });
 });
+
+describe('the user menu and About', () => {
+  it('has an icon for every entry, as path data, and never an icon without a label', async () => {
+    const { ICONS } = await import('./icons');
+    for (const k of ['account', 'chevron', 'appearance', 'security', 'info', 'signout']) {
+      expect(ICONS[k], k).toMatch(/^M[\d.,\sA-Za-z-]+Z$/);
+    }
+    // Each entry of the menu has a label in both languages (the key guard above finds them in the source; this names the ones that matter).
+    for (const k of ['menu.signedin', 'menu.appearance', 'menu.security', 'menu.about', 'about.title', 'about.version', 'about.channel', 'about.updates.admin', 'auth.signout', 'account.menu']) {
+      expect(k in nl && k in en, k).toBe(true);
+    }
+  });
+  it('shows the beta label and the update status on About, not under System', async () => {
+    const { readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const about = readFileSync(join(__dirname, '../routes/About.svelte'), 'utf8');
+    const system = readFileSync(join(__dirname, '../routes/System.svelte'), 'utf8');
+    expect(about).toContain('data-testid="about-beta"');
+    expect(about).toContain('update-check-now');
+    expect(system).not.toContain('update-check-now');
+    expect(readFileSync(join(__dirname, '../components/UpdateBanner.svelte'), 'utf8')).toContain('href="/about"');
+  });
+});

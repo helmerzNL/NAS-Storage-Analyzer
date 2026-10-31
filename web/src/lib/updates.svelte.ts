@@ -1,5 +1,5 @@
 // The update check, as the interface sees it (update-check.md): ask once after an administrator signs in, announce a newer release in a
-// banner that can be dismissed per version, and show the state under Settings > System. It only announces: nothing is updated or downloaded.
+// banner that can be dismissed per version, and show the state under About (ADR 0009). It only announces: nothing is updated or downloaded.
 import { get, post, type UpdateStatus } from './api';
 import { errMessage } from './errors';
 
