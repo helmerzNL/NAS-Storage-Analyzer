@@ -14,6 +14,10 @@ services:
     security_opt:
       - apparmor:unconfined
     # Mount points are created here; the credentials of SMB shares go to a tmpfs and are removed again.
+    # The mount points live under /run and not under /mnt: NASA_SHARES_MOUNT may be /mnt (or a folder
+    # above it), and a tmpfs cannot be nested inside the read-only bind mount of the shares.
+    environment:
+      NASA_MOUNT_DIR: /run/nasa-managed
     tmpfs:
       - /tmp
-      - /mnt/managed
+      - /run/nasa-managed

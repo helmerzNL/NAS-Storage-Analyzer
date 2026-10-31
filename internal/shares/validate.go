@@ -79,7 +79,8 @@ var (
 // Options configure validation.
 type Options struct {
 	// SharesRoot is the directory below which bind shares must lie
-	// ("/mnt/shares" in the container). Empty disables the check (tests).
+	// (NASA_SHARES_MOUNT, "/mnt/shares" by default, in the container).
+	// Empty disables the check (tests).
 	SharesRoot string
 }
 
@@ -180,7 +181,11 @@ func Validate(in *Input, opt Options) error {
 
 func validateBindPath(in *Input, opt Options) error {
 	if in.Path == "" || !path.IsAbs(in.Path) || strings.ContainsRune(in.Path, 0) {
-		return bad("path", "enter an absolute path inside the container, for example /mnt/shares/media")
+		example := "/mnt/shares"
+		if opt.SharesRoot != "" {
+			example = opt.SharesRoot
+		}
+		return bad("path", "enter an absolute path inside the container, for example %s", path.Join(example, "media"))
 	}
 	in.Path = path.Clean(in.Path)
 	if opt.SharesRoot != "" {

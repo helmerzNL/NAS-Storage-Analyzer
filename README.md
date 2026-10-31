@@ -35,7 +35,8 @@ Open <http://127.0.0.1:8080>, voer de setup-token uit `.env` in, maak het beheer
 factor in. Voeg daarna een share toe (**Shares → Share toevoegen**) en klik op **Scan nu** op het dashboard.
 
 Zet in `.env` `NASA_SHARES_DIR` op de map op de Docker-host waar je NAS-shares gemount zijn; die verschijnt
-read-only als `/mnt/shares` in de containers. Zie [Shares beschikbaar maken](#shares-beschikbaar-maken).
+read-only als `/mnt/shares` in de containers (of op een pad naar keuze, zie `NASA_SHARES_MOUNT`). Draait de stack op
+de NAS zelf, bijvoorbeeld Unraid, dan hoef je niets te mounten. Zie [Shares beschikbaar maken](#shares-beschikbaar-maken).
 
 ## Architectuur
 
@@ -80,6 +81,24 @@ NASA_SHARES_DIR=/srv/nas
 Voeg de share in de interface toe als type *Gemount pad* met het pad `/mnt/shares/media`. De containers kunnen dan
 niets op de NAS wijzigen en hebben geen speciale rechten nodig.
 
+Gebruik voor `NASA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
+`./shares` is een lege map in de stackmap. Zie
+[Unraid, Portainer, Dockge](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers).
+
+Draait de stack **op de NAS zelf** (route c)? Dan is er niets te mounten: de shares zijn gewone mappen. Geef die map
+door en zet `NASA_SHARES_MOUNT` op hetzelfde pad. In de interface typ je dan het pad dat je van de NAS kent. Voorbeeld
+voor Unraid:
+
+```bash
+# .env
+NASA_SHARES_DIR=/mnt/user
+NASA_SHARES_MOUNT=/mnt/user
+```
+
+Voeg elke share apart toe, bijvoorbeeld `/mnt/user/media`. Alleen wat je toevoegt wordt gescand. Losse Unraid-schijven
+in plaats van de (tragere) FUSE-laag `/mnt/user`, Exclusive shares en andere NAS-systemen:
+[`docs/deploy.md`](docs/deploy.md#route-c-de-stack-draait-op-de-nas-zelf).
+
 Alternatief (**route a**): de worker mount zelf, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`.
 Dat geeft alleen de worker root en `CAP_SYS_ADMIN`. Je vult dan in de interface server, export of share, versie en
 eventueel SMB-inloggegevens in (versleuteld opgeslagen). Details, SMB-voorbeelden, AppArmor en late mounts:
@@ -99,7 +118,8 @@ Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangr
 |---|---|
 | `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
 | `NASA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
-| `NASA_SHARES_DIR` | Map op de host met de gemounte shares (read-only, als `/mnt/shares` in de containers). |
+| `NASA_SHARES_DIR` | Map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
+| `NASA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Standaard `/mnt/shares`; zet het gelijk aan `NASA_SHARES_DIR` en de paden zijn overal hetzelfde. |
 | `NASA_HTTP_BIND`, `NASA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
 | `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
 | `NASA_RP_ID`, `NASA_RP_ORIGINS` | Passkeys zijn aan een hostnaam gebonden; zet deze in productie. |
@@ -225,7 +245,10 @@ Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the admi
 (authenticator app or passkey; mandatory). There are no default passwords. Then add a share and click *Scan nu*.
 
 **Mounting the NAS.** Recommended: mount the share read-only on the Docker host and point `NASA_SHARES_DIR` at the
-parent folder; it appears read-only as `/mnt/shares` in the containers, which need no special privileges. Alternative:
+parent folder; it appears read-only as `/mnt/shares` in the containers, which need no special privileges. Set
+`NASA_SHARES_MOUNT` to change that path; if it equals `NASA_SHARES_DIR`, the paths you type in the interface are the
+host paths. When the stack runs on the NAS itself (for example Unraid) there is nothing to mount: set both variables to
+the folder that holds the shares (`/mnt/user`) and add each share by its path. Alternative:
 `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d` lets the worker mount NFS/SMB itself, with
 root and `CAP_SYS_ADMIN` in the worker container only (verified up to the privileges; not tested against a real
 NFS/SMB server in the development sandbox). A scan that finds an empty share where the previous scan found over 100
