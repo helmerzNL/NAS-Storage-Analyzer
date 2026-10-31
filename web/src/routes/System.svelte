@@ -5,6 +5,7 @@
   import { formatDateTime, ago } from '../lib/format';
   import { update, loadUpdate, checkUpdateNow } from '../lib/updates.svelte';
   import { appInfo } from '../lib/version.svelte';
+  import ResetCard from '../components/ResetCard.svelte';
 
   onMount(() => { void loadUpdate(); });
   const s = $derived(update.status);
@@ -39,3 +40,5 @@
   <p class="muted small">{t('update.how')}</p>
   <p class="muted small">{t('update.privacy')}</p>
 </section>
+
+<ResetCard />

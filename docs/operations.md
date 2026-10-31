@@ -58,7 +58,8 @@ otherwise restore the backup you took before the update (`deploy.md` §5).
 `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` kept separately; without the key the stored SMB passwords cannot be
 decrypted. Commands, the restore sequence and what does not need saving (the scan index can be rebuilt with a full scan) are in
 [`deploy.md` §5](deploy.md#5-back-up-en-herstel). Besides that, *Settings → Backup* in the app takes an owner's own copy of the configuration (shares, file types, display preferences:
-no credentials, no scan results) as one JSON file and restores it on the server in one transaction; it does not replace the dump.
+no credentials, no scan results) as one JSON file and restores it on the server in one transaction; it does not replace the dump. *Settings → System → Factory reset* empties every table of the
+database on an administrator's request (the word and a fresh proof; refused while a scan runs; no restart): see [ADR 0008](adr/0008-factory-reset.md) and [`deploy.md` §5](deploy.md#5-back-up-en-herstel).
 
 ## 5. Runtime architecture and data location
 

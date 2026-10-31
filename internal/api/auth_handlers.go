@@ -200,7 +200,7 @@ func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) error {
 	if err := s.auth.CheckIPLocked(ctx, ip); err != nil {
 		return err
 	}
-	if s.opts.SetupToken == "" || subtle.ConstantTimeCompare([]byte(in.Token), []byte(s.opts.SetupToken)) != 1 {
+	if tok := s.setupToken(); tok == "" || subtle.ConstantTimeCompare([]byte(in.Token), []byte(tok)) != 1 {
 		s.auth.RecordIPFailure(ctx, ip)
 		s.audit(r, "setup.bad_token", "", nil)
 		s.problemCode(w, r, http.StatusForbidden, "wrong setup token", "Use the token printed in the application log (or NASA_SETUP_TOKEN).", "invalid_setup_token")

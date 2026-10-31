@@ -136,9 +136,9 @@ func (s *Store) MigrateTo(ctx context.Context, max int) error {
 	return nil
 }
 
-// seed inserts the built-in categories and default extension mapping. Rows
-// already present (including ones edited through the UI) are left alone.
-func (s *Store) seed(ctx context.Context) error {
+// seedBatch queues the built-in categories and the default extension mapping. Rows already present (including ones edited through the UI) are
+// left alone.
+func seedBatch() *pgx.Batch {
 	b := &pgx.Batch{}
 	for _, c := range categorize.Categories {
 		b.Queue(`INSERT INTO categories (id, key) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET key = EXCLUDED.key`, c.ID, c.Key)
@@ -146,7 +146,16 @@ func (s *Store) seed(ctx context.Context) error {
 	for ext, cat := range categorize.DefaultExtensions() {
 		b.Queue(`INSERT INTO extension_map (ext, category_id) VALUES ($1, $2) ON CONFLICT (ext) DO NOTHING`, ext, cat)
 	}
-	res := s.Pool.SendBatch(ctx, b)
+	return b
+}
+
+type batchSender interface {
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
+}
+
+func runSeed(ctx context.Context, db batchSender) error {
+	b := seedBatch()
+	res := db.SendBatch(ctx, b)
 	defer res.Close()
 	for i := 0; i < b.Len(); i++ {
 		if _, err := res.Exec(); err != nil {
@@ -155,6 +164,13 @@ func (s *Store) seed(ctx context.Context) error {
 	}
 	return nil
 }
+
+// seed inserts the built-in categories and default extension mapping.
+func (s *Store) seed(ctx context.Context) error { return runSeed(ctx, s.Pool) }
+
+// SeedTx does the same inside a transaction: a factory reset empties the tables and puts the seed back in the same transaction, so the
+// installation is never seen without its categories.
+func SeedTx(ctx context.Context, tx pgx.Tx) error { return runSeed(ctx, tx) }
 
 // LoadMapper builds the extension mapper from the extension_map table.
 func (s *Store) LoadMapper(ctx context.Context) (*categorize.Mapper, error) {

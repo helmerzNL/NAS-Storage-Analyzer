@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
 	"errors"
 	"regexp"
@@ -308,6 +309,15 @@ type Session struct {
 	CSRFToken string
 	ExpiresAt time.Time
 	hash      []byte
+}
+
+// NewSetupToken is a fresh token for the setup wizard: whoever reaches a new installation first cannot take it without the one in the log.
+func NewSetupToken() string {
+	b := make([]byte, 15)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
 }
 
 func randToken(n int) string {

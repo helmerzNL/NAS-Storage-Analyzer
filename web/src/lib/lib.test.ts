@@ -178,7 +178,7 @@ describe('translations', () => {
   });
   it('translate every error code the server sends', () => {
     for (const c of ['unauthenticated', 'mfa_required', 'enroll_required', 'forbidden', 'csrf', 'locked', 'invalid_credentials', 'invalid_code', 'not_found',
-      'conflict', 'last_admin', 'last_factor', 'setup_done', 'invalid_setup_token', 'https_required', 'already_active', 'busy', 'no_data']) expect('err.' + c in nl, c).toBe(true);
+      'conflict', 'last_admin', 'last_factor', 'setup_done', 'invalid_setup_token', 'https_required', 'already_active', 'busy', 'no_data', 'reset_phrase', 'reauth_required']) expect('err.' + c in nl, c).toBe(true);
   });
 });
 
