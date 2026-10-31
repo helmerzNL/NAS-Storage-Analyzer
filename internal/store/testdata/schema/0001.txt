@@ -1,0 +1,187 @@
+# Schema of a database after migration 0001, from pg_catalog (PostgreSQL 16).
+# Written by TestSchemaSnapshots; never edited once the migration has shipped.
+extension ltree
+extension pg_trgm
+extension plpgsql
+sequence dir_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence file_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence scan_errors_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence scans_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+sequence shares_id_seq | bigint | 1 | 1 | 9223372036854775807 | 1 | false | 1
+table categories
+  column id | smallint | NOT NULL |  |  |
+  column key | text | NOT NULL |  |  |
+  constraint categories_key_key | UNIQUE (key)
+  constraint categories_pkey | PRIMARY KEY (id)
+  index CREATE UNIQUE INDEX categories_key_key ON public.categories USING btree (key)
+  index CREATE UNIQUE INDEX categories_pkey ON public.categories USING btree (id)
+table dir_category_agg partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column dir_id | bigint | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  column size_direct | bigint | NOT NULL | 0 |  |
+  column alloc_direct | bigint | NOT NULL | 0 |  |
+  column files_direct | bigint | NOT NULL | 0 |  |
+  column size_total | bigint | NOT NULL | 0 |  |
+  column alloc_total | bigint | NOT NULL | 0 |  |
+  column files_total | bigint | NOT NULL | 0 |  |
+  constraint dir_category_agg_pkey | PRIMARY KEY (share_id, dir_id, category_id)
+  index CREATE INDEX dir_category_agg_cat_idx ON ONLY public.dir_category_agg USING btree (share_id, category_id, size_total DESC)
+  index CREATE UNIQUE INDEX dir_category_agg_pkey ON ONLY public.dir_category_agg USING btree (share_id, dir_id, category_id)
+table dirs partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column id | bigint | NOT NULL |  |  |
+  column parent_id | bigint | NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column depth | integer | NOT NULL |  |  |
+  column path | ltree | NOT NULL |  |  |
+  column mtime | timestamp with time zone | NOT NULL |  |  |
+  column entry_count | integer | NOT NULL |  |  |
+  column last_seen_scan | bigint | NOT NULL |  |  |
+  column size_direct | bigint | NOT NULL | 0 |  |
+  column alloc_direct | bigint | NOT NULL | 0 |  |
+  column files_direct | bigint | NOT NULL | 0 |  |
+  column dirs_direct | bigint | NOT NULL | 0 |  |
+  column d_oldest_mtime | timestamp with time zone | NULL |  |  |
+  column d_newest_mtime | timestamp with time zone | NULL |  |  |
+  column d_oldest_atime | timestamp with time zone | NULL |  |  |
+  column d_newest_atime | timestamp with time zone | NULL |  |  |
+  column size_total | bigint | NOT NULL | 0 |  |
+  column alloc_total | bigint | NOT NULL | 0 |  |
+  column files_total | bigint | NOT NULL | 0 |  |
+  column dirs_total | bigint | NOT NULL | 0 |  |
+  column oldest_mtime | timestamp with time zone | NULL |  |  |
+  column newest_mtime | timestamp with time zone | NULL |  |  |
+  column oldest_atime | timestamp with time zone | NULL |  |  |
+  column newest_atime | timestamp with time zone | NULL |  |  |
+  constraint dirs_pkey | PRIMARY KEY (share_id, id)
+  index CREATE INDEX dirs_children_idx ON ONLY public.dirs USING btree (share_id, parent_id, size_total DESC)
+  index CREATE INDEX dirs_depth_idx ON ONLY public.dirs USING btree (share_id, depth, parent_id)
+  index CREATE INDEX dirs_name_trgm ON ONLY public.dirs USING gin (name gin_trgm_ops)
+  index CREATE INDEX dirs_path_idx ON ONLY public.dirs USING gist (path)
+  index CREATE INDEX dirs_top_idx ON ONLY public.dirs USING btree (share_id, size_total DESC)
+  index CREATE UNIQUE INDEX dirs_pkey ON ONLY public.dirs USING btree (share_id, id)
+table extension_map
+  column ext | text | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  constraint extension_map_category_id_fkey | FOREIGN KEY (category_id) REFERENCES categories(id)
+  constraint extension_map_ext_check | CHECK (((ext = lower(ext)) AND (ext <> ''::text)))
+  constraint extension_map_pkey | PRIMARY KEY (ext)
+  index CREATE UNIQUE INDEX extension_map_pkey ON public.extension_map USING btree (ext)
+table files partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column id | bigint | NOT NULL | nextval('file_id_seq'::regclass) |  |
+  column dir_id | bigint | NOT NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column ext | text | NOT NULL |  |  |
+  column category_id | smallint | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column alloc | bigint | NOT NULL |  |  |
+  column mtime | timestamp with time zone | NOT NULL |  |  |
+  column atime | timestamp with time zone | NOT NULL |  |  |
+  column ctime | timestamp with time zone | NOT NULL |  |  |
+  column nlink | integer | NOT NULL | 1 |  |
+  column dev | bigint | NULL |  |  |
+  column ino | bigint | NULL |  |  |
+  column counted | boolean | NOT NULL | true |  |
+  constraint files_pkey | PRIMARY KEY (share_id, id)
+  index CREATE INDEX files_atime_idx ON ONLY public.files USING btree (share_id, atime)
+  index CREATE INDEX files_cat_size_idx ON ONLY public.files USING btree (share_id, category_id, size DESC)
+  index CREATE INDEX files_dir_idx ON ONLY public.files USING btree (share_id, dir_id)
+  index CREATE INDEX files_ext_size_idx ON ONLY public.files USING btree (share_id, ext, size DESC)
+  index CREATE INDEX files_link_idx ON ONLY public.files USING btree (share_id, dev, ino) WHERE (nlink > 1)
+  index CREATE INDEX files_mtime_idx ON ONLY public.files USING btree (share_id, mtime)
+  index CREATE INDEX files_name_trgm ON ONLY public.files USING gin (name gin_trgm_ops)
+  index CREATE INDEX files_size_idx ON ONLY public.files USING btree (share_id, size DESC)
+  index CREATE UNIQUE INDEX files_pkey ON ONLY public.files USING btree (share_id, id)
+table scan_errors
+  column id | bigint | NOT NULL | nextval('scan_errors_id_seq'::regclass) |  |
+  column scan_id | bigint | NOT NULL |  |  |
+  column path | text | NOT NULL |  |  |
+  column kind | text | NOT NULL |  |  |
+  column message | text | NOT NULL |  |  |
+  column at | timestamp with time zone | NOT NULL |  |  |
+  constraint scan_errors_pkey | PRIMARY KEY (id)
+  constraint scan_errors_scan_id_fkey | FOREIGN KEY (scan_id) REFERENCES scans(id) ON DELETE CASCADE
+  index CREATE INDEX scan_errors_scan_idx ON public.scan_errors USING btree (scan_id)
+  index CREATE UNIQUE INDEX scan_errors_pkey ON public.scan_errors USING btree (id)
+table scans
+  column id | bigint | NOT NULL | nextval('scans_id_seq'::regclass) |  |
+  column share_id | bigint | NOT NULL |  |  |
+  column status | text | NOT NULL | 'running'::text |  |
+  column mode | text | NOT NULL |  |  |
+  column trigger | text | NOT NULL | 'manual'::text |  |
+  column started_at | timestamp with time zone | NOT NULL | now() |  |
+  column finished_at | timestamp with time zone | NULL |  |  |
+  column excludes_hash | text | NOT NULL | ''::text |  |
+  column dirs | bigint | NOT NULL | 0 |  |
+  column reused_dirs | bigint | NOT NULL | 0 |  |
+  column files | bigint | NOT NULL | 0 |  |
+  column bytes | bigint | NOT NULL | 0 |  |
+  column alloc_bytes | bigint | NOT NULL | 0 |  |
+  column error_count | bigint | NOT NULL | 0 |  |
+  column atime_quality | jsonb | NULL |  |  |
+  column error | text | NULL |  |  |
+  constraint scans_mode_check | CHECK ((mode = ANY (ARRAY['full'::text, 'incremental'::text])))
+  constraint scans_pkey | PRIMARY KEY (id)
+  constraint scans_share_id_fkey | FOREIGN KEY (share_id) REFERENCES shares(id) ON DELETE CASCADE
+  constraint scans_status_check | CHECK ((status = ANY (ARRAY['running'::text, 'succeeded'::text, 'failed'::text, 'cancelled'::text])))
+  index CREATE INDEX scans_share_started_idx ON public.scans USING btree (share_id, started_at DESC)
+  index CREATE UNIQUE INDEX scans_one_running_idx ON public.scans USING btree (share_id) WHERE (status = 'running'::text)
+  index CREATE UNIQUE INDEX scans_pkey ON public.scans USING btree (id)
+table schema_migrations
+  column version | integer | NOT NULL |  |  |
+  column name | text | NOT NULL |  |  |
+  column applied_at | timestamp with time zone | NOT NULL | now() |  |
+  constraint schema_migrations_pkey | PRIMARY KEY (version)
+  index CREATE UNIQUE INDEX schema_migrations_pkey ON public.schema_migrations USING btree (version)
+table share_ext_agg partitioned by LIST (share_id)
+  column share_id | bigint | NOT NULL |  |  |
+  column ext | text | NOT NULL |  |  |
+  column size | bigint | NOT NULL |  |  |
+  column alloc | bigint | NOT NULL |  |  |
+  column files | bigint | NOT NULL |  |  |
+  constraint share_ext_agg_pkey | PRIMARY KEY (share_id, ext)
+  index CREATE UNIQUE INDEX share_ext_agg_pkey ON ONLY public.share_ext_agg USING btree (share_id, ext)
+table shares
+  column id | bigint | NOT NULL | nextval('shares_id_seq'::regclass) |  |
+  column name | text | NOT NULL |  |  |
+  column kind | text | NOT NULL |  |  |
+  column config | jsonb | NOT NULL | '{}'::jsonb |  |
+  column excludes | text[] | NOT NULL | '{}'::text[] |  |
+  column workers | integer | NOT NULL | 16 |  |
+  column max_ops_per_sec | integer | NOT NULL | 0 |  |
+  column last_used_basis | text | NOT NULL | 'atime'::text |  |
+  column last_scan_id | bigint | NULL |  |  |
+  column created_at | timestamp with time zone | NOT NULL | now() |  |
+  constraint shares_kind_check | CHECK ((kind = ANY (ARRAY['bind'::text, 'nfs'::text, 'smb'::text])))
+  constraint shares_last_used_basis_check | CHECK ((last_used_basis = ANY (ARRAY['atime'::text, 'mtime'::text, 'max'::text])))
+  constraint shares_max_ops_per_sec_check | CHECK ((max_ops_per_sec >= 0))
+  constraint shares_name_key | UNIQUE (name)
+  constraint shares_pkey | PRIMARY KEY (id)
+  constraint shares_workers_check | CHECK (((workers >= 1) AND (workers <= 256)))
+  index CREATE UNIQUE INDEX shares_name_key ON public.shares USING btree (name)
+  index CREATE UNIQUE INDEX shares_pkey ON public.shares USING btree (id)
+function
+  CREATE OR REPLACE FUNCTION public.drop_share_partitions(p_share bigint)
+   RETURNS void
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE t text;
+  BEGIN
+      FOREACH t IN ARRAY ARRAY['dirs', 'files', 'dir_category_agg', 'share_ext_agg'] LOOP
+          EXECUTE format('DROP TABLE IF EXISTS %I', t || '_s' || p_share);
+      END LOOP;
+  END $function$
+function
+  CREATE OR REPLACE FUNCTION public.ensure_share_partitions(p_share bigint)
+   RETURNS void
+   LANGUAGE plpgsql
+  AS $function$
+  DECLARE t text;
+  BEGIN
+      FOREACH t IN ARRAY ARRAY['dirs', 'files', 'dir_category_agg', 'share_ext_agg'] LOOP
+          EXECUTE format('CREATE TABLE IF NOT EXISTS %I PARTITION OF %I FOR VALUES IN (%s)',
+                         t || '_s' || p_share, t, p_share);
+      END LOOP;
+  END $function$

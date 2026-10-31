@@ -43,6 +43,10 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
 - **`api/openapi.yaml` is the contract.** An endpoint change changes the spec in the same commit; the contract tests validate
   every response against it and fail on a route the spec does not know.
 - Migrations in `internal/store/migrations/` are append-only. A shipped migration is never edited; a change is a new one.
+  Every migration comes with its schema snapshot in `internal/store/testdata/schema/` (baseline §2): after adding one run
+  `go test ./internal/store -run TestSchemaSnapshots -args -write-new-snapshots`, read the snapshot and commit it. A change in an
+  existing snapshot is a red flag in review. A migration that touches existing rows (a backfill, a new `NOT NULL` column) needs a
+  case in `TestUpgradeKeepsExistingRows`, because a fresh database never meets that path.
 - Every interface string exists in Dutch and English (`web/src/lib/i18n/`); a test fails when the key sets differ.
 - The interface is built into `internal/webui/dist` and embedded with `go:embed`; `dist/` is not committed.
 - Tests: `go vet ./... && go test -race ./...` (database tests need `NASA_TEST_DSN` and `NASA_REQUIRE_DB=1`),
