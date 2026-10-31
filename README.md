@@ -80,6 +80,10 @@ NASA_SHARES_DIR=/srv/nas
 Voeg de share in de interface toe als type *Gemount pad* met het pad `/mnt/shares/media`. De containers kunnen dan
 niets op de NAS wijzigen en hebben geen speciale rechten nodig.
 
+Gebruik voor `NASA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
+`./shares` is een lege map in de stackmap. Zie
+[Unraid, Portainer, Dockge](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers).
+
 Alternatief (**route a**): de worker mount zelf, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`.
 Dat geeft alleen de worker root en `CAP_SYS_ADMIN`. Je vult dan in de interface server, export of share, versie en
 eventueel SMB-inloggegevens in (versleuteld opgeslagen). Details, SMB-voorbeelden, AppArmor en late mounts:
