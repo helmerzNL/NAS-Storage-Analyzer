@@ -242,6 +242,120 @@ const expectText = async (page, sel, re, msg) => {
       if (lines.length !== 2 || !/name/.test(lines[0]) || !lines[1].includes('video')) throw new Error('csv: ' + text);
     });
 
+    await step('delete scripts: tick files, make a script per kind, the share keeps its base paths; nothing is deleted', async () => {
+      const row = (name) => page.locator('[data-testid=file-row]', { hasText: name });
+      const barCount = () => page.textContent('[data-testid=sel-count]');
+      const download = async (clickSel) => {
+        const [dl] = await Promise.all([page.waitForEvent('download'), page.click(clickSel)]);
+        return { name: dl.suggestedFilename(), bytes: fs.readFileSync(await dl.path()) };
+      };
+      await page.goto(BASE + '/browse/1?view=files&rec=1');
+      await page.waitForSelector('[data-testid=file-row]');
+      if ((await page.locator('[data-testid=select-file]').count()) !== 6) throw new Error('an administrator must see a tick box on every file');
+      if ((await page.locator('[data-testid=selection-bar]').count()) !== 0) throw new Error('the bar shows before anything is ticked');
+
+      // The box in the header ticks all loaded rows and unticks them again.
+      await page.check('[data-testid=select-all]');
+      await expectText(page, '[data-testid=sel-count]', /^6 geselecteerd$/, 'all six ticked');
+      await page.uncheck('[data-testid=select-all]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=selection-bar]'));
+
+      await row('film.mkv').locator('[data-testid=select-file]').check();
+      await row('report.pdf').locator('[data-testid=select-file]').check();
+      await expectText(page, '[data-testid=sel-count]', /^2 geselecteerd$/, 'two ticked');
+      if (!/hooguit 5[,.]44\s*MiB/.test(await page.textContent('[data-testid=selection-bar]'))) throw new Error('the size is an upper bound of the two files: ' + await page.textContent('[data-testid=selection-bar]'));
+      await shot('08a-selection-bar');
+
+      // The dialog: Linux/NAS script, base path "same as the scanned path".
+      await page.click('[data-testid=sel-make]');
+      await page.waitForSelector('dialog[open] [data-testid=script-summary]');
+      if (!/2 bestanden/.test(await page.textContent('[data-testid=script-summary]'))) throw new Error('summary: ' + await page.textContent('[data-testid=script-summary]'));
+      await page.check('[data-testid=script-type-sh]');
+      await page.click('[data-testid=script-root-same]');
+      if ((await page.inputValue('[data-testid=script-root]')) !== path.join(SHARE_APP_PATH, 'media')) throw new Error('same as scanned path: ' + await page.inputValue('[data-testid=script-root]'));
+      await shot('08b-script-dialog');
+      let got = await download('[data-testid=script-make]');
+      const sh = got.bytes.toString('utf8');
+      if (!/^delete-Media-\d{8}-\d{4}\.sh$/.test(got.name)) throw new Error('file name: ' + got.name);
+      if (!sh.startsWith('#!/bin/sh\n') || sh.includes('\r')) throw new Error('not a sh script with LF line ends');
+      if (!sh.includes('\nR|' + path.join(SHARE_APP_PATH, 'media') + '\n')) throw new Error('base path missing:\n' + sh.slice(0, 600));
+      if (!sh.includes('\nF|5000000|') || !sh.includes('|/video/film.mkv\n') || !sh.includes('|/docs/report.pdf\n') || sh.includes('img.CR2')) throw new Error('the script does not hold exactly the ticked files:\n' + sh.slice(0, 900));
+      await page.waitForSelector('[data-testid=script-done]');
+      if (!/2 bestanden in het script/.test(await page.textContent('[data-testid=script-done]'))) throw new Error('done: ' + await page.textContent('[data-testid=script-done]'));
+      if (!/^sh "\.\/delete-Media-\d{8}-\d{4}\.sh"$/.test((await page.textContent('[data-testid=script-command]')).trim())) throw new Error('command: ' + await page.textContent('[data-testid=script-command]'));
+      const again = await download('[data-testid=script-again]');
+      if (again.name !== got.name || !again.bytes.equals(got.bytes)) throw new Error('"download again" gives another file');
+
+      // A Linux path for a Windows script is refused next to the field, and nothing is downloaded.
+      await page.check('[data-testid=script-type-powershell]');
+      if ((await page.inputValue('[data-testid=script-root]')) !== '') throw new Error('a path of the other kind of machine must not carry over: ' + await page.inputValue('[data-testid=script-root]'));
+      await page.fill('[data-testid=script-root]', '/mnt/user/media');
+      await page.click('[data-testid=script-make]');
+      await page.waitForSelector('[data-testid=script-root-error]');
+      if (await page.locator('[data-testid=script-done]').count() !== 0) throw new Error('an old result stays after a refusal');
+      // PowerShell: UTF-8 with a byte-order mark, CRLF.
+      await page.fill('[data-testid=script-root]', '//NAS/Media/');
+      got = await download('[data-testid=script-make]');
+      if (!/\.ps1$/.test(got.name) || got.bytes.slice(0, 3).toString('hex') !== 'efbbbf') throw new Error('PowerShell file: ' + got.name + ' ' + got.bytes.slice(0, 3).toString('hex'));
+      const ps = got.bytes.toString('utf8');
+      if (!ps.includes('R|\\\\NAS\\Media\r\n') || !ps.includes('|\\video\\film.mkv\r\n')) throw new Error('PowerShell paths:\n' + ps.slice(0, 700));
+      if (!/powershell -NoProfile -ExecutionPolicy Bypass -File "\.\\delete-Media-/.test(await page.textContent('[data-testid=script-command]'))) throw new Error('PowerShell command: ' + await page.textContent('[data-testid=script-command]'));
+      // cmd: only the size is compared.
+      await page.check('[data-testid=script-type-cmd]');
+      got = await download('[data-testid=script-make]');
+      const cmd = got.bytes.toString('utf8');
+      if (!/\.cmd$/.test(got.name) || !cmd.includes('chcp 65001') || got.bytes.slice(0, 3).toString('hex') === 'efbbbf') throw new Error('cmd file: ' + got.name);
+      await page.click('dialog[open] button:has-text("Sluiten")');
+
+      // Nothing was deleted by any of it.
+      for (const f of ['video/film.mkv', 'docs/report.pdf', 'photos/img.CR2']) if (!fs.existsSync(path.join(SHARE_DIR, 'media', f))) throw new Error(f + ' is gone');
+
+      // The selection follows the person from the folder view to the lists and between the lists.
+      await page.click('a[href="/lists"]');
+      await page.waitForSelector('[data-testid=list-row]');
+      if (await page.locator('[data-testid=selection-bar]').count() !== 1) throw new Error('the selection did not follow to the lists');
+      if (!(await page.locator('[data-testid=list-row]', { hasText: 'film.mkv' }).locator('[data-testid=select-file]').isChecked())) throw new Error('film.mkv is not shown as ticked in the lists');
+      await page.locator('[data-testid=list-row]', { hasText: 'img.CR2' }).locator('[data-testid=select-file]').check();
+      await expectText(page, '[data-testid=sel-count]', /^3 geselecteerd$/, 'three ticked in the lists');
+      await page.click('[data-testid=tab-cold-files]');
+      await page.waitForFunction(() => document.querySelectorAll('[data-testid=list-row]').length === 1);
+      await expectText(page, '[data-testid=sel-count]', /^3 geselecteerd$/, 'still three after another tab');
+      await page.click('[data-testid=sel-clear]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=selection-bar]'));
+      // The folder lists have no tick boxes: only files are scripted.
+      await page.click('[data-testid=tab-top-dirs]');
+      await page.waitForSelector('[data-testid=list-row]');
+      if (await page.locator('[data-testid=select-file]').count() !== 0) throw new Error('folders can be ticked');
+
+      // The share keeps a base path per kind of machine, checked and tidied when it is saved, and the dialog starts from it.
+      await page.goto(BASE + '/admin/shares');
+      await page.click('[data-testid=edit-Media]');
+      await page.fill('[data-testid=f-client-posix]', 'relative/path');
+      await page.click('[data-testid=f-save]');
+      await page.waitForSelector('dialog[open] .field-error');
+      await page.fill('[data-testid=f-client-posix]', '/mnt/user//media/');
+      await page.fill('[data-testid=f-client-windows]', '//NAS/Media/');
+      await page.click('[data-testid=f-save]');
+      await page.waitForFunction(() => !document.querySelector('dialog[open]'));
+      await page.click('[data-testid=edit-Media]');
+      await page.waitForSelector('[data-testid=f-client-posix]');
+      if ((await page.inputValue('[data-testid=f-client-posix]')) !== '/mnt/user/media' || (await page.inputValue('[data-testid=f-client-windows]')) !== '\\\\NAS\\Media') throw new Error('the base paths are not stored tidied: ' + await page.inputValue('[data-testid=f-client-posix]') + ' | ' + await page.inputValue('[data-testid=f-client-windows]'));
+      await page.click('dialog[open] button:has-text("Annuleren")');
+      await page.goto(BASE + '/browse/1?view=files&rec=1');
+      await page.waitForSelector('[data-testid=file-row]');
+      await row('notes.txt').locator('[data-testid=select-file]').check();
+      await page.click('[data-testid=sel-make]');
+      await page.waitForSelector('dialog[open] [data-testid=script-root]');
+      // The kind chosen last time (cmd) is remembered, and starts from the share's Windows path.
+      if (!(await page.isChecked('[data-testid=script-type-cmd]')) || (await page.inputValue('[data-testid=script-root]')) !== '\\\\NAS\\Media') throw new Error('the dialog does not start from the share: ' + await page.inputValue('[data-testid=script-root]'));
+      await page.check('[data-testid=script-type-sh]');
+      if ((await page.inputValue('[data-testid=script-root]')) !== '/mnt/user/media') throw new Error('sh does not start from the share\'s Linux path: ' + await page.inputValue('[data-testid=script-root]'));
+      got = await download('[data-testid=script-make]');
+      if (!got.bytes.toString('utf8').includes('\nR|/mnt/user/media\n')) throw new Error('the share\'s base path is not used');
+      await page.click('dialog[open] button:has-text("Sluiten")');
+      await page.click('[data-testid=sel-clear]');
+    });
+
     await step('units and language switch immediately and persist', async () => {
       await page.goto(BASE + '/browse/1');
       await page.waitForSelector('[data-testid=folder-row]');
@@ -365,6 +479,11 @@ const expectText = async (page, sel, re, msg) => {
       if (await vp.$('[data-testid=update-banner]') || await vp.$('.update-dot')) throw new Error('a viewer is told about updates');
       const viewerUpdate = await vp.evaluate(async () => [(await fetch('/api/v1/system/update')).status, (await fetch('/api/v1/system/update/check', { method: 'POST' })).status]);
       if (viewerUpdate[0] !== 403 || ![401, 403].includes(viewerUpdate[1])) throw new Error('a viewer can reach the update status: ' + viewerUpdate);
+      await vp.goto(BASE + '/browse/1?view=files&rec=1');
+      await vp.waitForSelector('[data-testid=file-row]');
+      if (await vp.$('[data-testid=select-file]') || await vp.$('[data-testid=select-all]') || await vp.$('[data-testid=selection-bar]')) throw new Error('a viewer sees tick boxes for delete scripts');
+      const viewerScript = await vp.evaluate(async () => (await fetch('/api/v1/shares/1/delete-script', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [1], script: 'sh', client_root: '/x' }) })).status);
+      if (![401, 403].includes(viewerScript)) throw new Error('a viewer can ask for a delete script: ' + viewerScript);
       await vp.goto(BASE + '/admin/users');
       if (await vp.$('[data-testid=user-table]')) throw new Error('a viewer reached the user list');
       await vp.goto(BASE + '/account');
@@ -380,8 +499,9 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
+      for (const name of ['film.mkv', 'report.pdf', 'notes.txt']) if (text.includes(name)) throw new Error('a file name in the audit log: ' + name);
     });
 
     await step('invitations: a guest can choose a passkey, a user gets a new login link, a link can be revoked', async () => {
@@ -763,22 +883,40 @@ const expectText = async (page, sel, re, msg) => {
       }
       // Phone width: the settings menu becomes a row you swipe, with the open part scrolled into view, and nothing makes the page wider than the screen.
       await page.setViewportSize({ width: 390, height: 844 });
-      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/account', 'appearance'], ['/', 'dashboard']]) {
-        await page.goto(BASE + where);
-        await page.waitForSelector('main');
-        await page.waitForTimeout(350);
+      const noWide = async (name) => {
         const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
         if (wide > 1) {
           const who = await page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => { const r = e.getBoundingClientRect(); return r.right > innerWidth + 1 && r.width > 0; })
             .slice(0, 8).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ').join('.')}@${Math.round(e.getBoundingClientRect().right)}`));
           throw new Error(`${name} is ${wide}px wider than a phone screen: ${who.join(' ')}`);
         }
+      };
+      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/account', 'appearance'], ['/', 'dashboard']]) {
+        await page.goto(BASE + where);
+        await page.waitForSelector('main');
+        await page.waitForTimeout(350);
+        await noWide(name);
         if (where !== '/') {
           const visible = await page.$eval('.settings-nav a[aria-current=page]', (a) => { const r = a.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; });
           if (!visible) throw new Error('the open settings part is not scrolled into view on a phone');
         }
         await shot('23-phone-' + name);
       }
+      // The tick boxes, the bar and the dialog of the delete scripts fit a phone too, and the box is a 44 px target.
+      await page.goto(BASE + '/browse/1?view=files&rec=1');
+      await page.waitForSelector('[data-testid=file-row]');
+      const box = await page.locator('[data-testid=file-row]', { hasText: 'film.mkv' }).locator('.selcell').boundingBox();
+      if (!box || box.width < 44 || box.height < 44) throw new Error('the tick box is not a 44 px target on a phone: ' + JSON.stringify(box));
+      await page.locator('[data-testid=file-row]', { hasText: 'film.mkv' }).locator('[data-testid=select-file]').check();
+      await page.waitForSelector('[data-testid=selection-bar]');
+      await noWide('the file list with a selection');
+      await shot('23-phone-select');
+      await page.click('[data-testid=sel-make]');
+      await page.waitForSelector('dialog[open] [data-testid=script-root]');
+      await noWide('the script dialog');
+      await shot('23-phone-script-dialog');
+      await page.click('dialog[open] button:has-text("Sluiten")');
+      await page.click('[data-testid=sel-clear]');
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.evaluate(() => { document.documentElement.style.removeProperty('--accent'); document.documentElement.style.removeProperty('--on-accent'); document.documentElement.dataset.theme = 'light'; });
     });

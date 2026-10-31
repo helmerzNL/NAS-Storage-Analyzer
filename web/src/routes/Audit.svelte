@@ -5,7 +5,7 @@
   import { errMessage } from '../lib/errors';
 
   let items = $state<AuditEntry[]>([]), next = $state<number | null>(null), prefix = $state(''), error = $state(''), loading = $state(false);
-  const groups = ['login.', 'mfa.', 'share.', 'scan.', 'user.', 'extension.', 'setup.'];
+  const groups = ['login.', 'mfa.', 'share.', 'scan.', 'script.', 'user.', 'extension.', 'setup.'];
 
   async function load(more = false) {
     loading = true; error = '';

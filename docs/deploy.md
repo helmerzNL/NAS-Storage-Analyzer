@@ -525,6 +525,15 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   de héle share) duren 2,0 tot 2,6 s; de rest blijft onder 500 ms. Zie [`bench-phase2.md`](bench-phase2.md).
 * **Alleen Linux-bestandssystemen** worden gescand (de scanner gebruikt `openat`/`fstatat`). Het draaien van de
   container zelf kan overal waar Docker draait, maar de gemounte share moet POSIX-semantiek hebben.
+* **Verwijderscripts** (zie [ADR 0006](adr/0006-delete-scripts.md)): de applicatie verwijdert niets, ze schrijft een script dat de beheerder
+  zelf draait. Het script controleert grootte (en, buiten `cmd`, tijd) vóór het verwijdert, maar kan een bestand dat sinds de scan door een
+  ander van gelijke grootte en tijd is vervangen niet herkennen; een incrementele scan ziet een bestand dat op zijn plek is aangepast ook pas
+  bij de volgende volledige scan. Windows kan sommige Linux-namen niet aanspreken (`: * ? " < > |`, een naam die op een punt of spatie eindigt,
+  `CON`, `NUL`, …) en een pad boven 259 tekens opent `cmd` niet: zulke bestanden laat het script weg en noemt het, het `sh`-script op de NAS kan
+  ze wel aan. `cmd` laat lege bestanden weg en vergelijkt alleen de grootte. Bestanden die alleen in hoofdletters verschillen (SMB en macOS
+  houden ze niet uit elkaar) laat het weg; de vergelijking is `lower()` van de database, dus ASCII-only bij een database in de `C`-locale. Wie
+  het script draait heeft schrijfrechten nodig op de share; de mount van de app blijft read-only. Handmatig te controleren vóór gebruik op een
+  echte NAS: Samba met hoofdlettergevoeligheid en afronding van tijden, `LongPathsEnabled` op Windows, busybox `ash` (Synology, QNAP) en SmartScreen.
 * **OIDC is niet geïmplementeerd.** Een extra inlogmethode hoeft na het verifiëren van de identiteit alleen een sessie
   aan te maken (`auth.Service.CreateSession`), zoals de passkey-login doet; de rest (rollen, tweede-factor-eis, audit,
   lockout) blijft gelijk. Het zelf bouwen van die koppeling is werk, geen configuratie.

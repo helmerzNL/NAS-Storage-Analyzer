@@ -53,14 +53,50 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   const text = await res.text();
   let data: any = undefined;
   try { data = text ? JSON.parse(text) : undefined; } catch { /* not JSON */ }
-  if (!res.ok) {
-    const err = new ApiError(res.status, data?.title || res.statusText || 'error', data?.code || '', data?.detail || '', data?.field || '',
-      Number(res.headers.get('Retry-After')) || 0, data?.params);
-    if (['unauthenticated', 'mfa_required', 'enroll_required'].includes(err.code) && !path.startsWith('/auth/')) onAuthProblem(err.code);
-    throw err;
-  }
+  if (!res.ok) throw failure(res, data, path);
   if (data?.csrf_token) csrf = data.csrf_token;
   return data as T;
+}
+
+/** The error for a response that is not OK: carries the problem document's stable code and field. */
+function failure(res: Response, data: any, path: string): ApiError {
+  const err = new ApiError(res.status, data?.title || res.statusText || 'error', data?.code || '', data?.detail || '', data?.field || '',
+    Number(res.headers.get('Retry-After')) || 0, data?.params);
+  if (['unauthenticated', 'mfa_required', 'enroll_required'].includes(err.code) && !path.startsWith('/auth/')) onAuthProblem(err.code);
+  return err;
+}
+
+/** A file the server made on request: its bytes, the name it suggests and the numbers it reports in headers. */
+export interface Download { blob: Blob; filename: string; files: number; skipped: number; bytes: number }
+
+/**
+ * The file name a Content-Disposition header suggests: filename* (RFC 6266, any letters) before filename. Anything that could change the folder
+ * or the kind of file is replaced, because the name is only a suggestion from a server and ends up on the person's disk.
+ */
+export function filenameFromDisposition(header: string | null, fallback = 'download'): string {
+  let name = '';
+  const star = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header ?? '');
+  if (star) { try { name = decodeURIComponent(star[2].trim()); } catch { /* fall through to the plain form */ } }
+  if (!name) {
+    const plain = /filename\s*=\s*(?:"([^"]*)"|([^;]+))/i.exec(header ?? '');
+    name = (plain?.[1] ?? plain?.[2] ?? '').trim();
+  }
+  name = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+/, '_').slice(0, 200);
+  return name || fallback;
+}
+
+/** POSTs JSON and returns the file in the answer (the delete script). Errors are the same ApiError as everywhere. */
+export async function postForFile(path: string, body: unknown): Promise<Download> {
+  const headers: Record<string, string> = { Accept: 'text/plain, application/problem+json', 'Content-Type': 'application/json' };
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  const res = await fetch('/api/v1' + path, { method: 'POST', headers, body: JSON.stringify(body), credentials: 'same-origin' });
+  if (!res.ok) {
+    let data: any = undefined;
+    try { data = JSON.parse(await res.text()); } catch { /* not JSON */ }
+    throw failure(res, data, path);
+  }
+  const num = (h: string) => Number(res.headers.get(h)) || 0;
+  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get('Content-Disposition')), files: num('X-Files'), skipped: num('X-Skipped'), bytes: num('X-Bytes') };
 }
 
 export const get = <T = unknown>(path: string, signal?: AbortSignal, headers?: Record<string, string>) => api<T>('GET', path, undefined, signal, headers);
