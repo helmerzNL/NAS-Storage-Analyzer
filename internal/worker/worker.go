@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
@@ -39,6 +40,9 @@ type Worker struct {
 	mounts *mounts.Manager
 	cfg    Config
 	log    *slog.Logger
+
+	running   atomic.Int32 // jobs executing right now
+	lastClaim atomic.Int64 // unix nanoseconds of the last claim attempt that reached the database
 }
 
 func New(st *store.Store, sh *shares.Service, m *mounts.Manager, cfg Config, log *slog.Logger) *Worker {
@@ -60,7 +64,26 @@ func New(st *store.Store, sh *shares.Service, m *mounts.Manager, cfg Config, log
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Worker{st: st, q: jobs.NewQueue(st.Pool), shares: sh, mounts: m, cfg: cfg, log: log}
+	w := &Worker{st: st, q: jobs.NewQueue(st.Pool), shares: sh, mounts: m, cfg: cfg, log: log}
+	w.lastClaim.Store(cfg.Now().UnixNano())
+	return w
+}
+
+// Healthy reports whether the worker is doing its job: it reached the queue
+// recently, or every slot is busy with a scan (those beat on their own, and
+// the claim loop is then rightly waiting for a free slot).
+func (w *Worker) Healthy() error {
+	if int(w.running.Load()) >= w.cfg.Parallel {
+		return nil
+	}
+	limit := 5 * w.cfg.PollEvery
+	if limit < 30*time.Second {
+		limit = 30 * time.Second
+	}
+	if age := w.cfg.Now().Sub(time.Unix(0, w.lastClaim.Load())); age > limit {
+		return fmt.Errorf("the queue has not been reachable for %s", age.Round(time.Second))
+	}
+	return nil
 }
 
 // OpsLimit returns the operations-per-second limit that applies at time t:
@@ -106,6 +129,9 @@ func (w *Worker) Run(ctx context.Context) {
 			continue
 		}
 		job, err := w.q.Claim(ctx, w.cfg.ID)
+		if err == nil {
+			w.lastClaim.Store(w.cfg.Now().UnixNano())
+		}
 		if err != nil || job == nil {
 			<-slots
 			if err != nil && ctx.Err() == nil {
@@ -118,9 +144,11 @@ func (w *Worker) Run(ctx context.Context) {
 			continue
 		}
 		wg.Add(1)
+		w.running.Add(1)
 		go func() {
 			defer wg.Done()
 			defer func() { <-slots }()
+			defer w.running.Add(-1)
 			w.execute(ctx, job)
 		}()
 	}

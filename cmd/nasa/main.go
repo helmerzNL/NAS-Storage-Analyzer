@@ -7,6 +7,9 @@ import (
 	"os"
 )
 
+// version is set at build time (-ldflags "-X main.version=...").
+var version = "dev"
+
 const usage = `nasa - NAS Storage Analyzer
 
 Usage:
@@ -16,6 +19,8 @@ Commands:
   serve     run the web interface and REST API
   worker    run queued scans (mounts NFS/SMB shares when needed)
   genkey    print a new encryption key for NASA_ENCRYPTION_KEY
+  version   print the version
+  healthcheck   exit 0 when a URL answers 2xx (the container HEALTHCHECK)
   migrate   apply database migrations and seed default categories
   scan      scan a directory tree (read-only) and store the result
   recategorize  apply the current extension mapping to stored files (no rescan)
@@ -34,6 +39,8 @@ func main() {
 		err = runWorker(os.Args[2:])
 	case "genkey":
 		err = runGenKey(os.Args[2:])
+	case "healthcheck":
+		err = runHealthcheck(os.Args[2:])
 	case "serve":
 		err = runServe(os.Args[2:])
 	case "migrate":
@@ -42,6 +49,9 @@ func main() {
 		err = runScan(os.Args[2:])
 	case "recategorize":
 		err = runRecategorize(os.Args[2:])
+	case "version", "-version", "--version":
+		fmt.Println("nasa", version)
+		return
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return

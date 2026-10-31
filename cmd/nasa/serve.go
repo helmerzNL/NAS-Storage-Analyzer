@@ -180,7 +180,7 @@ func runServe(args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("listening", "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
+	log.Info("listening", "version", version, "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
 	select {
 	case err := <-errc:
 		return err

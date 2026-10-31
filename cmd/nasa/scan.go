@@ -80,6 +80,7 @@ func runScan(args []string) error {
 	name := fs.String("name", "", "share name in the database (default: base name of -path)")
 	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN)")
 	workers := fs.Int("workers", 16, "parallel directory workers")
+	allowEmpty := fs.Bool("allow-empty", false, "publish a scan that finds nothing although the previous one found files (a missing mount is refused otherwise)")
 	full := fs.Bool("full", false, "full scan: stat every file instead of reusing unchanged directories")
 	maxOps := fs.Int("max-ops", 0, "limit metadata operations per second (0 = unlimited)")
 	dirTimeout := fs.Duration("dir-timeout", 10*time.Minute, "give up on a directory when one filesystem call blocks this long (0 = never)")
@@ -147,7 +148,7 @@ func runScan(args []string) error {
 	}
 	log.Info("scan starting", "share", share.Name, "path", abs, "workers", *workers, "full", *full, "max_ops_per_sec", *maxOps)
 	res, err := scanrun.Run(ctx, st, share, scanrun.Options{
-		ForceFull: *full, Trigger: "cli", DirTimeout: *dirTimeout, OnProgress: progress, ProgressEvery: *every,
+		ForceFull: *full, AllowEmpty: *allowEmpty, Trigger: "cli", DirTimeout: *dirTimeout, OnProgress: progress, ProgressEvery: *every,
 	})
 	if err != nil {
 		return cancelled(err)

@@ -27,12 +27,25 @@ type Options struct {
 	ProgressEvery time.Duration
 	// FS replaces the real file system (tests).
 	FS scanner.FS
+	// AllowEmpty publishes a scan that found nothing even though the previous
+	// one found files; without it that is refused (see ErrEmptyShare).
+	AllowEmpty bool
 	// OnStart is called with the new scan's id as soon as it exists.
 	OnStart func(scanID int64)
 	// Throttle replaces the one built from the share's max_ops_per_sec, so the
 	// caller can change the rate while the scan runs.
 	Throttle *scanner.Throttle
 }
+
+// emptyGuardFiles is how many files the previous scan must have seen before an
+// empty result is treated as a missing mount rather than a cleared share.
+const emptyGuardFiles = 100
+
+// ErrEmptyShare is returned when a share that held files now shows an empty
+// root. The usual cause is a network share that is no longer mounted, which
+// leaves an empty mount point; publishing that would erase the history.
+var ErrEmptyShare = errors.New("the share is empty, but the previous scan found files: is it still mounted? " +
+	"Nothing was changed. If it was emptied on purpose, scan once with `nasa scan -allow-empty`")
 
 // Progress is a live view of a running scan.
 type Progress struct {
@@ -135,6 +148,11 @@ func Run(ctx context.Context, st *store.Store, share *store.Share, o Options) (*
 	if werr != nil {
 		w.Abort(context.Background())
 		return nil, fail(werr, prog.Errors.Load())
+	}
+
+	if hasPrev && prev.Files >= emptyGuardFiles && !o.AllowEmpty && prog.Files.Load() == 0 && prog.Dirs.Load() <= 1 {
+		w.Abort(context.Background())
+		return nil, fail(ErrEmptyShare, prog.Errors.Load())
 	}
 
 	quality := scanner.AssessAtime(prog.Atime(), mountOf(share.Path))

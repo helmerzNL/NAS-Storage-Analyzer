@@ -584,3 +584,56 @@ func TestEveryNthAutomaticScanIsFull(t *testing.T) {
 		t.Error("full_scan_every=0 must never force")
 	}
 }
+
+func TestEmptyRootIsRefusedAsAMissingMount(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	for i := 0; i < emptyGuardFiles+20; i++ {
+		if err := os.WriteFile(root+"/f"+strconv.Itoa(i), make([]byte, 10), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sh := newShare(t, st, "media", root, nil)
+	first := run(t, st, sh, Options{})
+	if first.Totals.Files != emptyGuardFiles+20 {
+		t.Fatalf("first scan files = %d", first.Totals.Files)
+	}
+
+	// The share goes away: what remains is an empty mount point.
+	entries, _ := os.ReadDir(root)
+	for _, e := range entries {
+		os.Remove(root + "/" + e.Name())
+	}
+	for _, o := range []Options{{}, {ForceFull: true}} {
+		if _, err := Run(context.Background(), st, sh, o); !errors.Is(err, ErrEmptyShare) {
+			t.Fatalf("empty root with %+v: err = %v, want ErrEmptyShare", o, err)
+		}
+	}
+	var files int64
+	if err := st.Pool.QueryRow(context.Background(), `SELECT count(*) FROM files WHERE share_id = $1`, sh.ID).Scan(&files); err != nil || files != emptyGuardFiles+20 {
+		t.Fatalf("stored files after the refused scans = %d (err %v), want the old data untouched", files, err)
+	}
+	var failed int
+	st.Pool.QueryRow(context.Background(), `SELECT count(*) FROM scans WHERE share_id = $1 AND status = 'failed'`, sh.ID).Scan(&failed)
+	if failed != 2 {
+		t.Errorf("failed scans recorded = %d, want 2", failed)
+	}
+
+	// Emptied on purpose: the explicit override publishes it.
+	res := run(t, st, sh, Options{AllowEmpty: true})
+	if res.Totals.Files != 0 {
+		t.Errorf("files after the override = %d, want 0", res.Totals.Files)
+	}
+}
+
+func TestSmallShareMayBecomeEmpty(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	os.WriteFile(root+"/only", []byte("x"), 0o644)
+	sh := newShare(t, st, "tiny", root, nil)
+	run(t, st, sh, Options{})
+	os.Remove(root + "/only")
+	if res := run(t, st, sh, Options{}); res.Totals.Files != 0 {
+		t.Errorf("files = %d, want 0: a share with few files is not guarded", res.Totals.Files)
+	}
+}

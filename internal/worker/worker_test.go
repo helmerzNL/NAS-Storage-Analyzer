@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -293,5 +294,23 @@ func TestOpsLimitFollowsTheDayWindow(t *testing.T) {
 	in.MaxOpsDay, in.MaxOpsPerSec = 0, 50
 	if got := worker.OpsLimit(in, at(12), ams); got != 50 {
 		t.Errorf("no day limit: %d", got)
+	}
+}
+
+func TestHealthyWhileThePollLoopReachesTheQueue(t *testing.T) {
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	e := newEnv(t, func(c *worker.Config) { c.Now = func() time.Time { return time.Unix(0, clock.Load()) } }, nil)
+	if err := e.w.Healthy(); err != nil {
+		t.Fatalf("a fresh worker is healthy: %v", err)
+	}
+	e.stop()
+	clock.Add(int64(10 * time.Second))
+	if err := e.w.Healthy(); err != nil {
+		t.Fatalf("a few seconds without a poll is normal: %v", err)
+	}
+	clock.Add(int64(2 * time.Minute))
+	if err := e.w.Healthy(); err == nil {
+		t.Fatal("a worker that stopped polling must report unhealthy")
 	}
 }
