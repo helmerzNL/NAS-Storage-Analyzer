@@ -5,6 +5,8 @@
 #
 # Shares are scanned read-only. The recommended route is to mount the NFS/SMB share on the
 # Docker host and point NASA_SHARES_DIR at the folder that holds the mounts; see docs/deploy.md.
+# On a NAS that runs this stack itself, point NASA_SHARES_DIR at the folder that holds its shares
+# (Unraid: /mnt/user). Set NASA_SHARES_MOUNT to the same path to type host paths in the interface.
 
 name: nas-storage-analyzer
 
@@ -32,9 +34,11 @@ x-nasa: &nasa
   volumes:
     # The scan target, read-only. rslave makes mounts that the host adds or renews later visible here;
     # set NASA_SHARES_PROPAGATION=rprivate if Docker refuses it ("not a shared or slave mount").
+    # It appears at NASA_SHARES_MOUNT in the container (default /mnt/shares). Setting that to the same
+    # value as NASA_SHARES_DIR makes the paths in the interface identical to the paths on the host.
     - type: bind
       source: ${NASA_SHARES_DIR:-./shares}
-      target: /mnt/shares
+      target: ${NASA_SHARES_MOUNT:-/mnt/shares}
       read_only: true
       bind:
         propagation: ${NASA_SHARES_PROPAGATION:-rslave}
@@ -45,7 +49,7 @@ x-nasa: &nasa
     NASA_DB_PASSWORD: ${NASA_DB_PASSWORD:-}
     NASA_ENCRYPTION_KEY: ${NASA_ENCRYPTION_KEY:-}
     NASA_TZ: ${NASA_TZ:-Europe/Amsterdam}
-    NASA_SHARES_ROOT: /mnt/shares
+    NASA_SHARES_ROOT: ${NASA_SHARES_MOUNT:-/mnt/shares}
 
 services:
   app:

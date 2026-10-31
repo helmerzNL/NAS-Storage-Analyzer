@@ -61,6 +61,27 @@ func TestValidateBind(t *testing.T) {
 	}
 }
 
+// The shares root is NASA_SHARES_MOUNT, so it need not be /mnt/shares: the check and the example in
+// the error message must follow it.
+func TestValidateBindFollowsConfiguredRoot(t *testing.T) {
+	opt := shares.Options{SharesRoot: "/mnt/user"}
+	in := valid()
+	in.Path = "/mnt/user/media"
+	if err := shares.Validate(&in, opt); err != nil {
+		t.Fatalf("a path below the configured root: %v", err)
+	}
+	in = valid() // /mnt/shares/media is outside this root
+	if err := shares.Validate(&in, opt); field(err) != "path" || !strings.Contains(err.Error(), "/mnt/user") {
+		t.Errorf("a path outside the configured root: %v", err)
+	}
+	in = valid()
+	in.Path = "media"
+	err := shares.Validate(&in, opt)
+	if field(err) != "path" || !strings.Contains(err.Error(), "/mnt/user/media") {
+		t.Errorf("a relative path must show an example below the configured root: %v", err)
+	}
+}
+
 func TestValidateFields(t *testing.T) {
 	opt := shares.Options{}
 	cases := []struct {
