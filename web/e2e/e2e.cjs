@@ -63,6 +63,22 @@ const expectText = async (page, sel, re, msg) => {
   let secret = '', codes = [];
 
   try {
+    await step('a stable build shows no beta label; a beta build shows it on the sign-in screen and in the tab title', async () => {
+      await page.goto(BASE + '/');
+      await page.waitForSelector('[data-testid=setup-token]');
+      const stable = await (await ctx.request.get(BASE + '/api/v1/version')).json();
+      if (stable.channel !== 'stable' || !stable.version) throw new Error('the server reports ' + JSON.stringify(stable) + ' without NASA_TAG');
+      if (await page.locator('[data-testid=beta-badge]').count() !== 0) throw new Error('a stable build shows a beta label');
+      if (await page.title() !== 'NAS Storage Analyzer') throw new Error('stable tab title is "' + await page.title() + '"');
+      // The same interface against a server that reports the beta channel (the Go tests cover the server side of NASA_TAG=beta).
+      const b = await browser.newContext({ locale: 'nl-NL' });
+      const bp = await b.newPage();
+      await bp.route('**/api/v1/version', (r) => r.fulfill({ json: { ...stable, channel: 'beta' } }));
+      await bp.goto(BASE + '/');
+      await bp.waitForSelector('[data-testid=beta-badge]');
+      await bp.waitForFunction(() => document.title === 'NAS Storage Analyzer (beta)');
+      await b.close();
+    });
     await step('setup wizard creates the first administrator', async () => {
       await page.goto(BASE + '/');
       await page.waitForSelector('[data-testid=setup-token]');

@@ -19,6 +19,7 @@ import (
 
 	apispec "github.com/helmerznl/nas-storage-analyzer/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/buildinfo"
 	"github.com/helmerznl/nas-storage-analyzer/internal/query"
 )
 
@@ -32,6 +33,8 @@ type Config struct {
 	CSVMaxRows int
 	// Now is the clock for relative filters such as unused_days (tests).
 	Now func() time.Time
+	// Build says which version and release channel this is; GET /api/v1/version reports it.
+	Build buildinfo.Info
 }
 
 // Server implements http.Handler.
@@ -98,6 +101,16 @@ func (s *Server) routes() {
 		w.Write([]byte("ok\n"))
 	})
 	s.handleFunc("GET /readyz", s.ready)
+	// Public on purpose: the sign-in screen already shows the beta label, and nothing here is secret.
+	s.handleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
+		build := s.cfg.Build
+		if build.Version == "" && build.Channel == "" {
+			build = buildinfo.New("", "", "")
+		}
+		if err := writeJSON(w, build); err != nil {
+			s.log.Error("writing the version", "error", err)
+		}
+	})
 	metrics := promhttp.HandlerFor(s.m.reg, promhttp.HandlerOpts{})
 	s.handleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		if s.auth != nil && !s.metricsAllowed(r) {

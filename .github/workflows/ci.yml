@@ -99,6 +99,15 @@ jobs:
           path: ${{ runner.temp }}/e2e-shots
           if-no-files-found: ignore
 
+  # Where the data lives and which image runs (baseline sections 20 and 21): the Compose file and .env.example are
+  # read as text, init-env.sh and migrate_data.sh are driven with a fake docker. Fast, needs no database.
+  deploy-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose layout, init-env.sh and migrate_data.sh
+        run: python -m unittest discover -s scripts -p "test_deploy_layout.py" -v
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
@@ -107,11 +116,22 @@ jobs:
         run: docker build --build-arg VERSION=ci -t nas-storage-analyzer:ci .
       - name: The binary in the image starts and reports its version
         run: docker run --rm nas-storage-analyzer:ci version
+      - name: Compose refuses to start without DATA_PATH or the shares folder
+        run: |
+          rm -f .env
+          for var in DATA_PATH NASA_SHARES_DIR; do
+            grep -v "^$var=" .env.example > .env
+            if docker compose config -q 2>compose.err; then echo "::error::compose started without $var"; exit 1; fi
+            grep -q "$var" compose.err || { echo "::error::compose failed, but not on $var:"; cat compose.err; exit 1; }
+          done
+          rm -f .env compose.err
       - name: Compose files are valid for the example env
         run: |
           cp .env.example .env
           docker compose config -q
           docker compose -f docker-compose.yml -f docker-compose.mounts.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.build.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.mounts.yml config -q
       - name: The Docker-secrets variant is valid
         run: |
           rm -f .env

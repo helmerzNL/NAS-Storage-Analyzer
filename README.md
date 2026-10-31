@@ -27,14 +27,28 @@ Vereist: Docker met Compose v2.
 ```bash
 git clone https://github.com/helmerzNL/NAS-Storage-Analyzer.git
 cd NAS-Storage-Analyzer
-./scripts/init-env.sh              # maakt .env met willekeurige geheimen (database-wachtwoord, encryptiesleutel, setup-token)
-docker compose up -d --build
+./scripts/init-env.sh              # maakt .env: de mappen (zie onder) en willekeurige geheimen (database-wachtwoord, encryptiesleutel, setup-token)
+docker compose up -d
 ```
+
+De stack haalt de image op van `ghcr.io/helmerznl/nas-storage-analyzer`; er wordt op de server niets gebouwd. `NASA_TAG` in `.env`
+kiest welke: `latest` (stabiel, standaard), `beta` (de build waar elke wijziging eerst in landt; de interface toont dan een
+**beta**-label, gebruik een aparte `DATA_PATH`) of een versienummer om vast te zetten. Zolang er nog geen promotie naar `main` is geweest
+bestaat `latest` nog niet: zet dan `NASA_TAG=beta`, of bouw de image uit deze map met
+`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+
+**Waar de data staat.** Alles wat niet verloren mag gaan (de database: `DATA_PATH/postgres`) staat in één **absolute** map op de
+host, `DATA_PATH` in `.env`. Het zijn gewone mappen, geen Docker-volumes, dus `docker compose down -v`, een prune of een
+herbouw raakt ze niet. Een relatief pad (`./data`) is niet toegestaan: dat wordt opgelost door de tool die de stack start (Dockhand op
+Unraid loste zo'n pad bij een andere Flux76-app op naar het RAM-schijfgeheugen; baseline §21). Op Unraid bijvoorbeeld `/mnt/cache/appdata/nas-storage-analyzer`, elders
+`/srv/nas-storage-analyzer`. `init-env.sh` weigert een relatief pad (`--data-path`, `--shares-dir`).
+**Heb je een installatie van vóór deze instelling** (database in het volume `db-data`)? Dan verplaats je die eenmalig, vóór je de
+nieuwe versie uitrolt: [`docs/deploy.md` §8](docs/deploy.md#8-bijwerken).
 
 Open <http://127.0.0.1:8080>, voer de setup-token uit `.env` in, maak het beheerdersaccount aan en stel de tweede
 factor in. Voeg daarna een share toe (**Shares → Share toevoegen**) en klik op **Scan nu** op het dashboard.
 
-Zet in `.env` `NASA_SHARES_DIR` op de map op de Docker-host waar je NAS-shares gemount zijn; die verschijnt
+Zet in `.env` `NASA_SHARES_DIR` (verplicht, een absoluut pad) op de map op de Docker-host waar je NAS-shares gemount zijn; die verschijnt
 read-only als `/mnt/shares` in de containers (of op een pad naar keuze, zie `NASA_SHARES_MOUNT`). Draait de stack op
 de NAS zelf, bijvoorbeeld Unraid, dan hoef je niets te mounten. Zie [Shares beschikbaar maken](#shares-beschikbaar-maken).
 
@@ -117,9 +131,11 @@ Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangr
 
 | Variabele | Betekenis |
 |---|---|
+| `DATA_PATH` | Vereist. Absolute map op de host met alles wat bewaard moet blijven; de database staat in `DATA_PATH/postgres`. Nooit relatief, nooit een Docker-volume. |
+| `NASA_TAG` | Welke image: `latest` (standaard), `beta` of een versienummer. Wordt ook in de container gezet; een beta-build toont een **beta**-label. |
 | `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
 | `NASA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
-| `NASA_SHARES_DIR` | Map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
+| `NASA_SHARES_DIR` | Vereist. Absolute map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
 | `NASA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Standaard `/mnt/shares`; zet het gelijk aan `NASA_SHARES_DIR` en de paden zijn overal hetzelfde. |
 | `NASA_HTTP_BIND`, `NASA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
 | `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
@@ -238,9 +254,20 @@ files, except two broad age filters at 2.0-2.6 s; see [`docs/bench-phase2.md`](d
 **Quick start** (Docker with Compose v2):
 
 ```bash
-./scripts/init-env.sh              # creates .env with random secrets
-docker compose up -d --build
+./scripts/init-env.sh              # creates .env: the folders (see below) and random secrets
+docker compose up -d
 ```
+
+The stack pulls `ghcr.io/helmerznl/nas-storage-analyzer`; nothing is built on the server. `NASA_TAG` in `.env` picks the image:
+`latest` (stable, the default), `beta` (the build every change lands in first; the interface shows a **beta** label, use a separate
+`DATA_PATH`) or a version number to pin. Until the first promotion to `main` there is no `latest` image: use `NASA_TAG=beta`, or
+build it from this folder with `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+
+**Where the data lives.** Everything that must not be lost (the database, `DATA_PATH/postgres`) is in one **absolute** host folder,
+`DATA_PATH` in `.env`. They are plain folders, never Docker volumes, so `docker compose down -v`, a prune or a rebuild cannot touch
+them. A relative path is refused: it is resolved by whatever tool starts the stack (Dockhand on Unraid resolved such a path into the RAM disk in another Flux76 app; baseline §21). If
+your database is still in the Docker volume `db-data` (a version from before this setting), move it once, **before** you deploy the
+new version: [`docs/deploy.md` §8](docs/deploy.md#8-bijwerken).
 
 Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the administrator and enrol a second factor
 (authenticator app or passkey; mandatory). There are no default passwords. Then add a share and click *Scan nu*.

@@ -1,0 +1,18 @@
+# Override: build the image from this checkout instead of pulling it.
+#
+#   NASA_COMMIT=$(git rev-parse --short HEAD) docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# NASA_COMMIT is shown next to the version (GET /api/v1/version, `nasa version`); without it the build says "dev".
+# Combine with the other overrides the usual way, for example
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.mounts.yml up -d --build
+x-build: &build
+  context: .
+  args:
+    VERSION: ${NASA_VERSION:-dev}
+    GIT_COMMIT: ${NASA_COMMIT:-}
+
+services:
+  app:
+    build: *build
+  worker:
+    build: *build

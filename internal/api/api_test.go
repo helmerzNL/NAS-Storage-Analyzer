@@ -23,6 +23,7 @@ import (
 
 	apispec "github.com/helmerznl/nas-storage-analyzer/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
+	"github.com/helmerznl/nas-storage-analyzer/internal/buildinfo"
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanrun"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
@@ -157,7 +158,7 @@ func TestResponsesMatchOpenAPIContract(t *testing.T) {
 		status int
 	}
 	cases := []tc{
-		{"/healthz", 200}, {"/readyz", 200}, {"/openapi.yaml", 200}, {"/metrics", 200},
+		{"/healthz", 200}, {"/readyz", 200}, {"/openapi.yaml", 200}, {"/metrics", 200}, {"/api/v1/version", 200},
 		{"/api/v1/shares", 200}, {s, 200}, {s + "/scans", 200}, {s + "/scans?limit=1", 200},
 		{s + "/categories", 200}, {s + "/categories?dir=root", 200},
 		{s + "/extensions", 200}, {s + "/extensions?category=video&limit=2", 200},
@@ -511,6 +512,28 @@ func TestOperationalEndpoints(t *testing.T) {
 	}
 	if f.get(t, "/api/v1/shares").Header().Get("X-Request-Id") == "" {
 		t.Error("no generated request id")
+	}
+}
+
+// A beta build says so (baseline section 20): the same binary reports "beta" for a beta tag and "stable"
+// without one, and the endpoint is public.
+func TestVersionReportsTheReleaseChannel(t *testing.T) {
+	get := func(cfg api.Config) buildinfo.Info {
+		t.Helper()
+		var out buildinfo.Info
+		newFixture(t, cfg).json(t, "/api/v1/version", 200, &out)
+		return out
+	}
+	stable := get(api.Config{Build: buildinfo.New("0.1.0", "abc1234", "")})
+	beta := get(api.Config{Build: buildinfo.New("0.1.0", "abc1234", "beta")})
+	if stable != (buildinfo.Info{Version: "0.1.0", Commit: "abc1234", Channel: "stable"}) {
+		t.Errorf("stable = %+v", stable)
+	}
+	if beta != (buildinfo.Info{Version: "0.1.0", Commit: "abc1234", Channel: "beta"}) {
+		t.Errorf("beta = %+v", beta)
+	}
+	if def := get(api.Config{}); def.Channel != "stable" || def.Version != "dev" {
+		t.Errorf("a server built without build info reports %+v, want dev/stable", def)
 	}
 }
 

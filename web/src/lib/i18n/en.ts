@@ -2,7 +2,7 @@ export const en: Record<string, string> = {
   // general
   'common.add': 'Add', 'common.cancel': 'Cancel', 'common.close': 'Close', 'common.continue': 'Continue', 'common.delete': 'Delete',
   'common.edit': 'Edit', 'common.loading': 'Loading…', 'common.more': 'Load more', 'common.retry': 'Try again', 'common.save': 'Save',
-  'app.notfound': 'This page does not exist.', 'app.unreachable': 'The server cannot be reached',
+  'app.beta.title': 'Beta build: new features that are still being tested', 'app.notfound': 'This page does not exist.', 'app.unreachable': 'The server cannot be reached',
   'nav.main': 'Main menu', 'nav.dashboard': 'Dashboard', 'nav.browse': 'Folders', 'nav.lists': 'Lists', 'nav.search': 'Search', 'nav.shares': 'Shares',
   'nav.extensions': 'File types', 'nav.users': 'Users', 'nav.audit': 'Audit log', 'nav.account': 'My account',
   'live.running': 'A scan is running', 'live.running.n': '{n} scan(s) running',

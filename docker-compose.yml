@@ -1,7 +1,14 @@
 # NAS Storage Analyzer: web interface + API (app), scan runner (worker) and database (db).
 #
 #   ./scripts/init-env.sh          # once: creates .env with a random database password and encryption key
-#   docker compose up -d --build
+#   docker compose up -d
+#
+# This file pulls the published image, so a server needs nothing but this file and .env. To build the image
+# from a checkout instead: docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+#
+# Everything that must not be lost lives in one absolute folder of the host, DATA_PATH (the database is
+# DATA_PATH/postgres). They are plain folders, never Docker volumes, so `docker compose down -v` and a prune
+# cannot touch them. A relative DATA_PATH is resolved by whatever tool starts the stack, not by Docker.
 #
 # Shares are scanned read-only. The recommended route is to mount the NFS/SMB share on the
 # Docker host and point NASA_SHARES_DIR at the folder that holds the mounts; see docs/deploy.md.
@@ -11,11 +18,9 @@
 name: nas-storage-analyzer
 
 x-nasa: &nasa
-  image: ${NASA_IMAGE:-nas-storage-analyzer:latest}
-  build:
-    context: .
-    args:
-      VERSION: ${NASA_VERSION:-dev}
+  # NASA_TAG is chosen in .env next to this file: latest (stable, the default), beta, or a version number to pin.
+  # The same value goes into the container (below), so a beta build shows a beta label in the interface.
+  image: ghcr.io/helmerznl/nas-storage-analyzer:${NASA_TAG:-latest}
   restart: unless-stopped
   init: true
   read_only: true
@@ -32,19 +37,23 @@ x-nasa: &nasa
     driver: json-file
     options: {max-size: 10m, max-file: "5"}
   volumes:
-    # The scan target, read-only. Use an absolute path on the host in NASA_SHARES_DIR (see docs/deploy.md).
+    # The scan target, read-only. NASA_SHARES_DIR is an absolute path on the host (see docs/deploy.md): a
+    # relative one is resolved by whatever tool starts the stack, and under Dockhand that is not the host.
     # It appears at NASA_SHARES_MOUNT in the container (default /mnt/shares). Setting that to the same
     # value as NASA_SHARES_DIR makes the paths in the interface identical to the paths on the host.
     # rprivate works on every host and shows the mounts that exist when the containers start. rslave
     # also shows mounts the host makes later (autofs), but Docker refuses it unless the host mount is
     # shared or slave ("not a shared or slave mount"), which is not the case on Unraid and many NAS systems.
     - type: bind
-      source: ${NASA_SHARES_DIR:-./shares}
+      source: ${NASA_SHARES_DIR:?Set NASA_SHARES_DIR in .env to the absolute folder of the host that holds the shares, e.g. /mnt/user}
       target: ${NASA_SHARES_MOUNT:-/mnt/shares}
       read_only: true
       bind:
         propagation: ${NASA_SHARES_PROPAGATION:-rprivate}
   environment: &nasa-env
+    NASA_TAG: ${NASA_TAG:-latest}
+    # The app does not use it; it is passed in so the container can warn when the value is relative.
+    DATA_PATH: ${DATA_PATH:?Set DATA_PATH in .env to an absolute folder of the host, e.g. /srv/nas-storage-analyzer}
     NASA_DB_HOST: db
     NASA_DB_NAME: ${NASA_DB_NAME:-nasa}
     NASA_DB_USER: ${NASA_DB_USER:-nasa}
@@ -113,7 +122,9 @@ services:
       - -c
       - random_page_cost=${PG_RANDOM_PAGE_COST:-1.5}
     volumes:
-      - db-data:/var/lib/postgresql/data
+      # The database is a folder on the host, never a Docker volume: it survives `docker compose down -v`, a prune
+      # and every update. DATA_PATH is an absolute folder of the host (a relative one is resolved by the deploy tool).
+      - ${DATA_PATH}/postgres:/var/lib/postgresql/data
     logging:
       driver: json-file
       options: {max-size: 10m, max-file: "5"}
@@ -123,6 +134,3 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
-
-volumes:
-  db-data:

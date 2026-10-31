@@ -38,6 +38,10 @@ func runWorker(args []string) error {
 		return err
 	}
 	log := newLogger()
+	if w := dataPathWarning(os.Getenv("DATA_PATH")); w != "" {
+		log.Warn(w)
+	}
+	log.Info("worker starting", "version", version, "commit", commit, "channel", buildInfo().Channel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 

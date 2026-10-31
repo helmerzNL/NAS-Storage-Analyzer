@@ -7,8 +7,11 @@ import (
 	"os"
 )
 
-// version is set at build time (-ldflags "-X main.version=...").
-var version = "dev"
+// version and commit are set at build time (-ldflags "-X main.version=... -X main.commit=...").
+var (
+	version = "dev"
+	commit  = ""
+)
 
 const usage = `nasa - NAS Storage Analyzer
 
@@ -50,7 +53,7 @@ func main() {
 	case "recategorize":
 		err = runRecategorize(os.Args[2:])
 	case "version", "-version", "--version":
-		fmt.Println("nasa", version)
+		fmt.Println(versionLine())
 		return
 	case "-h", "--help", "help":
 		fmt.Print(usage)

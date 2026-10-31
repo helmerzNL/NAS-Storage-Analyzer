@@ -33,5 +33,7 @@ the owner merges them.
 
 ## Enforcement / follow-up
 
-`only-from-beta` (CI), the Default branch and branch protection settings (owner), `AGENTS.md` §5. The image channel and the
-beta label arrive with the deployment-layout change; until then `AGENTS.md` says so.
+`only-from-beta` (CI), the Default branch and branch protection settings (owner), `AGENTS.md` §5. The image channel is
+`publish-beta.yml` (every push to `beta`) and `publish.yml` (a promotion); `NASA_TAG` picks it in `docker-compose.yml`, and
+`scripts/test_deploy_layout.py` plus the Go tests for `/api/v1/version` keep the tag, the Compose file and the beta label in
+step. See [ADR 0004](0004-deployment-layout.md).

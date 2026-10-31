@@ -91,6 +91,9 @@ func runServe(args []string) error {
 		return err
 	}
 	log := newLogger()
+	if w := dataPathWarning(os.Getenv("DATA_PATH")); w != "" {
+		log.Warn(w)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -172,7 +175,7 @@ func runServe(args []string) error {
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           api.New(ro, log, api.Config{CSVMaxRows: *csvRows}, opts),
+		Handler:           api.New(ro, log, api.Config{CSVMaxRows: *csvRows, Build: buildInfo()}, opts),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -180,7 +183,7 @@ func runServe(args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("listening", "version", version, "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
+	log.Info("listening", "version", version, "commit", commit, "channel", buildInfo().Channel, "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
 	select {
 	case err := <-errc:
 		return err

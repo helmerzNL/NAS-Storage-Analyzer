@@ -1,6 +1,6 @@
 name: version-guardrails
 
-# VERSION is raised after the merge (`bump-version` workflow, scripts/bump_version.py), never in a pull request:
+# VERSION is raised after the merge (`publish` workflow, scripts/bump_version.py), never in a pull request:
 # two pull requests that each raise it collide as soon as the other merges. A pull request that touches
 # it fails here with the fix. See docs/adr/0001-pipeline-bump-versioning.md.
 on:
