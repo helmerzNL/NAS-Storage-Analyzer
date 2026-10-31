@@ -13,6 +13,7 @@ import { nl } from './i18n/nl';
 import { en } from './i18n/en';
 import { pageTitle, APP_NAME } from './version.svelte';
 import { bannerVisible } from './updates.svelte';
+import { inviteFromHash, inviteLink } from './invite.svelte';
 
 describe('formatBytes', () => {
   it('uses 1024 or 1000 steps', () => {
@@ -250,5 +251,19 @@ describe('the update banner', () => {
   });
   it('keeps announcing an update that a failed check could not confirm again', () => {
     expect(bannerVisible(status({ error: 'Timeout' }), '')).toBe(true);   // a failure keeps the last good answer
+  });
+});
+
+describe('the invitation link', () => {
+  const token = 'Zx3-_aB9cD4eF5gH6iJ7kL8mN9oP0qR1sT2uV3wX4yZ';
+  it('is read from the URL fragment, and only when it looks like a token', () => {
+    expect(inviteFromHash('#invite=' + token)).toBe(token);
+    for (const bad of ['', '#', '#invite=', '#invite=short', '#other=' + token, '#invite=' + token + '&x=1', '#invite=' + token + '/', '#invite=<script>alert(1)</script>', '?invite=' + token, '#invite=' + 'a'.repeat(300)]) {
+      expect(inviteFromHash(bad), bad).toBe('');
+    }
+  });
+  it('is built from the configured address, else from the address in use', () => {
+    expect(inviteLink({ url: 'https://nas.example.com/#invite=abc', token: 'abc' })).toBe('https://nas.example.com/#invite=abc');
+    expect(inviteLink({ url: '', token: token }, 'https://nas.lan:8080')).toBe(`https://nas.lan:8080/#invite=${token}`);
   });
 });

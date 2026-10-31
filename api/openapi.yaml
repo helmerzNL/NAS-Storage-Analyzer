@@ -735,26 +735,6 @@ paths:
       responses:
         "200": {description: "Users.", content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/User"}}}}}}}
         default: {$ref: "#/components/responses/Problem"}
-    post:
-      tags: [admin]
-      operationId: createUser
-      summary: Create a user (admin)
-      description: The user must enrol a second factor at the first sign-in.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password, role]
-              properties:
-                username: {type: string, pattern: '^[A-Za-z0-9._@-]{3,64}$'}
-                display_name: {type: string}
-                password: {type: string, minLength: 12}
-                role: {type: string, enum: [admin, viewer]}
-      responses:
-        "201": {description: "Created.", content: {application/json: {schema: {$ref: "#/components/schemas/User"}}}}
-        default: {$ref: "#/components/responses/Problem"}
   /api/v1/users/{id}:
     parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
     patch:
@@ -791,15 +771,115 @@ paths:
       responses:
         "204": {description: Reset; the user enrols again at the next sign-in.}
         default: {$ref: "#/components/responses/Problem"}
-  /api/v1/users/{id}/password:
+  /api/v1/users/{id}/reset:
     post:
       tags: [admin]
-      operationId: setUserPassword
-      summary: Set a user's password (admin)
+      operationId: resetUser
+      summary: Make a login link that brings a user back (admin)
+      description: |
+        For a user who can no longer sign in (a lost phone, a forgotten password). It makes a `reset` invitation: a link the user opens to choose a new
+        password or passkey. **Nothing about the user changes until they have finished**: the old password, passkeys, second factor and recovery codes are
+        replaced, and every session of that user ended, in the same transaction that stores the new credential. There is one reset invitation per user; making
+        a new one replaces the old. You cannot make one for yourself (change your password instead) or for a disabled user.
+        The answer carries the link **once**; it is stored only as a hash.
       parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [password], properties: {password: {type: string, minLength: 12}}}}}}
       responses:
-        "204": {description: Set; the user's sessions end.}
+        "201": {description: "The link.", content: {application/json: {schema: {$ref: "#/components/schemas/InvitationCreated"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations:
+    get:
+      tags: [admin]
+      operationId: listInvitations
+      summary: Open invitations (admin)
+      responses:
+        "200": {description: "Open (unused, unexpired) invitations, oldest first. The links are not here: they are shown once, when they are made.", content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Invitation"}}}}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [admin]
+      operationId: createInvitation
+      summary: Invite someone (admin)
+      description: |
+        Makes a link for a new account. The guest opens it and chooses their own password or passkey, so the administrator never learns a credential.
+        The token is 32 random bytes and only its SHA-256 is stored; the link is in this answer **once**. It works once and for seven days.
+        The role is decided here, by the administrator, and cannot be changed by the guest. `username` is optional: a name to suggest and to reserve
+        meanwhile (the guest may change it). At most 50 users (pending invitations count as users) and 50 open invitations.
+        `url` is built from `NASA_PUBLIC_URL` (or the first passkey origin); empty means the interface builds it from the address you are using.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string, pattern: '^[A-Za-z0-9._@-]{3,64}$'}
+                role: {type: string, enum: [admin, viewer], default: viewer}
+      responses:
+        "201": {description: "The link.", content: {application/json: {schema: {$ref: "#/components/schemas/InvitationCreated"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/{id}:
+    delete:
+      tags: [admin]
+      operationId: revokeInvitation
+      summary: Revoke an invitation (admin)
+      description: A lost link is revoked and made again, never looked up.
+      parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+      responses:
+        "204": {description: "Revoked: the link stops working at once."}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/info:
+    get:
+      tags: [auth]
+      operationId: invitationInfo
+      summary: What the guest sees of an invitation (public)
+      description: |
+        Public: the token is the credential, sent in the `X-Invite-Token` header so that it stays out of access logs. Unknown, expired, used, revoked and
+        malformed tokens all answer the same `404`, so this cannot be used to ask which tokens exist; an address that keeps presenting bad ones is locked out
+        like a failing sign-in.
+      security: []
+      parameters: [{name: X-Invite-Token, in: header, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: "The invitation.", content: {application/json: {schema: {$ref: "#/components/schemas/InviteInfo"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/password:
+    post:
+      tags: [auth]
+      operationId: invitationPassword
+      summary: Finish an invitation with a password (public)
+      description: |
+        Creates the account (or, for a reset, replaces the credentials of the user), deletes the invitation and signs the guest in. The guest must then
+        enrol a second factor like every account (`enroll_required`). For a reset the name in the request is ignored: the user's own name is used.
+      security: []
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/InvitationPasswordRequest"}}}}
+      responses:
+        "200": {description: "Signed in, second factor still to enrol.", content: {application/json: {schema: {$ref: "#/components/schemas/SessionResponse"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/passkey/begin:
+    post:
+      tags: [auth]
+      operationId: invitationPasskeyBegin
+      summary: Start choosing a passkey for an invitation (public)
+      description: The normal passkey registration ceremony for the user the invitation is for. A taken name is refused here, before a passkey is made.
+      security: []
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/InvitationPasskeyRequest"}}}}
+      responses:
+        "200": {description: "WebAuthn creation options.", content: {application/json: {schema: {type: object, required: [options, ceremony], properties: {options: {type: object}, ceremony: {type: string}}}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/passkey/finish:
+    post:
+      tags: [auth]
+      operationId: invitationPasskeyFinish
+      summary: Finish an invitation with a passkey (public)
+      description: |
+        Verifies the authenticator and, in one transaction, creates the account (or replaces the credentials), stores the passkey and deletes the
+        invitation. A passkey verifies the user, so the guest is signed in completely.
+      security: []
+      parameters:
+        - {name: X-Invite-Token, in: header, required: true, schema: {type: string}}
+        - {name: ceremony, in: query, required: true, schema: {type: string}}
+        - {name: name, in: query, description: "A label for the passkey.", schema: {type: string, maxLength: 60}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "200": {description: "Signed in.", content: {application/json: {schema: {$ref: "#/components/schemas/SessionResponse"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/audit:
     get:
@@ -1314,6 +1394,49 @@ components:
         user: {$ref: "#/components/schemas/User"}
         methods: {type: array, items: {type: string, enum: [totp, passkey, recovery]}}
         recovery_codes: {type: array, items: {type: string}, description: Shown once.}
+    Invitation:
+      type: object
+      required: [id, kind, user_id, username, role, created_by, created_at, expires_at]
+      properties:
+        id: {type: integer, format: int64}
+        kind: {type: string, enum: [new, reset]}
+        user_id: {type: integer, format: int64, nullable: true, description: "The user a reset is for; null for a new account."}
+        username: {type: string, description: "A new account: the name reserved for the guest (may be empty). A reset: the user's own name."}
+        role: {type: string, enum: [admin, viewer]}
+        created_by: {type: string, description: "The administrator who made it (empty when that account is gone)."}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    InvitationCreated:
+      description: An invitation with its link, which is shown this once.
+      allOf:
+        - $ref: "#/components/schemas/Invitation"
+        - type: object
+          required: [token, url]
+          properties:
+            token: {type: string, description: "32 random bytes, base64url. Only its SHA-256 is stored."}
+            url: {type: string, description: "The link to hand over (`<public address>/#invite=<token>`); empty when no public address is configured."}
+    InviteInfo:
+      type: object
+      required: [kind, username, role, invited_by, expires_at]
+      properties:
+        kind: {type: string, enum: [new, reset]}
+        username: {type: string, description: "The suggested name (new, may be empty) or the user's own name (reset, read-only)."}
+        role: {type: string, enum: [admin, viewer]}
+        invited_by: {type: string}
+        expires_at: {type: string, format: date-time}
+    InvitationPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token: {type: string}
+        username: {type: string, description: "A new account: the name the guest chooses. Ignored for a reset."}
+        password: {type: string, minLength: 12}
+    InvitationPasskeyRequest:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string}
+        username: {type: string}
     SetupRequest:
       type: object
       required: [token, username, password]

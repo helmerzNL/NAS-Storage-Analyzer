@@ -363,20 +363,20 @@ func TestSessionCookieAttributes(t *testing.T) {
 func TestCSRFProtection(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	admin, _, _ := e.setupAdmin()
-	body := map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}
+	body := map[string]string{"username": "viewer1", "role": "viewer"}
 	// Cookie but no token: refused.
 	good := admin.csrf
 	admin.csrf = ""
-	expect(t, admin.do("POST", "/api/v1/users", body), 403, "csrf")
+	expect(t, admin.do("POST", "/api/v1/invitations", body), 403, "csrf")
 	// Wrong token.
 	admin.csrf = "not-the-token"
-	expect(t, admin.do("POST", "/api/v1/users", body), 403, "csrf")
+	expect(t, admin.do("POST", "/api/v1/invitations", body), 403, "csrf")
 	// Right token but a request from another site.
 	admin.csrf = good
-	expect(t, admin.do("POST", "/api/v1/users", body, "Origin", "https://evil.example"), 403, "csrf")
-	expect(t, admin.do("POST", "/api/v1/users", body, "Sec-Fetch-Site", "cross-site"), 403, "csrf")
+	expect(t, admin.do("POST", "/api/v1/invitations", body, "Origin", "https://evil.example"), 403, "csrf")
+	expect(t, admin.do("POST", "/api/v1/invitations", body, "Sec-Fetch-Site", "cross-site"), 403, "csrf")
 	// Same origin passes.
-	expect(t, admin.do("POST", "/api/v1/users", body, "Origin", e.srv.URL), 201, "")
+	expect(t, admin.do("POST", "/api/v1/invitations", body, "Origin", e.srv.URL), 201, "")
 	// Login is not exempt from the origin check.
 	expect(t, e.client().do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": pw}, "Origin", "https://evil.example"), 403, "csrf")
 	// Safe methods need no token.
@@ -387,32 +387,31 @@ func TestCSRFProtection(t *testing.T) {
 func TestRolesAndUserAdministration(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	admin, _, _ := e.setupAdmin()
-	r := admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "display_name": "Vera", "password": pw, "role": "viewer"})
-	expect(t, r, 201, "")
-	vid := int64(r.Body["id"].(float64))
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 409, "conflict")
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "x", "password": pw, "role": "viewer"}), 400, "invalid_request")
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "bad-role", "password": pw, "role": "root"}), 400, "")
+	token, _ := e.invite(admin, "viewer1", "viewer")
+	expect(t, admin.do("POST", "/api/v1/invitations", map[string]string{"username": "viewer1", "role": "viewer"}), 409, "conflict") // reserved by the pending one
+	expect(t, admin.do("POST", "/api/v1/invitations", map[string]string{"username": "x", "role": "viewer"}), 400, "invalid_request")
+	expect(t, admin.do("POST", "/api/v1/invitations", map[string]string{"username": "bad-role", "role": "root"}), 400, "")
 
 	// The new user must enrol a second factor at the first sign-in.
-	v := e.client()
-	r = v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
+	v, r := e.accept(token, "viewer1", pw)
+	expect(t, r, 200, "")
 	if r.Body["status"] != "enroll_required" {
-		t.Fatalf("first login = %s", r.Raw)
+		t.Fatalf("first sign-in = %s", r.Raw)
 	}
+	vid := int64(r.Body["user"].(map[string]any)["id"].(float64))
+	expect(t, admin.do("POST", "/api/v1/invitations", map[string]string{"username": "viewer1", "role": "viewer"}), 409, "conflict") // now taken
 	expect(t, v.do("GET", "/api/v1/shares", nil), 403, "enroll_required")
-	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
-	code, _ := totp.GenerateCode(sec, time.Now())
-	expect(t, v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": code}), 200, "")
+	e.enrol(v)
 	// A viewer reads but administers nothing.
 	expect(t, v.do("GET", "/api/v1/shares", nil), 200, "")
-	for _, p := range []string{"/api/v1/users", "/api/v1/audit"} {
+	for _, p := range []string{"/api/v1/users", "/api/v1/audit", "/api/v1/invitations"} {
 		expect(t, v.do("GET", p, nil), 403, "forbidden")
 	}
-	expect(t, v.do("POST", "/api/v1/users", map[string]string{"username": "evil1", "password": pw, "role": "admin"}), 403, "forbidden")
+	expect(t, v.do("POST", "/api/v1/invitations", map[string]string{"username": "evil1", "role": "admin"}), 403, "forbidden")
+	expect(t, v.do("POST", fmt.Sprintf("/api/v1/users/%d/reset", vid), nil), 403, "forbidden")
 	expect(t, v.do("DELETE", fmt.Sprintf("/api/v1/users/%d", vid), nil), 403, "forbidden")
 
-	// Admin: promote, disable (kills sessions), reset MFA, delete.
+	// Admin: disable (kills sessions), reset MFA, delete.
 	expect(t, admin.do("PATCH", fmt.Sprintf("/api/v1/users/%d", vid), map[string]any{"disabled": true}), 200, "")
 	expect(t, v.do("GET", "/api/v1/shares", nil), 401, "unauthenticated")
 	expect(t, e.client().do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw}), 401, "invalid_credentials")
@@ -422,8 +421,6 @@ func TestRolesAndUserAdministration(t *testing.T) {
 	if again.Body["status"] != "enroll_required" {
 		t.Errorf("after MFA reset: %s", again.Raw)
 	}
-	expect(t, admin.do("POST", fmt.Sprintf("/api/v1/users/%d/password", vid), map[string]string{"password": "another-long-password"}), 204, "")
-	expect(t, e.client().do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": "another-long-password"}), 200, "")
 	expect(t, admin.do("DELETE", fmt.Sprintf("/api/v1/users/%d", vid), nil), 204, "")
 
 	// The last administrator is protected.
@@ -630,14 +627,14 @@ func TestAuditTrail(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	admin, _, _ := e.setupAdmin()
 	e.client().do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": "wrong-password!"})
-	admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"})
+	e.newUser(admin, "viewer1", "viewer")
 	r := admin.do("GET", "/api/v1/audit?limit=50", nil)
 	expect(t, r, 200, "")
 	seen := map[string]bool{}
 	for _, it := range r.Body["items"].([]any) {
 		seen[it.(map[string]any)["action"].(string)] = true
 	}
-	for _, want := range []string{"setup.complete", "login.failure", "user.create", "mfa.totp_enabled", "login.success"} {
+	for _, want := range []string{"setup.complete", "login.failure", "invitation.create", "invitation.accept", "mfa.totp_enabled", "login.success"} {
 		if !seen[want] {
 			t.Errorf("audit lacks %q; has %v", want, seen)
 		}
@@ -682,6 +679,43 @@ func rebuildAssertion(t *testing.T, options any) *protocol.CredentialAssertion {
 }
 
 // codeFor returns the TOTP code for a base32 secret now.
+// invite makes an invitation link as the administrator and returns its token and id.
+func (e *authEnv) invite(admin *client, username, role string) (string, int64) {
+	e.t.Helper()
+	body := map[string]string{"role": role}
+	if username != "" {
+		body["username"] = username
+	}
+	r := admin.do("POST", "/api/v1/invitations", body)
+	expect(e.t, r, 201, "")
+	return r.Body["token"].(string), int64(r.Body["id"].(float64))
+}
+
+// accept opens an invitation as the guest and chooses a password: the guest is signed in, a second factor still to enrol.
+func (e *authEnv) accept(token, username, password string) (*client, reply) {
+	e.t.Helper()
+	g := e.client()
+	return g, g.do("POST", "/api/v1/invitations/password", map[string]string{"token": token, "username": username, "password": password})
+}
+
+// enrol gives a signed-in client its second factor (TOTP) and returns the secret: the client is then fully signed in.
+func (e *authEnv) enrol(c *client) string {
+	e.t.Helper()
+	sec := c.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
+	expect(e.t, c.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)}), 200, "")
+	return sec
+}
+
+// newUser makes an account the way people get one: an invitation, a password the guest chose, a second factor. It returns the signed-in
+// client and the TOTP secret. An administrator never sets or learns the password.
+func (e *authEnv) newUser(admin *client, username, role string) (*client, string) {
+	e.t.Helper()
+	token, _ := e.invite(admin, username, role)
+	g, r := e.accept(token, username, pw)
+	expect(e.t, r, 200, "")
+	return g, e.enrol(g)
+}
+
 func codeFor(secret string) string {
 	c, _ := totp.GenerateCode(secret, time.Now())
 	return c

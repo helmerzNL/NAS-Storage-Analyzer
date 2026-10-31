@@ -46,6 +46,9 @@ type Options struct {
 	SharesRoot string
 	// Static serves the web UI for every non-API path (nil: no UI).
 	Static http.Handler
+	// PublicURL is the address people reach the app on (https://nas.example.com), for the links in invitations. Empty: the first passkey origin,
+	// then the address the administrator is using.
+	PublicURL string
 	// Updates tells the administrator that a newer release exists (nil: the routes are not registered).
 	Updates *updates.Checker
 }

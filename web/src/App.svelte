@@ -18,6 +18,8 @@
   import Account from './routes/Account.svelte';
   import Appearance from './routes/Appearance.svelte';
   import System from './routes/System.svelte';
+  import Invite from './routes/Invite.svelte';
+  import { invite } from './lib/invite.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
   import { update, loadUpdate, resetUpdate, bannerVisible, dismissedState } from './lib/updates.svelte';
   import SettingsLayout from './components/SettingsLayout.svelte';
@@ -45,7 +47,10 @@
   const toggleTheme = () => setPref('theme', prefs.theme === 'dark' ? 'light' : prefs.theme === 'light' ? 'system' : 'dark');
 </script>
 
-{#if failed}
+{#if invite.token}
+  <!-- An invitation is open: neither the sign-in nor the setup wizard has anything for the guest. -->
+  <Invite onfinished={() => navigate('/', true)} />
+{:else if failed}
   <div class="auth-wrap"><div class="card auth-card"><div class="notice error">{t('app.unreachable')}: {failed}</div><button class="btn" onclick={() => location.reload()}>{t('common.retry')}</button></div></div>
 {:else if !session.loaded}
   <div class="auth-wrap"><p class="muted">{t('common.loading')}</p></div>

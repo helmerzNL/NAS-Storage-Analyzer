@@ -331,6 +331,28 @@ Een passkey is gebonden aan de hostnaam waarop hij is aangemaakt (de *relying pa
 * De tweede factor is verplicht, maar een passkey mag ook als enige inlogmethode (wachtwoordloos): hij vervangt dan
   wachtwoord en tweede factor in één stap (user verification is vereist).
 
+## 4b. Gebruikers uitnodigen
+
+Niemand kiest het wachtwoord van iemand anders. Een beheerder (**Instellingen → Gebruikers**) maakt een **uitnodigingslink**; de gast opent hem en kiest zelf een
+wachtwoord of een passkey. Daardoor kent de beheerder het nooit, en reist het niet door een chat. Dezelfde route brengt iemand terug die niet meer kan inloggen.
+
+* **Uitnodigen:** *Maak een uitnodigingslink* (naam optioneel: een voorstel dat intussen voor die persoon gereserveerd is; de rol kies jíj, de gast kan hem niet wijzigen).
+  De link staat **één keer** in beeld, met *Kopiëren*; daarna staat hij nergens meer, ook niet voor jou. Kwijt? Trek de uitnodiging in (**Openstaande uitnodigingen → Intrekken**) en maak een nieuwe.
+  De link werkt **één keer** en verloopt na **7 dagen**; een verlopen of gebruikte link is meteen onbruikbaar.
+* **De gast** opent de link, kiest een naam (mag het voorstel zijn) en een wachtwoord, of drukt op *Gebruik liever een passkey*. Met een wachtwoord moet daarna nog een tweede factor
+  (authenticator-app of passkey) worden ingesteld, zoals bij elk account; een passkey verifieert de gebruiker en is meteen een volledige aanmelding (en er worden dan geen herstelcodes gemaakt).
+* **Nieuwe inlog-link** (bij een gebruiker): voor wie zijn telefoon of wachtwoord kwijt is. De oude gegevens veranderen **pas op het moment dat de gast klaar is**: wachtwoord, passkeys, tweede factor
+  en herstelcodes worden dan vervangen en alle sessies van die gebruiker eindigen. Een gast die de link opent en weggaat kost die gebruiker niets. Er is er één per gebruiker tegelijk; een nieuwe vervangt de vorige.
+  Voor jezelf maak je geen link (wijzig je wachtwoord), en niet voor een uitgeschakelde gebruiker.
+* **Het adres in de link** komt uit `NASA_PUBLIC_URL`, anders uit het eerste `NASA_RP_ORIGINS`, anders uit het adres waarop jij de app opent (nooit uit het verzoek zelf: achter een proxy kan dat een intern adres zijn).
+  Het token staat in het deel na de `#`: een browser stuurt dat nooit naar een server, het komt niet in `Referer` en niet in proxy-logs.
+* **Grenzen:** 50 gebruikers (openstaande uitnodigingen voor nieuwe accounts tellen mee) en 50 openstaande uitnodigingen. Een adres dat steeds onbekende tokens probeert wordt geblokkeerd zoals bij mislukte aanmeldingen
+  (30 per uur). Onbekend, verlopen, gebruikt en ingetrokken geven hetzelfde antwoord.
+* **Auditlog:** `invitation.create`, `invitation.accept` en `invitation.revoke` staan erin (wie, wat, wanneer), nooit het token of een wachtwoord.
+* **Back-up:** uitnodigingen, sessies en inloggegevens zitten in de database en dus in de `pg_dump`; ze hoeven niet apart bewaard.
+* **Alleen beheerder en je bent alles kwijt?** Een andere beheerder maakt je een inlog-link. Ben je de enige beheerder en heb je geen enkele manier meer om in te loggen, dan blijft alleen direct ingrijpen in de database
+  of een herstel van de back-up over; zorg dus voor minstens twee beheerders en bewaar de herstelcodes.
+
 ## 5. Back-up en herstel
 
 Alles wat de moeite waard is staat in PostgreSQL, plus één sleutel buiten de database.
@@ -545,6 +567,9 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   name (not an IP address) and https.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` stored separately. Without the key the
   stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
+* **Users:** nobody chooses anyone else's password. An administrator (Settings → Users) makes an **invitation link**; the guest opens it and chooses their own password or a passkey. The link is shown once
+  (revoke and make a new one if lost), works once and expires after 7 days; the token travels in the URL fragment, never in a path or query string, and never in the audit log. *New login link* brings back a user who cannot sign in:
+  the old credentials are replaced only when the guest has finished, and every session of that user ends. Set `NASA_PUBLIC_URL` when the address you use differs from the one guests must use. Limits: 50 users (pending invitations count) and 50 open invitations.
 * **Update check:** the administrator is told about a newer stable release (banner, Settings → System); it sends only a fixed `User-Agent` to `github.com`, never
   updates anything and can be switched off with `NASA_UPDATE_CHECK=false`.
 * **Update / rollback:** `docker compose pull && docker compose up -d`. A rollback is `NASA_TAG` set to the previous version number; migrations

@@ -287,6 +287,10 @@ root and `CAP_SYS_ADMIN` in the worker container only (verified up to the privil
 NFS/SMB server in the development sandbox). A scan that finds an empty share where the previous scan found over 100
 files is refused, so a dropped mount does not erase your history.
 
+**Users.** Nobody chooses anyone else's password: an administrator makes an **invitation link** (Instellingen → Gebruikers) that the guest opens to choose their own password or a
+passkey. The link is shown once, works once, expires after 7 days and is never stored (only its hash); *Nieuwe inlog-link* brings back a user who cannot sign in. `NASA_PUBLIC_URL` is the address the links point at.
+Details: [`docs/deploy.md` §4b](docs/deploy.md#4b-gebruikers-uitnodigen).
+
 **Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and Settings → System with *Check now*).
 It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,
 no user data) and never updates anything; switch it off with `NASA_UPDATE_CHECK=false`. A beta build is only told about stable releases.
