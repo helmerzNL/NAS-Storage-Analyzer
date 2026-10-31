@@ -100,6 +100,25 @@ func TestCmdSkipCountIsExact(t *testing.T) {
 	}
 }
 
+// bash 3.2 is the sh of every Mac. It ends a $( ) at the first ) it sees, also the one that closes a case pattern, so a
+// case inside a command substitution is a syntax error there. The tests run in the shells of the CI machine, and macOS
+// is the only place that has bash 3.2, so this keeps the rule where it can be seen everywhere.
+func TestShScriptHasNoCaseInsideACommandSubstitution(t *testing.T) {
+	script := string(mustGenerate(t, fileSet(2, "A"), paramsFor(TargetSh, LangEN)).Script)
+	for i, line := range strings.Split(script, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue // a comment may talk about it
+		}
+		if strings.Contains(line, "$(") && !strings.Contains(line, "$((") && regexp.MustCompile(`\bcase\b`).MatchString(line) {
+			t.Errorf("line %d has a case inside $( ): %s", i+1, line)
+		}
+	}
+	// And the case statements that are there sit in functions or groups, never on a line with a substitution.
+	if !strings.Contains(script, "found() {") {
+		t.Errorf("the count of found files must be a function")
+	}
+}
+
 func TestLineEndingsAndEncodingPerTarget(t *testing.T) {
 	files := fileSet(2, "Ünïcode")
 	for tg, want := range map[Target]struct {

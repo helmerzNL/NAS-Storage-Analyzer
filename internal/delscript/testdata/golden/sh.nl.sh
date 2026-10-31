@@ -50,7 +50,17 @@ if [ ! -d "${ROOT:-/}" ]; then
   exit 2
 fi
 # A record is cut apart with parameter expansion, not with read and IFS: read would take a trailing bar off the path.
-FOUND=$(data | { c=0; while IFS= read -r L; do case $L in F\|*) ;; *) continue ;; esac; L=${L#F|}; L=${L#*|}; P=${L#*|}; if [ -e "$ROOT$P" ] || [ -h "$ROOT$P" ]; then c=$((c + 1)); fi; done; printf '%s' "$c"; })
+# This is a function and not a command substitution: bash 3.2 (the sh of macOS) ends a $( ) at the first ) of a case pattern.
+found() {
+  c=0
+  while IFS= read -r L; do
+    case $L in F\|*) ;; *) continue ;; esac
+    L=${L#F|}; L=${L#*|}; P=${L#*|}
+    if [ -e "$ROOT$P" ] || [ -h "$ROOT$P" ]; then c=$((c + 1)); fi
+  done
+  printf '%s' "$c"
+}
+FOUND=$(data | found)
 printf '%s%s%s%s%s\n' 'Gevonden onder de padbasis: ' "$FOUND" ' van ' "$N" '.'
 if [ "$FOUND" = 0 ]; then
   printf '%s\n' 'Geen enkel bestand gevonden. Klopt de padbasis? Er is niets gewijzigd.'

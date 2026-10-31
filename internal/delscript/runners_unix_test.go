@@ -11,8 +11,7 @@ import (
 	"testing"
 )
 
-// runners returns the shells that can run on this machine: every POSIX shell found, and PowerShell where installed.
-// A shell named in NASA_REQUIRE_SHELLS has to be there.
+// runners returns the POSIX shells that can run on this machine. A shell named in NASA_REQUIRE_SHELLS has to be there.
 func runners(t *testing.T) []runner {
 	var out []runner
 	posix := []struct {
@@ -38,17 +37,9 @@ func runners(t *testing.T) []runner {
 		}
 		out = append(out, r)
 	}
-	pwsh := runner{name: "pwsh", target: TargetPowerShell, eol: "\n"}
-	if path, err := exec.LookPath("pwsh"); err == nil {
-		pwsh.run = func(t *testing.T, script, stdin string) (string, int) {
-			return execute(t, path, []string{"-NoProfile", "-File", script}, stdin)
-		}
-	} else if shellRequired("pwsh") {
-		t.Fatalf("pwsh is required by NASA_REQUIRE_SHELLS but is not installed")
-	} else {
-		pwsh.absent = "pwsh is not installed"
-	}
-	return present(t, append(out, pwsh))
+	// PowerShell is not run here: the script is a Windows script (\\server\share and Z:\ paths, backslashes), and sh covers
+	// Linux and macOS. runners_windows_test.go runs it in Windows PowerShell 5.1 and in PowerShell 7.
+	return present(t, out)
 }
 
 func execute(t *testing.T, bin string, args []string, stdin string) (string, int) {

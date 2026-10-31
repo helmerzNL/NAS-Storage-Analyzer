@@ -42,9 +42,11 @@ than the file.
 - **The base path is checked as hard as a name** (`NormalizeRoot`): no control characters, quotes or bars; `X:\…` or `\\server\share`
   for Windows, absolute for `sh`; no `\\?\`, no `.` or `..`.
 - **At most 2,000 files per script.** More than that cannot be read through by eye, and the summary is what stands in for reading.
-- **Proof is by running.** `internal/delscript`'s tests run the scripts in `sh`, `dash`, `bash` (also `--posix`), PowerShell
-  7 and, on Windows, `cmd.exe` and Windows PowerShell 5.1, against files with the names that break scripts, with decoys
-  that must survive (a sibling with the same prefix, the same name in another folder, a case twin).
+- **Proof is by running.** `internal/delscript`'s tests run the scripts in `sh`, `dash`, `bash` (also `--posix`) on Linux and
+  macOS (where `sh` is bash 3.2 and `stat` is the BSD one), and on Windows in `cmd.exe`, Windows PowerShell 5.1 and
+  PowerShell 7, against files with the names that break scripts, with decoys that must survive (a sibling with the same
+  prefix, the same name in another folder, a case twin). PowerShell is a Windows target (`\\server\share` and `Z:\` paths);
+  Linux and macOS are covered by the `sh` script.
 
 This ADR covers the generator. The endpoint that builds a script from ticked file ids, the per-share base path, the audit
 entry and the interface follow in later pull requests and extend the Enforcement section.

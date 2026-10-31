@@ -79,9 +79,22 @@ type tree struct {
 
 var epoch = time.Date(2025, 10, 31, 12, 0, 0, 0, time.UTC)
 
+// shortTempDir is a temporary folder with a short path. t.TempDir() puts the whole name of the test in it, and on
+// Windows that alone takes most of the 259 characters a path may have: the generator then rightly leaves the
+// files with long names out of the script, which is not what these tests are about.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "ds")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
+
 func newTree(t *testing.T, target Target) *tree {
 	t.Helper()
-	tr := &tree{t: t, root: t.TempDir()}
+	tr := &tree{t: t, root: shortTempDir(t)}
 	write := func(path string, size int, mtime time.Time) { writeFile(t, path, size, mtime) }
 	i := 0
 	for _, name := range hostileNames {
@@ -182,7 +195,7 @@ func scenario(t *testing.T, r runner, name string, f func(t *testing.T, tr *tree
 
 func writeScript(t *testing.T, target Target, script []byte) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "delete"+target.Extension())
+	path := filepath.Join(shortTempDir(t), "delete"+target.Extension())
 	if err := os.WriteFile(path, script, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -261,29 +274,41 @@ func runScenarios(t *testing.T, runners []runner) {
 				}
 				kept = append([]string{lines[i]}, kept...)
 			}
-			cuts := map[string]string{
+			// The data is not what the script was made for: it must refuse and delete nothing.
+			strict := map[string]string{
 				"records missing": strings.Join(kept, eol),
 				"count raised":    strings.Replace(s, fmt.Sprintf("N|%d", res.Files), fmt.Sprintf("N|%d", res.Files+1), 1),
 				"count lowered":   strings.Replace(s, fmt.Sprintf("N|%d", res.Files), fmt.Sprintf("N|%d", res.Files-1), 1),
 			}
-			if r.target != TargetCmd { // cmd runs what it has read so far, so a cut inside its code is not a defined case
-				for _, pct := range []int{20, 40, 60, 80, 90, 95, 99} {
-					at := strings.LastIndex(s[:len(s)*pct/100], eol)
-					cuts[fmt.Sprintf("cut at %d%%", pct)] = s[:at+len(eol)]
-				}
-			}
-			for what, text := range cuts {
+			for what, text := range strict {
 				if text == s {
 					t.Fatalf("%s: the edit changed nothing", what)
 				}
 				out, code := r.run(t, writeScript(t, r.target, []byte(text)), confirm(res.Files))
-				// A script cut off after its definitions and before anything is run exits 0 having done nothing; what
-				// matters, and is checked below, is that no file was deleted.
-				if code == 0 && !strings.HasPrefix(what, "cut at") {
+				if code == 0 {
 					t.Errorf("%s: exit code 0\n%s", what, normalize(out))
 				}
 				if present, _ := tr.remaining(); len(present) != len(tr.paths) {
 					t.Fatalf("%s: files were deleted\n%s", what, normalize(out))
+				}
+			}
+			// The code is cut off. The records are all there, so a cut that leaves the deletion loop whole (only the
+			// closing lines are gone) deletes everything, exactly as the full script would; a cut inside the loop is a
+			// syntax error and deletes nothing. What must never happen is that only some of the files are deleted.
+			// cmd runs what it has read so far and has its data after its code, so a cut inside its code is not defined.
+			if r.target == TargetCmd {
+				return
+			}
+			for _, pct := range []int{20, 40, 60, 80, 90, 95, 99} {
+				at := strings.LastIndex(s[:len(s)*pct/100], eol)
+				text := s[:at+len(eol)]
+				out, _ := r.run(t, writeScript(t, r.target, []byte(text)), confirm(res.Files))
+				present, _ := tr.remaining()
+				if len(present) != 0 && len(present) != len(tr.paths) {
+					t.Fatalf("cut at %d%%: %d of %d files are left, a partial deletion\n%s", pct, len(present), len(tr.paths), normalize(out))
+				}
+				if len(present) == 0 {
+					return // everything went, as the full script would have done; nothing more to cut
 				}
 			}
 		})

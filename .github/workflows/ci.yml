@@ -28,7 +28,7 @@ jobs:
     env:
       NASA_TEST_DSN: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
       NASA_REQUIRE_DB: "1"      # a database test that cannot run fails instead of skipping
-      NASA_REQUIRE_SHELLS: sh,dash,bash,bash-posix,pwsh   # same for the shells the delete-script tests run scripts in
+      NASA_REQUIRE_SHELLS: sh,dash,bash,bash-posix   # same for the shells the delete-script tests run scripts in
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -121,9 +121,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            shells: sh,dash,bash,bash-posix,pwsh
+            shells: sh,dash,bash,bash-posix
           - os: macos-latest
-            shells: sh,bash,bash-posix,pwsh
+            shells: sh,bash,bash-posix
           - os: windows-latest
             shells: pwsh
     env:
