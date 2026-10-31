@@ -159,6 +159,9 @@ A pull request that raises a size, rate or timeout limit states the new value as
   accent; the accent as text is `--accent-ink`; a new token goes in `tokens.css` for light *and* dark; targets are 44 px. `design/components.css` stays
   a copy of the starter (changes go in `app.css`). `lib/design.test.ts` and `lib/appearance.test.ts` hold what a test can; look at a screen in light and
   dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots).
+- **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
+  (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
+  the installation; it never updates anything; and `NASA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.
 - **Reuse before writing new code.** The shared `query` and `store` packages, the `testsupport` helpers and the existing UI
   components come first; a second implementation of the same thing is the bug (baseline §10).
 

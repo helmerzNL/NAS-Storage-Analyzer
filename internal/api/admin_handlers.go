@@ -28,6 +28,11 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("GET "+v+"/settings", lvViewer, s.getSettings)
 		h("GET "+v+"/fs/dirs", lvAdmin, s.browseFolders)
 	}
+	if s.opts.Updates != nil {
+		// The administrator is told that a newer release exists; nobody else, and nothing is updated or downloaded.
+		h("GET "+v+"/system/update", lvAdmin, s.updateStatus)
+		h("POST "+v+"/system/update/check", lvAdmin, s.updateCheck)
+	}
 	h("GET "+v+"/shares/{share}/history", lvViewer, s.history)
 	h("GET "+v+"/shares/{share}/dirs/{dir}/history", lvViewer, s.dirHistory)
 	h("PUT "+v+"/auth/prefs", lvViewer, s.putPrefs)
@@ -394,4 +399,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// updateStatus returns the remembered answer about newer releases; a page view never calls GitHub twice in six hours.
+func (s *Server) updateStatus(w http.ResponseWriter, r *http.Request) error {
+	return writeJSON(w, s.opts.Updates.Status(r.Context()))
+}
+
+// updateCheck asks GitHub again now (within a floor of 30 seconds between two real requests).
+func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) error {
+	return writeJSON(w, s.opts.Updates.Check(r.Context()))
 }

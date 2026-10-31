@@ -82,6 +82,7 @@ services:
       NASA_TRUSTED_PROXIES: ${NASA_TRUSTED_PROXIES:-}
       NASA_REQUIRE_HTTPS: ${NASA_REQUIRE_HTTPS:-false}
       NASA_METRICS_TOKEN: ${NASA_METRICS_TOKEN:-}
+      NASA_UPDATE_CHECK: ${NASA_UPDATE_CHECK:-true}
     healthcheck:
       test: ["CMD", "nasa", "healthcheck", "-url", "http://127.0.0.1:8080/readyz"]
       interval: 30s

@@ -42,6 +42,10 @@ data move this project has ever needed, from the Docker volume `db-data` to `DAT
 hand, before you deploy** (`scripts/migrate_data.sh`, [`deploy.md` §8](deploy.md#8-bijwerken)); the containers also log a warning when
 `DATA_PATH` is relative.
 
+The app calls out to exactly one place: `https://github.com/helmerzNL/NAS-Storage-Analyzer/releases/latest`, for the update check (a banner for the administrator when
+a newer stable release exists). It is a single `GET` with a fixed `User-Agent` and nothing else, answered from a cache for six hours (ten minutes after a failure, never twice
+within 30 seconds); it announces and does nothing more. A server that must not call out sets `NASA_UPDATE_CHECK=false`, and the check reports "switched off", not an error.
+
 Which image runs is one variable, `NASA_TAG` (`latest`, `beta` or a version number). A push to `beta` publishes `beta` and
 `beta-<sha>`; a promotion to `main` publishes `latest` and, while its git tag does not exist yet, the version number
 (`publish-beta.yml`, `publish.yml`; both `linux/amd64` and `linux/arm64`). To roll back, set `NASA_TAG` to the previous version

@@ -132,4 +132,14 @@ export const en: Record<string, string> = {
   'nav.settings': 'Settings', 'settings.menu': 'Settings menu', 'settings.personal': 'Personal', 'settings.data': 'Data', 'settings.admin': 'Administration',
   'settings.appearance': 'Appearance and language', 'settings.security': 'Security', 'settings.units.note': 'The units choice is also in the top bar.',
   'fold.open': 'Show', 'fold.closed': 'Hide',
+  // The update check (update-check.md)
+  'nav.system': 'System', 'system.intro': 'The version you run, and whether a newer release is out.', 'update.title': 'Updates',
+  'update.banner': 'A new version is available: v{latest} (you have v{current})', 'update.view': 'View', 'update.later': 'Later', 'update.checknow': 'Check now',
+  'update.installed': 'Installed version', 'update.latest': 'Latest release', 'update.checked': 'Last checked', 'update.dot': 'Update available',
+  'update.state.available': 'Update available', 'update.state.current': 'Up to date', 'update.state.none': 'No release published', 'update.state.disabled': 'Switched off',
+  'update.state.failed': 'Check failed', 'update.none.hint': 'The repository has no published release yet, so there is nothing to compare with.',
+  'update.disabled.hint': 'The update check is switched off (NASA_UPDATE_CHECK=false).', 'update.error.kept': 'The last check failed ({error}); the answer above is from the last successful check.',
+  'update.notes': 'Release notes on GitHub',
+  'update.how': 'To update, pull the new image and restart (docker compose pull, then docker compose up -d). Your data stays in the data folder (DATA_PATH). This page only announces: it never updates, restarts or downloads anything.',
+  'update.privacy': 'The check asks GitHub for the latest release of this project and sends nothing about your installation: no version, no instance id, no user data (GitHub does see the address your server connects from, as with any request). Switch it off with NASA_UPDATE_CHECK=false. A beta build is only told about stable releases.',
 };

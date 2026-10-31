@@ -82,7 +82,7 @@ jobs:
       - name: Build the interface and the binary
         run: |
           (cd web && npm ci --no-audit --no-fund && npm run build)
-          go build -o nasa ./cmd/nasa
+          go build -ldflags "-X main.version=0.1.0" -o nasa ./cmd/nasa   # a numeric version: the update check has something to compare
       - name: Install Playwright and Chromium
         run: |
           npm install -g playwright@1.63.0

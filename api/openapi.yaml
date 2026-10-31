@@ -823,6 +823,33 @@ paths:
                   next_before: {type: integer, format: int64, nullable: true}
         default: {$ref: "#/components/responses/Problem"}
 
+  /api/v1/system/update:
+    get:
+      tags: [admin]
+      operationId: getUpdateStatus
+      summary: Is a newer release available? (administrator)
+      description: |
+        The app asks GitHub for the latest published, non-prerelease release of its own repository and compares it with the version it runs. A prerelease
+        is never announced. The request carries a fixed `User-Agent` and nothing else: no version, no instance id, no user data. The answer is remembered
+        (six hours after a success, ten minutes after a failure), so a page view never calls GitHub. A failure keeps the last good answer and adds `error`.
+        The check can be switched off with `NASA_UPDATE_CHECK=false`; that is reported as `enabled: false`, not as an error. It only announces: nothing is
+        updated, restarted or downloaded.
+      responses:
+        "200":
+          description: The remembered answer.
+          content: {application/json: {schema: {$ref: "#/components/schemas/UpdateStatus"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/system/update/check:
+    post:
+      tags: [admin]
+      operationId: checkForUpdate
+      summary: Ask GitHub again now (administrator)
+      description: Bypasses the remembered answer but not a floor of 30 seconds between two real requests, so it cannot be used to hammer GitHub. Answers with the status either way.
+      responses:
+        "200":
+          description: The answer after the check.
+          content: {application/json: {schema: {$ref: "#/components/schemas/UpdateStatus"}}}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/history:
     get:
       tags: [lists]
@@ -1253,6 +1280,19 @@ components:
         version: {type: string, description: "MAJOR.MINOR.PATCH the image was built for, `dev` for a build from a checkout.", example: "0.1.0"}
         commit: {type: string, description: "The git commit the image was built from; empty when unknown.", example: "5d74b70"}
         channel: {type: string, enum: [stable, beta]}
+    UpdateStatus:
+      type: object
+      required: [enabled, current, latest, available, url, checked_at, error, error_detail, repo]
+      properties:
+        enabled: {type: boolean, description: "False when the check is switched off (NASA_UPDATE_CHECK=false)."}
+        current: {type: string, description: "The version this installation runs; `dev` for a build from a checkout.", example: "0.1.0"}
+        latest: {type: string, description: "The newest published release without the v; empty when there is none.", example: "0.2.0"}
+        available: {type: boolean, description: "Latest is a higher version than current. Never true for a version that does not parse (`dev`)."}
+        url: {type: string, description: "The release page, built from the repository and the version, never taken from GitHub's answer."}
+        checked_at: {type: string, format: date-time, nullable: true, description: "When GitHub last answered; null when it has not yet."}
+        error: {type: string, description: "The cause in words an administrator can act on, for example `HTTP 403 (rate limit)`; empty when the last attempt worked."}
+        error_detail: {type: string, description: "The raw reason, also in the log."}
+        repo: {type: string, example: "helmerzNL/NAS-Storage-Analyzer"}
     AuthStatus:
       type: object
       required: [setup_required, authenticated, min_password_length, https_required]

@@ -411,6 +411,15 @@ Een stackmanager (Dockhand, Komodo, Portainer) doet dat zelf bij "bijwerken". We
 op het vorige nummer en pull opnieuw; migraties worden niet teruggedraaid, dus een oudere versie werkt alleen als de
 release-notes (`docs/releases/`) zeggen dat het schema compatibel is. Herstel anders de back-up van vóór de update.
 
+**Je hoeft niet zelf te kijken of er een nieuwe versie is.** Zodra een beheerder de interface opent, vraagt de app (hoogstens eens per zes uur, anders komt het antwoord uit het geheugen) aan `github.com` wat de nieuwste gepubliceerde release is
+en meldt een nieuwere aan de beheerder: een banner bovenaan (met *Later*, per versie onthouden in de browser) en **Instellingen → Systeem**, met de geïnstalleerde en
+nieuwste versie, *Nu controleren* en de link naar de release-notes. Zo weet je wanneer je bovenstaande twee commando's moet draaien; de app doet zelf niets.
+De aanvraag is een `GET https://github.com/helmerzNL/NAS-Storage-Analyzer/releases/latest` met alleen een vaste `User-Agent`: geen versie, geen installatie-id, geen
+gebruikersgegevens (GitHub ziet wel het adres van je server, zoals bij elk verzoek). Daarom ook geen last van het limiet van de GitHub-API (60 per uur per adres): de
+tag staat in de redirect. Een mislukte controle laat het laatste goede antwoord staan en noemt de oorzaak in woorden (`HTTP 403 (rate limit)`, `Timeout`, certificaat,
+geen verbinding of DNS). Een server die niet naar buiten mag bellen zet hem uit met `NASA_UPDATE_CHECK=false` in `.env`; dan staat er "Uitgeschakeld", geen fout.
+Een beta-build (`NASA_TAG=beta`) hoort alleen van **stabiele** releases: zo draait hij nooit "achter" op een beta die al nieuwer is.
+
 Migraties draaien bij het starten (onder een advisory lock, dus `app` en `worker` kunnen tegelijk starten).
 Maak vooraf een [back-up](#5-back-up-en-herstel). Een nieuwe versie die een nieuwe categorie of extensie
 toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
@@ -536,6 +545,8 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   name (not an IP address) and https.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` stored separately. Without the key the
   stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
+* **Update check:** the administrator is told about a newer stable release (banner, Settings → System); it sends only a fixed `User-Agent` to `github.com`, never
+  updates anything and can be switched off with `NASA_UPDATE_CHECK=false`.
 * **Update / rollback:** `docker compose pull && docker compose up -d`. A rollback is `NASA_TAG` set to the previous version number; migrations
   are not undone, so back up first and check the release notes.
 * **Limits:** atime is often unreliable (warned in the UI, switchable to mtime); incremental scans miss in-place

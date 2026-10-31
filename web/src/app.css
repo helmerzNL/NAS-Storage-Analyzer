@@ -181,3 +181,10 @@ dialog.sheet .dlg-foot { padding: 12px 18px; border-top: 1px solid var(--lijn); 
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 .intro-row { margin-bottom: 14px; }
 td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }   /* the row's actions wrap instead of pushing the table wider than the screen */
+
+/* The update check: a banner at the top of the page for administrators, and a dot on the entries that lead to Settings > System. The dot is not
+   the message (the banner and the page say it in words); it is accompanied by a text for screen readers and a tooltip. */
+.update-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.update-dot { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--surface-solid); flex: none; }
+.stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 8rem; }
+.nav a, .settings-nav a { position: relative; }   /* a screen-reader-only text inside a link stays inside it: otherwise it sits where the page ends and widens it */

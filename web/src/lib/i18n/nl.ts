@@ -132,4 +132,14 @@ export const nl: Record<string, string> = {
   'nav.settings': 'Instellingen', 'settings.menu': 'Instellingenmenu', 'settings.personal': 'Persoonlijk', 'settings.data': 'Gegevens', 'settings.admin': 'Beheer',
   'settings.appearance': 'Weergave en taal', 'settings.security': 'Beveiliging', 'settings.units.note': 'De eenhedenkeuze staat ook in de balk bovenaan.',
   'fold.open': 'Tonen', 'fold.closed': 'Verbergen',
+  // De update-check (update-check.md)
+  'nav.system': 'Systeem', 'system.intro': 'De versie die je draait, en of er een nieuwere release is.', 'update.title': 'Updates',
+  'update.banner': 'Er is een nieuwe versie beschikbaar: v{latest} (je hebt v{current})', 'update.view': 'Bekijken', 'update.later': 'Later', 'update.checknow': 'Nu controleren',
+  'update.installed': 'Geïnstalleerde versie', 'update.latest': 'Nieuwste release', 'update.checked': 'Laatst gecontroleerd', 'update.dot': 'Update beschikbaar',
+  'update.state.available': 'Update beschikbaar', 'update.state.current': 'Up-to-date', 'update.state.none': 'Geen release gepubliceerd', 'update.state.disabled': 'Uitgeschakeld',
+  'update.state.failed': 'Controle mislukt', 'update.none.hint': 'Het repository heeft nog geen gepubliceerde release, dus er is niets om mee te vergelijken.',
+  'update.disabled.hint': 'De update-check staat uit (NASA_UPDATE_CHECK=false).', 'update.error.kept': 'De laatste controle mislukte ({error}); het antwoord hierboven komt van de laatste geslaagde controle.',
+  'update.notes': 'Release-notes op GitHub',
+  'update.how': 'Bijwerken doe je door de nieuwe image op te halen en opnieuw te starten (docker compose pull, daarna docker compose up -d). Je gegevens blijven in de gegevensmap (DATA_PATH). Deze pagina meldt alleen: ze werkt niets bij, herstart niets en downloadt niets.',
+  'update.privacy': 'De controle vraagt GitHub om de nieuwste release van dit project en stuurt niets over jouw installatie mee: geen versie, geen installatie-id, geen gebruikersgegevens (GitHub ziet wel het adres waarvandaan je server verbindt, zoals bij elk verzoek). Zet hem uit met NASA_UPDATE_CHECK=false. Een beta-build hoort alleen van stabiele releases.',
 };

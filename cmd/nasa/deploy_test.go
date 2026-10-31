@@ -44,3 +44,12 @@ func TestBuildInfoFollowsNASA_TAG(t *testing.T) {
 		t.Errorf("versionLine without a commit = %q", got)
 	}
 }
+
+func TestUpdateCheckIsOnUnlessSwitchedOff(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "true": true, "1": true, "yes": true, "on": true, "anything": true,
+		"false": false, "FALSE": false, "0": false, "no": false, "No": false, "off": false, " off ": false} {
+		if got := updateCheckEnabled(v); got != want {
+			t.Errorf("NASA_UPDATE_CHECK=%q: enabled = %v, want %v", v, got, want)
+		}
+	}
+}

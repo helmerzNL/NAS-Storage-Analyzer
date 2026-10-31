@@ -144,6 +144,7 @@ Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangr
 | `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
 | `NASA_RP_ID`, `NASA_RP_ORIGINS` | Passkeys zijn aan een hostnaam gebonden; zet deze in productie. |
 | `NASA_METRICS_TOKEN` | Bearer-token voor `/metrics`; zonder token alleen vanaf loopback. |
+| `NASA_UPDATE_CHECK` | Standaard `true`: de app vraagt github.com of er een nieuwere release is en meldt dat aan de beheerder (banner, en Instellingen → Systeem). Hij werkt niets bij en stuurt niets over jouw installatie mee (vaste `User-Agent`, geen versie, geen id). `false` zet hem uit. |
 | `NASA_TZ` | Tijdzone voor cron-schema's en het dag/nacht-venster. |
 | `PG_*` | PostgreSQL afstellen op het beschikbare geheugen. |
 
@@ -285,6 +286,10 @@ the folder that holds the shares (`/mnt/user`) and add each share by its path. A
 root and `CAP_SYS_ADMIN` in the worker container only (verified up to the privileges; not tested against a real
 NFS/SMB server in the development sandbox). A scan that finds an empty share where the previous scan found over 100
 files is refused, so a dropped mount does not erase your history.
+
+**Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and Settings → System with *Check now*).
+It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,
+no user data) and never updates anything; switch it off with `NASA_UPDATE_CHECK=false`. A beta build is only told about stable releases.
 
 **Behind a reverse proxy** set `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS=true`, `NASA_RP_ID` and `NASA_RP_ORIGINS`,
 and disable response buffering for `/api/v1/events`. **Backup** with `pg_dump -Fc` and keep `NASA_ENCRYPTION_KEY`

@@ -20,6 +20,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
+	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 	"github.com/helmerznl/nas-storage-analyzer/internal/webui"
 )
 
@@ -120,7 +121,13 @@ func runServe(args []string) error {
 	sharesRoot := env("NASA_SHARES_ROOT", "/mnt/shares")
 	queue := jobs.NewQueue(rw.Pool)
 	svc := auth.NewService(rw.Pool, box, auth.DefaultConfig())
+	// The update check (docs/deploy.md): on by default, NASA_UPDATE_CHECK=false (also 0, no, off) switches it off.
+	checker := updates.New(version, updateCheckEnabled(env("NASA_UPDATE_CHECK", "")), log)
+	if base := env("NASA_UPDATE_BASE_URL", ""); base != "" {
+		checker.BaseURL = base // a mirror, or a test double
+	}
 	opts := api.Options{
+		Updates:        checker,
 		Auth:           svc,
 		Shares:         shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc),
 		Queue:          queue,
