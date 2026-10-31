@@ -722,6 +722,7 @@ paths:
                 units: {type: string, enum: [binary, decimal]}
                 language: {type: string, enum: [nl, en]}
                 theme: {type: string, enum: [system, light, dark]}
+                accent: {type: string, pattern: '^(#[0-9a-fA-F]{6})?$', description: "The accent colour of the interface as #rrggbb (stored in lower case); empty means the default. Anything else is refused: the value ends up in a CSS custom property."}
       responses:
         "200": {description: "The merged preferences.", content: {application/json: {schema: {type: object, required: [prefs], properties: {prefs: {type: object, additionalProperties: {type: string}}}}}}}
         default: {$ref: "#/components/responses/Problem"}

@@ -53,14 +53,15 @@
 </script>
 
 <div class="page-head">
-  <div class="grow"><h1>{t('nav.lists')}</h1><p class="muted" style="margin:0">{t('lists.intro')}</p></div>
+  <h1>{t('nav.lists')}</h1>
   <div class="row">
-    <select value={shareId} onchange={(e) => setQuery({ share: e.currentTarget.value })} style="width:auto" aria-label={t('browse.share')}>
+    <select value={shareId} onchange={(e) => setQuery({ share: e.currentTarget.value })} class="auto" aria-label={t('browse.share')}>
       {#each sharesStore.items as s}<option value={String(s.id)}>{s.name}</option>{/each}
     </select>
     <a class="btn" href={csv} download data-testid="export-csv">⬇ CSV</a>
   </div>
 </div>
+<p class="muted intro">{t('lists.intro')}</p>
 
 {#if share}<AtimeNotice {share} />{/if}
 <div class="tabs" role="tablist">
@@ -73,20 +74,20 @@
 <div class="row" style="margin:12px 0">
   {#if isCold}
     <label class="field" style="flex-direction:row;align-items:center;gap:8px">{t('lists.unused')}
-      <select value={days} onchange={(e) => setQuery({ days: e.currentTarget.value })} style="width:auto" data-testid="cold-days">
+      <select value={days} onchange={(e) => setQuery({ days: e.currentTarget.value })} class="auto" data-testid="cold-days">
         {#each ['30', '90', '180', '365', '730', '1825'] as d}<option value={d}>{t('lists.days', { n: d })}</option>{/each}
       </select></label>
   {/if}
   {#if !isFiles}
     <label class="field" style="flex-direction:row;align-items:center;gap:8px">{t('lists.by')}
-      <select value={by} onchange={(e) => setQuery({ by: e.currentTarget.value })} style="width:auto">
+      <select value={by} onchange={(e) => setQuery({ by: e.currentTarget.value })} class="auto">
         <option value="total">{t('lists.by.total')}</option><option value="direct">{t('lists.by.direct')}</option></select></label>
     <span class="muted small">{by === 'direct' ? t('lists.by.direct.hint') : t('lists.by.total.hint')}</span>
   {/if}
 </div>
 
-{#if error}<div class="alert bad" role="alert">{error}</div>{/if}
-<div class="card table-wrap" style="padding:0" aria-busy={loading}>
+{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+<div class="card table-wrap flush" aria-busy={loading}>
   {#if isFiles}
     <table data-testid="list-table">
       <thead><tr><th>#</th><th>{t('col.name')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.accessed')}</th></tr></thead>
@@ -95,7 +96,7 @@
           <tr data-testid="list-row"><td class="muted">{i + 1}</td>
             <td><div class="truncate" style="max-width:60ch" title={f.path}>{f.name}</div>
               <a class="small truncate" style="display:inline-block;max-width:60ch" href="/browse/{shareId}/{f.dir_id}?view=files" use:link>{folderOf(f.path)}</a></td>
-            <td class="right nowrap">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
+            <td class="right actions">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
             <td class="right hide-sm nowrap">{formatDate(f.mtime, i18n.lang)}</td>
             <td class="right hide-sm nowrap" title={formatDate(f.atime, i18n.lang)}>{ago(f.atime, i18n.lang)}</td></tr>
         {:else}<tr><td colspan="5" class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
@@ -108,8 +109,8 @@
         {#each dirs as d, i (d.id)}
           <tr data-testid="list-row"><td class="muted">{i + 1}</td>
             <td><a class="truncate" style="display:inline-block;max-width:60ch" href="/browse/{shareId}/{d.id}" use:link title={d.path}>📁 {d.path || '/'}</a></td>
-            <td class="right nowrap">{formatBytes(by === 'direct' ? d.size_direct : d.size, prefs.units, i18n.lang)}</td>
-            <td class="right nowrap">{formatNumber(by === 'direct' ? d.files_direct : d.files, i18n.lang)}</td>
+            <td class="right actions">{formatBytes(by === 'direct' ? d.size_direct : d.size, prefs.units, i18n.lang)}</td>
+            <td class="right actions">{formatNumber(by === 'direct' ? d.files_direct : d.files, i18n.lang)}</td>
             <td class="right hide-sm nowrap">{formatDate(d.newest_mtime, i18n.lang)}</td>
             <td class="right hide-sm nowrap" title={formatDate(lastUsed(d), i18n.lang)}>{ago(lastUsed(d), i18n.lang)}</td></tr>
         {:else}<tr><td colspan="6" class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
@@ -117,4 +118,4 @@
     </table>
   {/if}
 </div>
-{#if cursor}<div class="row" style="margin-top:10px"><button onclick={() => load(true)}>{t('common.more')}</button></div>{/if}
+{#if cursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={() => load(true)}>{t('common.more')}</button></div>{/if}

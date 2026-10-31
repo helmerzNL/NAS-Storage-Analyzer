@@ -7,7 +7,7 @@ export const nl: Record<string, string> = {
   'nav.extensions': 'Bestandstypes', 'nav.users': 'Gebruikers', 'nav.audit': 'Auditlog', 'nav.account': 'Mijn account',
   'live.running': 'Er loopt een scan', 'live.running.n': '{n} scan(s) actief',
   'pref.units': 'Eenheden', 'pref.units.binary': 'KiB (1024)', 'pref.units.decimal': 'kB (1000)', 'pref.units.binary.long': 'Binair: KiB, MiB, GiB (1024)',
-  'pref.units.decimal.long': 'Decimaal: kB, MB, GB (1000)', 'pref.language': 'Taal', 'pref.theme': 'Weergave', 'pref.theme.system': 'Volg systeem',
+  'pref.units.decimal.long': 'Decimaal: kB, MB, GB (1000)', 'pref.language': 'Taal', 'pref.theme': 'Thema', 'pref.theme.system': 'Volg systeem',
   'pref.theme.light': 'Licht', 'pref.theme.dark': 'Donker',
   'role.admin': 'Beheerder', 'role.viewer': 'Kijker', 'kind.bind': 'Gemount pad', 'kind.nfs': 'NFS', 'kind.smb': 'SMB', 'mode.full': 'volledige scan', 'mode.incremental': 'incrementele scan',
   'cat.video': 'Video', 'cat.audio': 'Audio', 'cat.images': 'Afbeeldingen', 'cat.documents': 'Documenten', 'cat.archives': 'Archieven', 'cat.code': 'Code',
@@ -106,7 +106,7 @@ export const nl: Record<string, string> = {
   'ext.saved': 'Opgeslagen; {n} share(s) worden bijgewerkt', 'ext.deleted': 'Verwijderd; de extensie valt nu onder Overig', 'ext.move': 'Verplaats .{ext} naar een andere categorie',
 
   // account
-  'account.lastlogin': 'laatst ingelogd {when}', 'account.prefs': 'Weergave', 'account.password': 'Wachtwoord', 'account.pw.current': 'Huidig wachtwoord', 'account.pw.new': 'Nieuw wachtwoord',
+  'account.lastlogin': 'laatst ingelogd {when}', 'account.prefs': 'Voorkeuren', 'account.password': 'Wachtwoord', 'account.pw.current': 'Huidig wachtwoord', 'account.pw.new': 'Nieuw wachtwoord',
   'account.pw.change': 'Wachtwoord wijzigen', 'account.pw.changed': 'Wachtwoord gewijzigd', 'account.pw.note': 'Je andere sessies worden afgemeld.',
   'account.totp': 'Authenticator-app', 'account.enabled': 'Ingesteld', 'account.notset': 'Niet ingesteld', 'account.totp.remove': 'Verwijderen', 'account.totp.removed': 'Authenticator-app verwijderd',
   'account.totp.remove.body': 'Bevestig met je wachtwoord om de authenticator-app te verwijderen.', 'account.lastfactor': 'Voeg eerst een passkey toe: een tweede factor is verplicht.',
@@ -124,4 +124,12 @@ export const nl: Record<string, string> = {
   'err.last_factor': 'Een tweede factor is verplicht: voeg eerst een andere toe.', 'err.setup_done': 'De installatie is al afgerond; log in.', 'err.invalid_setup_token': 'Deze setup-token klopt niet.',
   'err.https_required': 'Aanmelden kan alleen via https.', 'err.already_active': 'Er staat al een scan in de wachtrij of er loopt er een.', 'err.busy': 'Er staat een scan in de wachtrij of er loopt er een. Annuleer die eerst.',
   'err.no_data': 'Deze share is nog niet gescand.', 'err.passkey_domain': 'Passkeys werken niet op dit adres ({host}). Open de app via een hostnaam met https (of via http://localhost), en laat de beheerder NASA_RP_ID op die hostnaam zetten.', 'err.passkey_known': 'Deze passkey staat al op je account.', 'err.passkey_cancelled': 'De passkey-aanvraag is geannuleerd of verlopen.',
+  // Weergave (web-app-design.md): de accentkleur en het instellingenmenu
+  'pref.accent': 'Accentkleur', 'pref.accent.custom': 'Kies een andere kleur', 'pref.accent.hint': 'Knoppen, het geopende menu-item en de focusrand volgen deze kleur. Statussen houden hun eigen kleuren.',
+  'pref.accent.reset': 'Terug naar de standaard',
+  'accent.default': 'Standaard (teal)', 'accent.violet': 'Violet', 'accent.blue': 'Blauw', 'accent.indigo': 'Indigo', 'accent.purple': 'Paars', 'accent.pink': 'Roze',
+  'accent.red': 'Rood', 'accent.orange': 'Oranje', 'accent.green': 'Groen', 'accent.teal': 'Helder teal', 'accent.bordeaux': 'Bordeaux', 'accent.graphite': 'Grafiet',
+  'nav.settings': 'Instellingen', 'settings.menu': 'Instellingenmenu', 'settings.personal': 'Persoonlijk', 'settings.data': 'Gegevens', 'settings.admin': 'Beheer',
+  'settings.appearance': 'Weergave en taal', 'settings.security': 'Beveiliging', 'settings.units.note': 'De eenhedenkeuze staat ook in de balk bovenaan.',
+  'fold.open': 'Tonen', 'fold.closed': 'Verbergen',
 };

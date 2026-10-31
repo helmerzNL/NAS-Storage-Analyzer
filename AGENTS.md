@@ -154,6 +154,11 @@ A pull request that raises a size, rate or timeout limit states the new value as
 - **Performance is a requirement, not a polish step.** Queries use keyset pagination, never `OFFSET`; the API sessions run read-only
   with a `statement_timeout`. A change that touches the query layer re-runs `nasabench queries` against a large dataset and records
   the numbers.
+- **The interface follows the Flux76 web design system** (baseline: `web-app-design.md`; [ADR 0005](docs/adr/0005-web-design-system.md),
+  [`web/src/design/README.md`](web/src/design/README.md)). A colour in a component is a token, never a hex; a status uses `--tone-*` and never the
+  accent; the accent as text is `--accent-ink`; a new token goes in `tokens.css` for light *and* dark; targets are 44 px. `design/components.css` stays
+  a copy of the starter (changes go in `app.css`). `lib/design.test.ts` and `lib/appearance.test.ts` hold what a test can; look at a screen in light and
+  dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots).
 - **Reuse before writing new code.** The shared `query` and `store` packages, the `testsupport` helpers and the existing UI
   components come first; a second implementation of the same thing is the bug (baseline §10).
 

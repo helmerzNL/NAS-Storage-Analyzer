@@ -101,7 +101,7 @@ const expectText = async (page, sel, re, msg) => {
       secret = (await page.textContent('[data-testid=totp-secret]')).trim();
       await page.fill('[data-testid=totp-code]', '000000');
       await page.click('text=Bevestigen');
-      await page.waitForSelector('[data-testid=auth-error], .alert.bad');
+      await page.waitForSelector('[data-testid=auth-error], .notice.error');
       await page.fill('[data-testid=totp-code]', totp(secret));
       await page.click('text=Bevestigen');
     });
@@ -129,7 +129,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=folder-picker] [data-testid=folder-media]');
       const crumbsAtRoot = await page.$$eval('[data-testid=folder-crumbs] button, [data-testid=folder-crumbs] span.mono', (els) => els.length);
       if (crumbsAtRoot !== 1) throw new Error('a missing typed path must open the picker at the shares root, got ' + crumbsAtRoot + ' crumbs');
-      if (await page.$('[data-testid=folder-picker] .alert.bad')) throw new Error('a missing typed path must not show an error');
+      if (await page.$('[data-testid=folder-picker] .notice.error')) throw new Error('a missing typed path must not show an error');
       if (await page.$('[data-testid=folder-up]')) throw new Error('the root has no "up"');
       await shot('04a-folder-picker-root');
       // 2. Go into the folder: sub-folders are listed (folders only, never files), "up" and the breadcrumb appear.
@@ -164,7 +164,7 @@ const expectText = async (page, sel, re, msg) => {
       if ((await page.inputValue('[data-testid=f-path]')) !== path.join(SHARE_APP_PATH, 'media')) throw new Error('re-picking media failed: ' + await page.inputValue('[data-testid=f-path]'));
       await page.fill('[data-testid=f-cron]', 'not a cron');
       await page.click('[data-testid=f-save]');
-      await page.waitForSelector('dialog[open] .field-error, dialog[open] .alert.bad');
+      await page.waitForSelector('dialog[open] .field-error, dialog[open] .notice.error');
       await shot('04-share-form-error');
       await page.fill('[data-testid=f-cron]', '0 3 * * *');
       await page.click('[data-testid=f-save]');
@@ -191,7 +191,7 @@ const expectText = async (page, sel, re, msg) => {
     });
 
     await step('category filter narrows the folder sizes', async () => {
-      await page.click('.chip:has-text("Video")');
+      await page.click('.seg:has-text("Video")');
       await page.click('text=Toepassen');
       await page.waitForFunction(() => document.querySelectorAll('[data-testid=folder-row]').length === 1);
       const row = await page.textContent('[data-testid=folder-row]');
@@ -259,7 +259,7 @@ const expectText = async (page, sel, re, msg) => {
     });
 
     await step('dark mode', async () => {
-      for (let i = 0; i < 3 && (await page.evaluate(() => document.documentElement.dataset.theme)) !== 'dark'; i++) await page.click('button[aria-label=Weergave]');
+      for (let i = 0; i < 3 && (await page.evaluate(() => document.documentElement.dataset.theme)) !== 'dark'; i++) await page.click('button[aria-label=Thema]');
       const theme = await page.evaluate(() => document.documentElement.dataset.theme);
       if (theme !== 'dark') throw new Error('theme = ' + theme);
       await page.goto(BASE + '/');
@@ -269,13 +269,13 @@ const expectText = async (page, sel, re, msg) => {
     });
 
     await step('add a passkey, sign out, sign in with the passkey alone', async () => {
-      await page.goto(BASE + '/account');
+      await page.goto(BASE + '/account/security');
       await page.click('[data-testid=passkey-add]');
       await page.click('button:has-text("Passkey instellen")');
       await page.fill('input[placeholder="Mijn passkey"]', 'Testlaptop');
       await page.click('[data-testid=add-passkey]');
       await page.waitForSelector('[data-testid=passkey-list] >> text=Testlaptop');
-      await shot('11-account');
+      await shot('11-security');
       await page.click('[data-testid=signout]');
       await page.waitForSelector('[data-testid=login-passkey]');
       await page.click('[data-testid=login-passkey]');
@@ -345,6 +345,11 @@ const expectText = async (page, sel, re, msg) => {
       if (await vp.$('[data-testid=scan-now]')) throw new Error('a viewer sees the scan button');
       await vp.goto(BASE + '/admin/users');
       if (await vp.$('[data-testid=user-table]')) throw new Error('a viewer reached the user list');
+      await vp.goto(BASE + '/account');
+      await vp.waitForSelector('.settings-nav');
+      const viewerParts = await vp.$$eval('.settings-nav a', (as) => as.map((a) => a.getAttribute('href')));
+      if (viewerParts.join() !== '/account,/account/security') throw new Error('a viewer sees these settings parts: ' + viewerParts);
+      if ((await vp.$$('.settings-group')).length !== 1) throw new Error('an empty group must be hidden for a viewer');
       await v.close();
     });
 
@@ -402,6 +407,142 @@ const expectText = async (page, sel, re, msg) => {
       if (!(await row.$('.badge.warn'))) throw new Error('an empty scan must stand out (amber badge)');
       if (!(await page.$('[data-testid=audit-table] tbody tr:has-text("scan.finished"):has-text("Media")'))) throw new Error('the scan of Media is missing as scan.finished');
       await shot('14-audit-empty-scan');
+    });
+
+    await step('settings menu: grouped parts with icons, the open part marked by more than colour', async () => {
+      await page.goto(BASE + '/account');
+      await page.waitForSelector('.settings-nav');
+      const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
+      const want = [['Persoonlijk', ['/account', '/account/security']], ['Gegevens', ['/admin/shares', '/admin/extensions']], ['Beheer', ['/admin/users', '/admin/audit']]];
+      if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
+      for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
+      const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));
+      if (open.length !== 1) throw new Error('exactly one open part, got ' + open);
+      const bar = await page.$eval('.settings-nav a[aria-current=page]', (a) => getComputedStyle(a).boxShadow + '|' + getComputedStyle(a).fontWeight);
+      if (!/inset/.test(bar) || Number(bar.split('|')[1]) < 600) throw new Error('the open part is marked by colour alone: ' + bar);
+      await page.click('[data-testid=settings-admin-users]');
+      await page.waitForSelector('[data-testid=user-table]');
+      if (!(await page.$('.settings-nav a[aria-current=page][href="/admin/users"]'))) throw new Error('the open part follows the page');
+    });
+
+    await step('a rarely used card folds away and the choice is remembered', async () => {
+      await page.goto(BASE + '/account/security');
+      await page.waitForSelector('[data-testid=fold-recovery]');
+      const expanded = () => page.getAttribute('[data-testid=fold-recovery]', 'aria-expanded');
+      if ((await expanded()) !== 'false') throw new Error('recovery codes should start folded');
+      if (await page.isVisible('[data-testid=codes-regenerate]')) throw new Error('a folded card must hide its content');
+      await page.click('[data-testid=fold-recovery]');
+      await page.waitForSelector('[data-testid=codes-regenerate]', { state: 'visible' });
+      await page.reload();
+      await page.waitForSelector('[data-testid=fold-recovery]');
+      if ((await expanded()) !== 'true' || !(await page.isVisible('[data-testid=codes-regenerate]'))) throw new Error('the open state is not remembered');
+      await page.keyboard.press('Tab'); // operable with the keyboard: focus the toggle and press Enter
+      await page.focus('[data-testid=fold-recovery]');
+      await page.keyboard.press('Enter');
+      if ((await expanded()) !== 'false') throw new Error('Enter does not fold the card');
+    });
+
+    await step('accent colour: recolours the interface, persists per account, statuses keep their own colours', async () => {
+      const root = () => page.evaluate(() => [document.documentElement.style.getPropertyValue('--accent'), document.documentElement.style.getPropertyValue('--on-accent')]);
+      const primaryBg = async () => { await page.goto(BASE + '/'); await page.waitForSelector('[data-testid=share-Media] .btn.primary'); return page.$eval('[data-testid=share-Media] .btn.primary', (b) => getComputedStyle(b).backgroundColor); };
+      await page.goto(BASE + '/account');
+      await page.waitForSelector('[data-testid=accent-2f9e44]');
+      if ((await primaryBg()) !== 'rgb(15, 118, 110)') throw new Error('the default accent is the brand teal');
+      await page.goto(BASE + '/account');
+      await page.click('[data-testid=accent-2f9e44]');
+      if ((await root())[0] !== '#2f9e44') throw new Error('accent not set on <html>: ' + (await root()));
+      if (await page.getAttribute('[data-testid=accent-2f9e44]', 'aria-pressed') !== 'true') throw new Error('the chosen swatch is not announced as pressed');
+      if ((await primaryBg()) !== 'rgb(47, 158, 68)') throw new Error('the primary button does not follow the accent');
+      // A status never follows the accent: "Gelukt" keeps the success tone, and a warning and an error differ from it and from each other.
+      const tones = await page.$$eval('.badge.ok, .notice.warn, .notice.error', (els) => els.map((e) => getComputedStyle(e).getPropertyValue('--tone') || getComputedStyle(e).borderTopColor));
+      if (tones.some((t) => /47,\s*158,\s*68|2f9e44/i.test(t))) throw new Error('a status took the accent colour: ' + tones);
+      // Saved with the account: forget the browser's copy, reload, and it comes back from the server.
+      await page.evaluate(() => localStorage.removeItem('nasa.accent'));
+      await page.goto(BASE + '/account');
+      await page.waitForSelector('[data-testid=accent-2f9e44][aria-pressed=true]');
+      if ((await root())[0] !== '#2f9e44') throw new Error('the accent was not saved with the account');
+      await shot('20-appearance-green-' + (await page.evaluate(() => document.documentElement.dataset.theme || 'system')));
+      await page.fill('[data-testid=accent-custom]', '#b0213f').catch(() => {});
+      await page.$eval('[data-testid=accent-custom]', (i) => { i.value = '#b0213f'; i.dispatchEvent(new Event('input', { bubbles: true })); });
+      await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--accent') === '#b0213f');
+      await page.click('[data-testid=accent-reset]');
+      await page.waitForFunction(() => document.documentElement.style.getPropertyValue('--accent') === '');
+      if (!(await page.$('[data-testid=accent-0f766e][aria-pressed=true]'))) throw new Error('back to the default shows the default swatch as chosen');
+    });
+
+    await step('the accent is on <html> before the application loads, and a bad stored value is ignored', async () => {
+      const c = await browser.newContext({ locale: 'nl-NL', viewport: { width: 1280, height: 800 } });
+      await c.addInitScript(() => { localStorage.setItem('nasa.accent', '#e5484d'); localStorage.setItem('nasa.theme', 'dark'); });
+      await c.route('**/assets/*.js', async (route) => { await new Promise((r) => setTimeout(r, 1200)); await route.continue(); });   // hold the application back
+      const p = await c.newPage();
+      await p.goto(BASE + '/', { waitUntil: 'commit' });
+      await p.waitForFunction(() => document.documentElement.style.getPropertyValue('--accent') === '#e5484d', null, { timeout: 5000 });
+      const early = await p.evaluate(() => ({ app: document.getElementById('app')?.children.length ?? -1, theme: document.documentElement.dataset.theme, on: document.documentElement.style.getPropertyValue('--on-accent') }));
+      if (early.app !== 0) throw new Error('the application had already rendered, so this proves nothing: ' + JSON.stringify(early));
+      if (early.theme !== 'dark') throw new Error('the theme is not set before the first paint: ' + early.theme);
+      if (early.on !== '#14131f') throw new Error('red needs the dark text on it (4.5:1), got ' + early.on);
+      await c.close();
+      const bad = await browser.newContext({ locale: 'nl-NL' });
+      await bad.addInitScript(() => localStorage.setItem('nasa.accent', 'url(//evil.example/x);color:red'));
+      const bp = await bad.newPage();
+      await bp.goto(BASE + '/');
+      await bp.waitForSelector('[data-testid=login-username]');
+      if (await bp.evaluate(() => document.documentElement.style.getPropertyValue('--accent'))) throw new Error('a bad stored accent was applied');
+      await bad.close();
+    });
+
+    await step('keyboard: the focus is visible on the swatches, the menu and the fold toggle', async () => {
+      await page.goto(BASE + '/account');
+      await page.waitForSelector('[data-testid=accent-0f766e]');
+      await page.focus('[data-testid=accent-0f766e]');
+      await page.keyboard.press('Tab');
+      for (const sel of ['[data-testid=accent-0f766e]', '.settings-nav a[aria-current=page]', '[data-testid=pref-units]']) {
+        await page.focus(sel);
+        await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');   // arrive by keyboard so :focus-visible applies
+        await page.waitForTimeout(300);   // the field's ring fades in (a 150 ms transition): measure the end state, not the first frame
+        const ring = await page.evaluate(() => { const e = document.activeElement, s = getComputedStyle(e); return [s.outlineStyle, parseFloat(s.outlineWidth), s.boxShadow, e.tagName + '[' + (e.getAttribute('data-testid') || e.className) + ']', e.matches(':focus-visible')].join('|'); });
+        const [style, width, shadow, who, fv] = ring.split('|');
+        if (!(await page.evaluate((x) => document.activeElement.matches(x), sel))) throw new Error('focus is on ' + who + ', not on ' + sel);
+        if (fv !== 'true') throw new Error(sel + ' is focused by keyboard but does not match :focus-visible');
+        // The outline, or the field's own ring (a colour-mix shadow with a real spread), must be there.
+        if ((style === 'none' || width < 2) && !/ [1-9]\d*px$/.test(shadow.replace(/\s*inset\s*/, ' ').trim())) throw new Error(sel + ' shows no focus indicator: ' + ring);
+      }
+    });
+
+    await step('screenshots: light and dark in two accents', async () => {
+      for (const [theme, accent] of [['light', ''], ['dark', ''], ['light', '#e5484d'], ['dark', '#0c9aa6']]) {
+        await page.evaluate(([th, ac]) => { document.documentElement.dataset.theme = th; if (ac) { document.documentElement.style.setProperty('--accent', ac); } else document.documentElement.style.removeProperty('--accent'); }, [theme, accent]);
+        await page.goto(BASE + '/account');
+        await page.waitForSelector('[data-testid=accent-0f766e]');
+        await page.evaluate(([th, ac]) => { document.documentElement.dataset.theme = th; if (ac) { document.documentElement.style.setProperty('--accent', ac); document.documentElement.style.setProperty('--on-accent', ac === '#e5484d' ? '#14131f' : '#14131f'); } }, [theme, accent]);
+        await page.waitForTimeout(350);   // let the colour transitions finish: a screenshot mid-fade is misleading
+        await shot(`21-appearance-${theme}-${accent ? accent.slice(1) : 'default'}`);
+        await page.goto(BASE + '/');
+        await page.waitForSelector('[data-testid=share-Media]');
+        await page.evaluate(([th, ac]) => { document.documentElement.dataset.theme = th; if (ac) { document.documentElement.style.setProperty('--accent', ac); document.documentElement.style.setProperty('--on-accent', '#14131f'); } }, [theme, accent]);
+        await page.waitForTimeout(350);
+        await shot(`22-dashboard-${theme}-${accent ? accent.slice(1) : 'default'}`);
+      }
+      // Phone width: the settings menu becomes a row you swipe, with the open part scrolled into view, and nothing makes the page wider than the screen.
+      await page.setViewportSize({ width: 390, height: 844 });
+      for (const [where, name] of [['/admin/audit', 'audit'], ['/account', 'appearance'], ['/', 'dashboard']]) {
+        await page.goto(BASE + where);
+        await page.waitForSelector('main');
+        await page.waitForTimeout(350);
+        const wide = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        if (wide > 1) {
+          const who = await page.evaluate(() => [...document.querySelectorAll('body *')].filter((e) => { const r = e.getBoundingClientRect(); return r.right > innerWidth + 1 && r.width > 0; })
+            .slice(0, 8).map((e) => `${e.tagName.toLowerCase()}.${String(e.className).split(' ').join('.')}@${Math.round(e.getBoundingClientRect().right)}`));
+          throw new Error(`${name} is ${wide}px wider than a phone screen: ${who.join(' ')}`);
+        }
+        if (where !== '/') {
+          const visible = await page.$eval('.settings-nav a[aria-current=page]', (a) => { const r = a.getBoundingClientRect(); return r.left >= -1 && r.right <= innerWidth + 1; });
+          if (!visible) throw new Error('the open settings part is not scrolled into view on a phone');
+        }
+        await shot('23-phone-' + name);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.evaluate(() => { document.documentElement.style.removeProperty('--accent'); document.documentElement.style.removeProperty('--on-accent'); document.documentElement.dataset.theme = 'light'; });
     });
 
     await step('no JavaScript errors occurred', async () => { if (errors.length) throw new Error(errors.join('\n')); });

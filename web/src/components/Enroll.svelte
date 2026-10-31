@@ -37,15 +37,15 @@
   }
 </script>
 
-{#if error}<div class="alert bad" role="alert">{error}</div>{/if}
+{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 
 {#if mode === 'choose'}
   <div class="stack">
     {#if canTotp}
-      <button class="primary" type="button" onclick={startTotp} disabled={busy}>{t('enroll.totp')}</button>
+      <button class="btn primary" type="button" onclick={startTotp} disabled={busy}>{t('enroll.totp')}</button>
     {/if}
     {#if canPasskey && passkeysSupported()}
-      <button type="button" onclick={() => (mode = 'passkey')} disabled={busy}>{t('enroll.passkey')}</button>
+      <button class="btn" type="button" onclick={() => (mode = 'passkey')} disabled={busy}>{t('enroll.passkey')}</button>
     {:else if canPasskey}
       <p class="muted small">{t('enroll.nopasskey')}</p>
     {/if}
@@ -53,12 +53,12 @@
 {:else if mode === 'totp'}
   <form class="stack" onsubmit={confirmTotp}>
     <p>{t('enroll.totp.scan')}</p>
-    <div style="width: 200px; max-width: 100%; background: #fff; padding: 6px; border-radius: 8px; align-self: center">{@html svg}</div>
+    <div class="qr">{@html svg}</div>
     <details><summary class="small muted">{t('enroll.totp.manual')}</summary><code class="mono" data-testid="totp-secret">{secret}</code></details>
     <label class="field">{t('enroll.totp.code')}
       <input bind:value={code} inputmode="numeric" autocomplete="one-time-code" maxlength="7" required data-testid="totp-code" />
     </label>
-    <button class="primary" type="submit" disabled={busy || code.replace(/\s/g, '').length < 6}>{t('enroll.confirm')}</button>
+    <button class="btn primary" type="submit" disabled={busy || code.replace(/\s/g, '').length < 6}>{t('enroll.confirm')}</button>
   </form>
 {:else}
   <form class="stack" onsubmit={addPasskey}>
@@ -66,6 +66,6 @@
     <label class="field">{t('enroll.passkey.name')}
       <input bind:value={name} placeholder={t('enroll.passkey.default')} maxlength="60" />
     </label>
-    <button class="primary" type="submit" disabled={busy} data-testid="add-passkey">{t('enroll.passkey.add')}</button>
+    <button class="btn primary" type="submit" disabled={busy} data-testid="add-passkey">{t('enroll.passkey.add')}</button>
   </form>
 {/if}

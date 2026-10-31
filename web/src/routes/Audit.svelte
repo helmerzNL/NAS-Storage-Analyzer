@@ -21,10 +21,11 @@
     : a === 'scan.empty' || a === 'scan.errors' ? 'warn' : a.startsWith('login.success') || a === 'scan.finished' ? 'ok' : '');
 </script>
 
-<div class="page-head"><div class="grow"><h1>{t('nav.audit')}</h1><p class="muted" style="margin:0">{t('audit.intro')}</p></div>
-  <select bind:value={prefix} style="width:auto" aria-label={t('audit.filter')}><option value="">{t('audit.all')}</option>{#each groups as g}<option value={g}>{g}*</option>{/each}</select></div>
-{#if error}<div class="alert bad" role="alert">{error}</div>{/if}
-<div class="card table-wrap" style="padding:0" aria-busy={loading}>
+<div class="page-head"><h1>{t('nav.audit')}</h1>
+  <select bind:value={prefix} class="auto" aria-label={t('audit.filter')}><option value="">{t('audit.all')}</option>{#each groups as g}<option value={g}>{g}*</option>{/each}</select></div>
+<p class="muted intro">{t('audit.intro')}</p>
+{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+<div class="card table-wrap flush" aria-busy={loading}>
   <table data-testid="audit-table">
     <thead><tr><th>{t('audit.when')}</th><th>{t('audit.who')}</th><th>{t('audit.action')}</th><th class="hide-sm">{t('audit.target')}</th><th class="hide-sm">IP</th></tr></thead>
     <tbody>
@@ -36,4 +37,4 @@
     </tbody>
   </table>
 </div>
-{#if next}<div class="row" style="margin-top:10px"><button onclick={() => load(true)}>{t('common.more')}</button></div>{/if}
+{#if next}<div class="row" style="margin-top:10px"><button class="btn" onclick={() => load(true)}>{t('common.more')}</button></div>{/if}

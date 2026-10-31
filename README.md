@@ -18,7 +18,7 @@ snel blijft.
   wachtwoordloos met alleen een passkey), herstelcodes, lockout, CSRF-bescherming, rollen Admin en Viewer, auditlog,
   setup-wizard zonder standaardwachtwoorden.
 * **Beheer**: scheduler met cron per share (persistente jobstatus), OpenAPI-REST-API, Prometheus-`/metrics`, JSON-logs,
-  health checks. Interface in Nederlands en Engels, binaire of decimale eenheden, donkere modus.
+  health checks. Interface in Nederlands en Engels, binaire of decimale eenheden, licht, donker of volgens het systeem, en een accentkleur die elke gebruiker zelf kiest (Instellingen → Weergave en taal).
 
 ## Snel starten
 

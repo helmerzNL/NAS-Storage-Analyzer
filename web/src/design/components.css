@@ -1,0 +1,165 @@
+/*
+ * Flux76 web design system: components
+ *
+ * Needs tokens.css first. No framework, no build step, no inline style: it is written to pass a `style-src 'self'` policy, and it only
+ * uses properties that animate cheaply (colour, shadow, transform). Class names are plain on purpose, so an app can adopt a part of it.
+ * Extracted from Flux76HQ/3dprint_pricing; the full app stylesheet there also holds what is specific to that app.
+ */
+* { box-sizing: border-box; }
+html { font-size: 100%; -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; font: 1rem/1.5 var(--font); color: var(--text); background: var(--bg); -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(60rem 40rem at 0% -10%, var(--bg-glow-1), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 0%, var(--bg-glow-2), transparent 60%);
+  background-attachment: fixed; min-height: 100vh; min-height: 100dvh;
+}
+h1, h2, h3 { text-wrap: balance; letter-spacing: -.012em; margin: 0 0 .5rem; }
+h1 { font-size: 1.75rem; line-height: 1.2; font-weight: 700; letter-spacing: -.02em; }
+h2 { font-size: 1.2rem; font-weight: 700; }
+h3 { font-size: 1.05rem; }
+p { margin: 0 0 .5rem; }
+a { color: var(--accent); }
+.muted { color: var(--text-muted); }
+[hidden] { display: none !important; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; } }
+
+/* Layout */
+main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+.stack { display: flex; flex-direction: column; gap: 12px; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); }
+.page-head { position: sticky; top: 0; z-index: 15; display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin: -16px -16px 16px; padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; min-height: 56px;
+  background: rgba(var(--surface-rgb), .94); -webkit-backdrop-filter: blur(18px) saturate(1.4); backdrop-filter: blur(18px) saturate(1.4);
+  border-bottom: 1px solid var(--lijn-strong); }
+.page-head h1 { margin: 0; font-size: 1.35rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Glass is for floating chrome (navigation, pop-ups). Body content sits on solid cards. */
+.glass { background: var(--surface); -webkit-backdrop-filter: var(--glass-blur); backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border); box-shadow: var(--shadow); }
+@media (prefers-reduced-transparency: reduce) { .glass, .page-head { background: var(--surface-solid); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+/* Cards: solid, a hairline, a two-layer shadow */
+.card { border-radius: var(--radius); padding: 16px; transition: box-shadow .2s var(--ease), border-color .2s var(--ease), transform .2s var(--ease); }
+.card.glass { background: var(--surface-solid); -webkit-backdrop-filter: none; backdrop-filter: none; border-color: var(--lijn-strong); }
+.item { display: flex; flex-direction: column; gap: 12px; }
+.item-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.item h3 a { color: var(--text); text-decoration: none; }
+.item h3 a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+.link-card { color: inherit; text-decoration: none; }
+.link-card:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--lijn-strong)); transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(20, 16, 60, .06), 0 16px 32px -14px color-mix(in srgb, var(--accent) 45%, rgba(20, 16, 60, .3)); }
+.empty { padding: 32px 16px; text-align: center; color: var(--text-muted); border: 1px dashed var(--rand); background: transparent !important; box-shadow: none; }
+
+/* Key figures: a small uppercase label above a bold, tabular value */
+.stats { display: flex; gap: 8px 28px; flex-wrap: wrap; margin: 0; padding-top: 12px; border-top: 1px solid var(--lijn); }
+.stats dt { font-size: .7rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+.stats dd { margin: 0; font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* Badges and status. A status is never colour alone: it always carries its word, and the colour comes from --tone-*, not from the accent. */
+.badge { display: inline-block; font-size: .72rem; font-weight: 650; letter-spacing: .01em; padding: 3px 10px; border-radius: 99px; background: var(--accent-subtle); color: var(--text); }
+.badge.muted { background: var(--lijn); color: var(--text-muted); }
+:where(.pill, select.status) { --tone: var(--tone-neutral); }      /* the default; :where keeps it weaker than [data-tone] */
+.pill, select.status { font-weight: 650; border: 1px solid color-mix(in srgb, var(--tone) 55%, var(--rand));
+  background-color: color-mix(in srgb, var(--tone) 11%, var(--surface-field)); color: var(--text); }
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 3px 12px 3px 10px; border-radius: 99px; font-size: .8rem; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--tone); }
+[data-tone="busy"] { --tone: var(--tone-busy); }
+[data-tone="info"] { --tone: var(--tone-info); }
+[data-tone="done"] { --tone: var(--tone-done); }
+[data-tone="danger"] { --tone: var(--danger); }
+
+/* Buttons: 44 px touch targets */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 8px 16px; border-radius: 12px;
+  border: 1px solid var(--rand); background: var(--surface-field); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; text-decoration: none;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease), transform .1s var(--ease); }
+.btn:hover:not(:disabled) { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface-field)); }
+.btn:active:not(:disabled) { transform: scale(.98); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--accent) 45%, transparent), 0 8px 16px -8px color-mix(in srgb, var(--accent) 70%, transparent); }
+.btn.primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn.danger { color: var(--danger); }
+.btn.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, var(--surface-field)); border-color: var(--danger); }
+
+/* Filter chips and segmented controls */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.seg { min-height: 44px; padding: 6px 14px; border: 1px solid var(--rand); border-radius: 99px; background: var(--surface-field); color: var(--text);
+  font: inherit; cursor: pointer; transition: background-color .15s var(--ease), border-color .15s var(--ease); }
+.seg:hover:not([aria-pressed="true"]) { background: var(--accent-subtle); }
+.seg[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+
+/* Forms: a visible label, a field with its own focus state, a drawn select arrow, a finished file picker */
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label { font-size: .82rem; font-weight: 600; letter-spacing: .01em; color: var(--text-muted); }
+.hint { font-size: .8rem; color: var(--text-muted); margin: 0; }
+input[type=text], input[type=password], input[type=email], input[type=tel], input[type=url], input[type=number], input[type=date], select, textarea {
+  font: inherit; color: var(--text); background: var(--surface-field); border: 1px solid var(--rand); border-radius: var(--radius-sm);
+  padding: 8px 12px; min-height: 44px; width: 100%; transition: border-color .15s var(--ease), box-shadow .15s var(--ease); }
+textarea { resize: vertical; }
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: .75; }
+input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent); }
+select:not([multiple]):not([size]) { -webkit-appearance: none; appearance: none; padding-right: 38px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 50%, calc(100% - 14px) 50%; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+select.status:not([multiple]):not([size]) { padding-left: 32px; width: auto;    /* the status colour dot first, the arrow after it */
+  background-image: radial-gradient(circle, var(--tone) 0 4.5px, transparent 5px),
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: 13px 50%, calc(100% - 19px) 50%, calc(100% - 14px) 50%; background-size: 10px 10px, 5px 5px, 5px 5px; }
+input[type=file] { font: inherit; color: var(--text); width: 100%; padding: 8px; border: 1px dashed var(--rand); border-radius: var(--radius-sm); background: var(--surface-field); cursor: pointer; }
+input[type=file]:hover { border-color: var(--accent); }
+input[type=file]::file-selector-button { margin-right: 12px; min-height: 36px; padding: 6px 14px; border: 1px solid var(--accent); border-radius: 10px;
+  background: var(--accent-subtle); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+input[type=file]::file-selector-button:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+
+/* Notices and pop-ups */
+.notice { border: 1px solid var(--rand); border-radius: var(--radius-sm); padding: 12px 16px; }
+.notice.info { border-color: var(--accent); background: var(--accent-subtle); }
+.notice.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.notice.error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+dialog.sheet { padding: 0; border: 1px solid var(--lijn-strong); border-radius: 20px; color: var(--text); background: var(--surface-solid);
+  width: min(calc(100vw - 24px), 560px); box-shadow: 0 24px 60px -20px rgba(0, 0, 0, .5); }
+dialog.sheet::backdrop { background: rgba(8, 9, 18, .55); }
+.toast { padding: 12px 16px; border-radius: 14px; background: var(--surface-solid); color: var(--text); border: 1px solid var(--lijn-strong); box-shadow: var(--shadow); }
+
+/* Settings layout: the parts of a settings page as a menu. A sticky column of grouped parts beside the page on a wide screen, a row you swipe on a
+   phone (the markup is the same: a <nav class="settings-nav"> of <div class="settings-group" role="group"> with a title and <a> links, the open one
+   aria-current="page"). The icon is optional (an <svg class="icon"> or any icon element before the label). */
+.settings-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.settings-content { min-width: 0; }
+.settings-nav { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 6px; scrollbar-width: none; scroll-snap-type: x proximity; }
+.settings-nav::-webkit-scrollbar { display: none; }
+.settings-group { display: contents; }
+.settings-group-title { display: none; }
+.settings-nav a { flex: none; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 6px 14px; border-radius: 99px; scroll-snap-align: center;
+  border: 1px solid var(--lijn-strong); background: var(--surface-solid); color: var(--text); text-decoration: none; white-space: nowrap;
+  transition: background-color .15s var(--ease), border-color .15s var(--ease); }
+.settings-nav a .icon { width: 20px; height: 20px; flex: none; fill: currentColor; color: var(--text-muted); }
+.settings-nav a:hover { border-color: var(--accent); }
+.settings-nav a[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 650; }
+.settings-nav a[aria-current="page"] .icon { color: inherit; }
+@media (min-width: 860px) {
+  .settings-layout { grid-template-columns: 236px minmax(0, 1fr); gap: 24px; }
+  .settings-nav { flex-direction: column; gap: 2px; overflow: visible; margin: 0; padding: 8px; position: sticky; top: 88px;
+    background: var(--surface-solid); border: 1px solid var(--lijn-strong); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .settings-group { display: flex; flex-direction: column; gap: 2px; }
+  .settings-group + .settings-group { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--lijn); }
+  .settings-group-title { display: block; margin: 6px 12px 4px; font-size: .7rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted); }
+  .settings-nav a { border: 0; border-radius: 10px; background: none; padding: 8px 12px; gap: 12px; }
+  .settings-nav a:hover { background: var(--accent-subtle); }
+  .settings-nav a[aria-current="page"] { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }   /* active is not colour alone */
+  .settings-nav a[aria-current="page"] .icon { color: var(--accent); }
+}
+
+/* A card that folds away: only its heading stays while the button is not expanded. Build the heading with foldHead() (fold.js). */
+.fold-head { margin: 0; }
+.fold-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 44px; margin: -8px 0; padding: 8px 0;
+  background: none; border: 0; border-radius: 10px; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fold-toggle::after { content: ""; flex: none; width: 8px; height: 8px; margin-right: 6px; border: solid var(--text-muted); border-width: 0 2px 2px 0;
+  transform: rotate(45deg) translateY(-2px); transition: transform .2s var(--ease), border-color .15s var(--ease); }
+.fold-toggle[aria-expanded="true"]::after { transform: rotate(-135deg) translateY(-2px); }
+.fold-toggle:hover::after { border-color: var(--text); }
+.card:has(> .fold-head [aria-expanded="false"]) > :not(.fold-head) { display: none; }
+.card:has(> .fold-head [aria-expanded="false"]) { gap: 0; }

@@ -1,4 +1,6 @@
 import { mount } from 'svelte';
+import './design/tokens.css';
+import './design/components.css';
 import './app.css';
 import App from './App.svelte';
 import { loadVersion } from './lib/version.svelte';

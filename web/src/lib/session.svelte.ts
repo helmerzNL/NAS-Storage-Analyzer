@@ -1,5 +1,6 @@
 import { get, post, put, setCsrf, setAuthProblemHandler, type AuthStatus, type SessionResponse, type User } from './api';
 import { setLang, detectLang, type Lang } from './i18n.svelte';
+import { applyAccent, isAccent } from './appearance';
 import type { Units } from './format';
 
 export const session = $state({
@@ -12,7 +13,7 @@ export const session = $state({
   minPassword: 12,
 });
 
-export const prefs = $state({ units: 'binary' as Units, theme: 'system' as 'system' | 'light' | 'dark' });
+export const prefs = $state({ units: 'binary' as Units, theme: 'system' as 'system' | 'light' | 'dark', accent: '' });
 
 export const isAdmin = () => session.stage === 'active' && session.user?.role === 'admin';
 export const isActive = () => session.stage === 'active';
@@ -32,15 +33,24 @@ function applyPrefs(p: Record<string, string> | undefined) {
   const lang = p?.language ?? load('lang');
   if (lang === 'nl' || lang === 'en') setLang(lang as Lang);
   applyTheme(p?.theme ?? load('theme') ?? 'system');
+  applyAccentPref(p ? (p.accent ?? '') : (load('accent') ?? ''));   // saved preferences win; the browser's copy only stands in until they load
+}
+
+/** Sets the accent colour (#rrggbb; empty or anything else is the app's default) and remembers it for the pre-paint script. */
+export function applyAccentPref(accent: string) {
+  prefs.accent = isAccent(accent) ? accent.toLowerCase() : '';
+  applyAccent(prefs.accent);
+  store('accent', prefs.accent);
 }
 
 export function initPrefs() { setLang(detectLang()); applyPrefs(undefined); }
 
 /** Changes a preference now and saves it on the server for signed-in users. */
-export async function setPref(key: 'units' | 'language' | 'theme', value: string) {
+export async function setPref(key: 'units' | 'language' | 'theme' | 'accent', value: string) {
   store(key === 'language' ? 'lang' : key, value);
   if (key === 'units') prefs.units = value as Units;
   else if (key === 'language') setLang(value as Lang);
+  else if (key === 'accent') applyAccentPref(value);
   else applyTheme(value);
   if (session.stage === 'active') {
     try { await put('/auth/prefs', { [key]: value }); } catch { /* the choice still applies in this browser */ }

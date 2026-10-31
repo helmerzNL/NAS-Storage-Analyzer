@@ -16,7 +16,7 @@
 </script>
 
 <svg viewBox="0 0 140 140" width={size} height={size} role="img" aria-label={slices.map((s) => s.label).join(', ')}>
-  <circle cx="70" cy="70" {r} fill="none" stroke="var(--panel-2)" stroke-width="22" />
+  <circle cx="70" cy="70" {r} fill="none" stroke="var(--lijn)" stroke-width="22" />
   {#each arcs as a}
     <circle cx="70" cy="70" {r} fill="none" stroke={a.color} stroke-width="22" stroke-dasharray="{a.len} {c - a.len}"
       stroke-dashoffset={-a.offset} transform="rotate(-90 70 70)"><title>{a.label}</title></circle>

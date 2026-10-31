@@ -100,24 +100,22 @@
 </script>
 
 <div class="page-head">
-  <div class="grow">
-    <h1>{t('nav.browse')}</h1>
-    <div class="row">
-      <select aria-label={t('browse.share')} value={shareId} onchange={(e) => navigate('/browse/' + e.currentTarget.value + location.search.replace(/[?&]?(view|sort|order)=[^&]*/g, ''))} style="width:auto" data-testid="share-select">
-        {#each sharesStore.items as s}<option value={String(s.id)}>{s.name}</option>{/each}
-      </select>
-      {#if detail}
-        <nav class="crumbs" aria-label={t('browse.path')} data-testid="breadcrumb">
-          {#each detail.breadcrumb as c, i}
-            {#if i > 0}<span class="sep">/</span>{/if}
-            {#if i === detail.breadcrumb.length - 1}<span><b>{c.name || share?.name}</b></span>
-            {:else}<a href={i === 0 ? `/browse/${shareId}${location.search}` : dirHref(c.id)} use:link>{c.name || share?.name}</a>{/if}
-          {/each}
-        </nav>
-      {/if}
-    </div>
-  </div>
+  <h1>{t('nav.browse')}</h1>
   <a class="btn" href={csvHref} download data-testid="export-csv">⬇ CSV</a>
+</div>
+<div class="row intro-row">
+  <select aria-label={t('browse.share')} value={shareId} onchange={(e) => navigate('/browse/' + e.currentTarget.value + location.search.replace(/[?&]?(view|sort|order)=[^&]*/g, ''))} class="auto" data-testid="share-select">
+    {#each sharesStore.items as s}<option value={String(s.id)}>{s.name}</option>{/each}
+  </select>
+  {#if detail}
+    <nav class="crumbs" aria-label={t('browse.path')} data-testid="breadcrumb">
+      {#each detail.breadcrumb as c, i}
+        {#if i > 0}<span class="sep">/</span>{/if}
+        {#if i === detail.breadcrumb.length - 1}<span><b>{c.name || share?.name}</b></span>
+        {:else}<a href={i === 0 ? `/browse/${shareId}${location.search}` : dirHref(c.id)} use:link>{c.name || share?.name}</a>{/if}
+      {/each}
+    </nav>
+  {/if}
 </div>
 
 {#if share}<AtimeNotice {share} />{/if}
@@ -132,7 +130,7 @@
         <b>{formatBytes(filtered && detail.matching ? detail.matching.size : detail.total.size, prefs.units, i18n.lang)}</b>
         <span class="muted">{t('browse.files', { n: formatNumber(filtered && detail.matching ? detail.matching.files : detail.total.files, i18n.lang) })}</span>
         {#if filtered && detail.matching}<span class="muted small">{t('browse.of', { size: formatBytes(detail.total.size, prefs.units, i18n.lang) })}</span>{/if}
-        {#if detail.categories.length}<span class="chips">{#each detail.categories.slice(0, 4) as c}<span class="badge"><i style="width:8px;height:8px;border-radius:50%;display:inline-block" style:background={categoryColor(c.key)}></i>{t('cat.' + c.key)} {c.pct.toFixed(0)}%</span>{/each}</span>{/if}
+        {#if detail.categories.length}<span class="chips">{#each detail.categories.slice(0, 4) as c}<span class="badge"><i class="dot" style:background={categoryColor(c.key)}></i>{t('cat.' + c.key)} {c.pct.toFixed(0)}%</span>{/each}</span>{/if}
       </div>
       <div class="tabs" style="margin:0;border:0" role="tablist">
         {#each [['folders', 'browse.view.folders'], ['map', 'browse.view.map'], ['files', 'browse.view.files']] as [v, label]}
@@ -142,10 +140,10 @@
     </div>
   {/if}
 
-  {#if error}<div class="alert bad" role="alert">{error}</div>{/if}
+  {#if error}<div class="notice error" role="alert">{error}</div>{/if}
 
   {#if view === 'folders'}
-    <div class="card table-wrap" style="padding:0" aria-busy={loading}>
+    <div class="card table-wrap flush" aria-busy={loading}>
       <table data-testid="folder-table">
         <thead><tr>
           <th><button class="sort" onclick={() => sortBy('name')}>{t('col.name')}{arrow('name')}</button></th>
@@ -163,9 +161,9 @@
             <tr data-testid="folder-row">
               <td><a href={dirHref(c.id)} use:link class="truncate" style="display:inline-block;max-width:34ch" title={c.name}>📁 {c.name}</a>
                 {#if c.dirs}<span class="muted small"> · {t('browse.subfolders', { n: c.dirs })}</span>{/if}</td>
-              <td class="right nowrap"><span data-testid="folder-size">{formatBytes(c.size, prefs.units, i18n.lang)}</span><div class="bar"><i style:width="{Math.min(100, c.pct)}%"></i></div></td>
+              <td class="right actions"><span data-testid="folder-size">{formatBytes(c.size, prefs.units, i18n.lang)}</span><div class="bar"><i style:width="{Math.min(100, c.pct)}%"></i></div></td>
               <td class="right hide-sm nowrap">{formatPct(c.pct, i18n.lang)}</td>
-              <td class="right nowrap">{formatNumber(c.files, i18n.lang)}</td>
+              <td class="right actions">{formatNumber(c.files, i18n.lang)}</td>
               <td class="right hide-sm nowrap">{formatDate(c.newest_mtime, i18n.lang)}</td>
               <td class="right hide-sm nowrap">{formatDate(lastUsed(c), i18n.lang)}</td>
             </tr>
@@ -177,9 +175,9 @@
     </div>
     {#if detail && detail.direct.files > 0 && !filtered}
       <p class="muted small">{t('browse.direct', { n: formatNumber(detail.direct.files, i18n.lang), size: formatBytes(detail.direct.size, prefs.units, i18n.lang) })}
-        <button class="ghost small" onclick={() => setQuery({ view: 'files' })}>{t('browse.view.files')}</button></p>
+        <button class="btn ghost small" onclick={() => setQuery({ view: 'files' })}>{t('browse.view.files')}</button></p>
     {/if}
-    {#if cursor}<div class="row" style="margin-top:10px"><button onclick={more}>{t('common.more')}</button></div>{/if}
+    {#if cursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={more}>{t('common.more')}</button></div>{/if}
 
   {:else if view === 'map'}
     <div class="card">
@@ -192,12 +190,12 @@
   {:else}
     <div class="row" style="margin-bottom:8px">
       <label class="checkrow"><input type="checkbox" checked={recursive} onchange={(e) => setQuery({ rec: e.currentTarget.checked ? '1' : undefined })} data-testid="recursive" /> {t('browse.recursive')}</label>
-      <select value={(route.query.get('fsort') ?? 'size') + ':' + (route.query.get('forder') ?? 'desc')} style="width:auto"
+      <select value={(route.query.get('fsort') ?? 'size') + ':' + (route.query.get('forder') ?? 'desc')} class="auto"
         onchange={(e) => { const [s, o] = e.currentTarget.value.split(':'); setQuery({ fsort: s, forder: o }); }} aria-label={t('browse.sort')}>
         {#each [['size', 'desc'], ['name', 'asc'], ['mtime', 'desc'], ['used', 'asc'], ['ext', 'asc']] as [s, o]}<option value="{s}:{o}">{t('sort.' + s)}</option>{/each}
       </select>
     </div>
-    <div class="card table-wrap" style="padding:0" aria-busy={loading}>
+    <div class="card table-wrap flush" aria-busy={loading}>
       <table data-testid="file-table">
         <thead><tr><th>{t('col.name')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.accessed')}</th></tr></thead>
         <tbody>
@@ -205,7 +203,7 @@
             <tr data-testid="file-row"><td><span class="truncate" style="display:inline-block;max-width:60ch" title={f.path}>{f.name}</span>
               {#if recursive}<div class="muted small truncate" style="max-width:60ch">{f.path.slice(0, f.path.length - f.name.length - 1) || '/'}</div>{/if}
               {#if !f.counted}<span class="badge" title={t('files.hardlink.hint')}>{t('files.hardlink')}</span>{/if}</td>
-              <td class="right nowrap">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
+              <td class="right actions">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
               <td class="right hide-sm nowrap">{formatDate(f.mtime, i18n.lang)}</td><td class="right hide-sm nowrap">{formatDate(f.atime, i18n.lang)}</td></tr>
           {:else}
             <tr><td colspan="4" class="muted">{loading ? t('common.loading') : t('browse.nomatch')}</td></tr>
@@ -213,6 +211,6 @@
         </tbody>
       </table>
     </div>
-    {#if filesCursor}<div class="row" style="margin-top:10px"><button onclick={more}>{t('common.more')}</button></div>{/if}
+    {#if filesCursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={more}>{t('common.more')}</button></div>{/if}
   {/if}
 {/if}

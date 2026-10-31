@@ -320,6 +320,34 @@ func TestPreferences(t *testing.T) {
 	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"colour": "red"}), 400, "")
 }
 
+// The accent colour is a free #rrggbb that ends up in a CSS custom property, so only that shape is stored, and in lower case.
+func TestAccentPreference(t *testing.T) {
+	e := newAuthEnv(t, nil)
+	admin, _, _ := e.setupAdmin()
+	prefs := func() map[string]any {
+		return admin.do("GET", "/api/v1/auth/me", nil).Body["user"].(map[string]any)["prefs"].(map[string]any)
+	}
+	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"accent": "#B0213F"}), 200, "")
+	if prefs()["accent"] != "#b0213f" {
+		t.Errorf("accent = %v, want it stored in lower case", prefs()["accent"])
+	}
+	for _, bad := range []string{"red", "#fff", "#12345", "#1234567", "#gggggg", "b0213f", "#b0213f;color:red", "url(//evil)", "#b0213f ", " #b0213f", "#b0213f\n"} {
+		expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"accent": bad}), 400, "")
+	}
+	if prefs()["accent"] != "#b0213f" {
+		t.Errorf("a refused value changed the stored accent: %v", prefs()["accent"])
+	}
+	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"accent": ""}), 200, "") // back to the default
+	if prefs()["accent"] != "" {
+		t.Errorf("accent = %v after reset, want empty", prefs()["accent"])
+	}
+	// One bad value refuses the whole request: nothing of it is stored.
+	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"theme": "dark", "accent": "nope"}), 400, "")
+	if _, stored := prefs()["theme"]; stored {
+		t.Errorf("a refused request stored part of itself: %v", prefs())
+	}
+}
+
 func TestLiveStatusStream(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	e.startWorker()

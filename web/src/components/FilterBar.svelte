@@ -31,7 +31,7 @@
 <form class="card stack" onsubmit={submit} aria-label={t('filter.title')}>
   <div class="chips" role="group" aria-label={t('filter.category')}>
     {#each categoryOrder as key}
-      <button type="button" class="chip" class:on={selected.has(key)} aria-pressed={selected.has(key)} onclick={() => toggle(key)}>
+      <button type="button" class="seg" aria-pressed={selected.has(key)} onclick={() => toggle(key)}>
         <i style:background={categoryColor(key)}></i>{t('cat.' + key)}
       </button>
     {/each}
@@ -69,9 +69,9 @@
     {/if}
   </div>
   <div class="row">
-    <button class="primary" type="submit">{t('filter.apply')}</button>
+    <button class="btn primary" type="submit">{t('filter.apply')}</button>
     {#if activeFilterCount(filters) > 0}
-      <button type="button" onclick={() => onchange(emptyFilters())}>{t('filter.clear')}</button>
+      <button class="btn" type="button" onclick={() => onchange(emptyFilters())}>{t('filter.clear')}</button>
       <span class="muted small">{t('filter.active', { n: activeFilterCount(filters) })}</span>
     {/if}
   </div>
