@@ -1,0 +1,130 @@
+name: ci
+
+on:
+  pull_request:
+    branches:
+      - beta
+      - main
+  # beta is where changes land, so its state has to be checked too: a promotion starts from "CI on beta is green".
+  push:
+    branches:
+      - beta
+
+permissions:
+  contents: read
+
+jobs:
+  go-tests:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      NASA_TEST_DSN: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
+      NASA_REQUIRE_DB: "1"      # a database test that cannot run fails instead of skipping
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # A skipped test is a missing control, so fail if any test was skipped.
+      - name: Run the tests with the race detector
+        run: |
+          set -o pipefail
+          go test -race -count=1 -v ./... | tee /tmp/gotest.out
+          ! grep -q -- "--- SKIP" /tmp/gotest.out
+
+  web-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npx vitest run
+      - run: npm run build
+
+  browser-e2e:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Build the interface and the binary
+        run: |
+          (cd web && npm ci --no-audit --no-fund && npm run build)
+          go build -o nasa ./cmd/nasa
+      - name: Install Playwright and Chromium
+        run: |
+          npm install -g playwright@1.63.0
+          playwright install --with-deps chromium
+      - name: Run the whole application in a real browser
+        env:
+          SHOTS: ${{ runner.temp }}/e2e-shots
+        run: sh web/e2e/run.sh ./nasa postgres://postgres:test@127.0.0.1:5432
+      - name: Keep the screenshots of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: ${{ runner.temp }}/e2e-shots
+          if-no-files-found: ignore
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build --build-arg VERSION=ci -t nas-storage-analyzer:ci .
+      - name: The binary in the image starts and reports its version
+        run: docker run --rm nas-storage-analyzer:ci version
+      - name: Compose files are valid for the example env
+        run: |
+          cp .env.example .env
+          docker compose config -q
+          docker compose -f docker-compose.yml -f docker-compose.mounts.yml config -q
+      - name: The Docker-secrets variant is valid
+        run: |
+          rm -f .env
+          sh scripts/init-env.sh --secrets
+          docker compose -f docker-compose.yml -f docker-compose.secrets.yml config -q
+      # Last, on purpose: setting up buildx makes `docker build` stop loading images into the local daemon.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: The image also builds for arm64 (Raspberry Pi, Apple silicon); publishing builds both
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: false
+          cache-from: type=gha,scope=ci-arm64
+          cache-to: type=gha,scope=ci-arm64,mode=max

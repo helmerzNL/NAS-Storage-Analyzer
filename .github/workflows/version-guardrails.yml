@@ -1,0 +1,22 @@
+name: version-guardrails
+
+# VERSION is raised after the merge (`bump-version` workflow, scripts/bump_version.py), never in a pull request:
+# two pull requests that each raise it collide as soon as the other merges. A pull request that touches
+# it fails here with the fix. See docs/adr/0001-pipeline-bump-versioning.md.
+on:
+  pull_request:
+    branches:
+      - beta
+      - main
+
+jobs:
+  enforce-version-bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Test the version scripts
+        run: python -m unittest discover -s scripts -p "test_bump_version.py" -v
+      - name: A pull request must not change VERSION
+        run: python scripts/check_version_bump.py --base-ref "origin/${{ github.base_ref }}"

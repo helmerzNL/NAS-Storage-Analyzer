@@ -1,0 +1,29 @@
+# Rules: project-baseline.md §20 (new apps start with the beta -> main model; docs/adr/0002-beta-main-promotion.md).
+#
+# Pull requests go to beta. main only receives a pull request from beta (the promotion to a stable
+# release). The owner makes the `only-from-beta` check required in the branch protection of main;
+# that setting cannot be made from the code.
+name: pr-target
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, reopened, synchronize, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  only-from-beta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require beta of this repository as the source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [ "$HEAD_REF" != "beta" ] || [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            echo "::error::Pull requests into main only come from beta (this one comes from '$HEAD_REPO:$HEAD_REF'). Target beta instead."
+            exit 1
+          fi

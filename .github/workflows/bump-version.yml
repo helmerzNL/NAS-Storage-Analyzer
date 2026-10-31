@@ -1,0 +1,75 @@
+# Rules: project-baseline.md §1 (pipeline-bump model), docs/adr/0001-pipeline-bump-versioning.md.
+#
+# Pull requests never change VERSION; this workflow raises it after a promotion reaches main, so two pull
+# requests cannot conflict on it. The part comes from a label on the promotion pull request:
+# `version:major`, `version:minor`, otherwise patch. A push of documentation only keeps the number.
+#
+# The commit is pushed with GITHUB_TOKEN and starts no workflow: when the image publishing arrives
+# (baseline §20), these steps move to the top of its publish job so the image is built from the bumped commit.
+# The repository must let github-actions push to main (a ruleset bypass if main is protected); without
+# that the bump fails here, loudly.
+name: bump-version
+
+on:
+  push:
+    branches:
+      - main
+
+# One run at a time: each one raises the number that the previous one left.
+concurrency:
+  group: bump-version
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main                    # the tip, not the pushed commit: an earlier run may have raised the version since
+          fetch-depth: 0
+      - name: Raise the version for this push
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          part=patch
+          labels="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[].labels[].name' 2>/dev/null || true)"
+          if grep -qx 'version:major' <<<"$labels"; then part=major
+          elif grep -qx 'version:minor' <<<"$labels"; then part=minor; fi
+          python scripts/bump_version.py --before "${{ github.event.before }}" --after "$GITHUB_SHA" --part "$part"
+          if ! git diff --quiet VERSION; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Release $(tr -d '[:space:]' < VERSION)" VERSION
+            pushed=false
+            for attempt in 1 2 3; do
+              if git push origin HEAD:main; then pushed=true; break; fi
+              git pull --rebase origin main            # something landed meanwhile; VERSION is only ever changed here
+            done
+            if [ "$pushed" != true ]; then
+              echo "::error::Could not push the version bump to main. Let github-actions push to main (ruleset bypass), or bump VERSION by hand."
+              exit 1
+            fi
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      # beta is where pull requests land and main only receives promotions from it, so beta has to carry the
+      # VERSION bump main just made. Best effort: a failure here never undoes the bump.
+      - name: Bring beta level with main
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin beta
+          git checkout -B beta origin/beta
+          if git merge --no-edit "${{ steps.bump.outputs.sha }}" && git push origin beta; then
+            echo "beta is level with main."
+          else
+            git merge --abort 2>/dev/null || true
+            echo "::warning::Could not bring beta level with main. Merge main into beta by hand."
+            exit 1
+          fi

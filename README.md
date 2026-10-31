@@ -164,6 +164,11 @@ Alle beperkingen met toelichting: [`docs/deploy.md`](docs/deploy.md#9-bekende-be
 
 ## Ontwikkelen en testen
 
+**Werkafspraken** (voor mensen en AI-agents): [`AGENTS.md`](AGENTS.md). Pull requests gaan naar `beta`; `main` krijgt alleen een
+promotie-PR vanuit `beta`. Pull requests wijzigen `VERSION` niet, dat doet de pipeline. Activeer na het clonen de hooks met
+`python scripts/setup_hooks.py`. Wat een operator nodig heeft (starten, health checks, limieten voor een proxy, back-up):
+[`docs/operations.md`](docs/operations.md).
+
 ```bash
 cd web && npm ci && npm run build && cd ..     # de interface wordt in de Go-binary ingebakken
 go build -o nasa ./cmd/nasa                    # subcommando's: serve, worker, scan, migrate, recategorize, genkey, healthcheck, version

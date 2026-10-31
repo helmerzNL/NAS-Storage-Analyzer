@@ -7,8 +7,8 @@ Doel is een self-hosted Docker Compose-stack die NFS/SMB-shares read-only scant 
 bestandstype inzichtelijk maakt, met UI-weergaven < 500 ms bij 10 mln bestanden.
 
 Dit voorstel dekt stap 1 van de werkwijze (stack, schema, scanner, auth). Er wordt pas gebouwd na akkoord.
-De `CLAUDE.md`/`AGENTS.md`-conventies in `/home/user/App-Guidance` horen bij een ander repo (Flux76); ik pas ze
-hier niet toe tenzij je dat wilt.
+De conventies van `Flux76HQ/App-Guidance` golden bij het eerste voorstel nog niet voor dit repo. Dat is veranderd: vanaf
+de procesbasis (zie [`AGENTS.md`](../AGENTS.md)) volgt dit repo die guidelines.
 
 Beslissingen al genomen: UI/README in NL + EN via i18n (NL standaard); passkey-only login toegestaan;
 PostgreSQL als enige database, doel < 500 ms met ≤ 2 s geaccepteerd voor vrije filtercombinaties op share-niveau
