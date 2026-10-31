@@ -5,7 +5,7 @@ Dit document hoort bij de [README](../README.md). Nederlands eerst; de Engelse s
 ## Inhoud
 
 1. [Installatie in vier stappen](#1-installatie-in-vier-stappen)
-2. [Shares beschikbaar maken: route (b) host-mount, route (a) in de container](#2-shares-beschikbaar-maken)
+2. [Shares beschikbaar maken: route (b) host-mount, route (c) de stack draait op de NAS zelf, route (a) in de container](#2-shares-beschikbaar-maken)
 3. [Reverse proxy en https](#3-reverse-proxy-en-https)
 4. [Passkeys: RP-ID en origin](#4-passkeys-rp-id-en-origin)
 5. [Back-up en herstel](#5-back-up-en-herstel)
@@ -78,6 +78,10 @@ NASA_SHARES_DIR=/srv/nas
 Alles onder `/srv/nas` verschijnt als `/mnt/shares/...` in de containers (dus `/srv/nas/media` wordt
 `/mnt/shares/media`). Voeg de share toe als type *Gemount pad* met dat container-pad.
 
+Liever hetzelfde pad in de interface als op de host? Zet dan ook `NASA_SHARES_MOUNT=/srv/nas` in `.env`; de map staat
+in de container dan op `/srv/nas` en je voert `/srv/nas/media` in. Zonder `NASA_SHARES_MOUNT` is het `/mnt/shares`.
+Kies een absoluut pad dat de container zelf niet gebruikt: niet `/`, `/usr`, `/etc`, `/tmp` of `/run`.
+
 * **`ro`**: de scan kan de NAS dan niet eens per ongeluk wijzigen.
 * **`noatime`** (op de client) is niet nodig om te scannen, maar voorkomt dat de client zelf toegangstijden
   schrijft. Het beïnvloedt niet wat de server als atime bijhoudt, zie [bekende beperkingen](#9-bekende-beperkingen).
@@ -98,8 +102,10 @@ Alles onder `/srv/nas` verschijnt als `/mnt/shares/...` in de containers (dus `/
   en die bewaart een manager waar hij wil; je scant dan een lege map in plaats van je NAS. Zet de variabelen in het
   `.env`-bestand van de stack (of in de omgevingsvariabelen-editor van je manager).
 * **Unraid:** de array-shares staan onder `/mnt/user`. Met `NASA_SHARES_DIR=/mnt/user` verschijnt elke share als
-  `/mnt/shares/<share>`, dus je voegt bijvoorbeeld `/mnt/shares/media` toe als *Gemount pad*. Wil je maar een deel
-  scannen, wijs dan naar die map (`/mnt/user/media`) of sluit mappen uit in de share-instellingen.
+  `/mnt/shares/<share>`, dus je voegt bijvoorbeeld `/mnt/shares/media` toe als *Gemount pad*. Zet je ook
+  `NASA_SHARES_MOUNT=/mnt/user`, dan typ je `/mnt/user/media`, het pad dat je op Unraid zelf kent; zie
+  [route (c)](#route-c-de-stack-draait-op-de-nas-zelf). Wil je maar een deel scannen, wijs dan naar die map
+  (`/mnt/user/media`) of sluit mappen uit in de share-instellingen.
 * **Leesrechten:** de containers draaien als uid 10001. Op Unraid zijn shares standaard voor iedereen leesbaar. Zijn
   ze dat bij jou niet, geef `others` dan leesrechten of zet in een override `user: "99:100"` (nobody:users) op `app`
   en `worker`.
@@ -128,6 +134,55 @@ een tmpfs en verwijdert het na het mounten. Opties komen uit een allow-list en d
   `CAP_SYS_ADMIN`, `mount -t tmpfs` lukt, `mount.nfs` en `mount.cifs` zijn aanwezig) en met een nagebootste
   mount-uitvoerder in de unit tests. Een echte NFS- of SMB-server was daar niet beschikbaar (de kernel had geen
   NFS-client); test een nieuwe share dus eerst met *Scan nu* en lees de foutmelding op het dashboard.
+
+### Route (c): de stack draait op de NAS zelf
+
+Draait Docker op de NAS die de shares bevat (Unraid, bijvoorbeeld), dan is er niets te mounten: de shares zijn gewone
+mappen op de host. Dit is route (b) zonder NFS- of SMB-regel: je geeft de map read-only door. Gebruik hier **niet**
+route (a): je zou de NAS via het netwerk met zichzelf verbinden en de worker onnodig veel rechten geven.
+
+Zet `NASA_SHARES_MOUNT` op hetzelfde pad als `NASA_SHARES_DIR`. De map staat dan in de container op dezelfde plek als
+op de host, en in de interface typ je het pad dat je van de NAS kent. Voorbeeld voor Unraid:
+
+```
+# .env
+NASA_SHARES_DIR=/mnt/user
+NASA_SHARES_MOUNT=/mnt/user
+```
+
+Voeg elke share apart toe (**Shares → Share toevoegen**, type *Gemount pad*): `media` wordt `/mnt/user/media`,
+`backups` wordt `/mnt/user/backups`. Alleen wat je toevoegt wordt gescand, en alles is read-only. Een share die je later
+op Unraid aanmaakt staat al onder `/mnt/user`; je voegt hem alleen in de interface toe.
+
+De standaard `rprivate` past hier (zie *Late mounts* hierboven): de array draait al voordat Docker start. Na een stop en
+start van de array herstart je de stack (`docker compose restart`).
+
+**Unraid: `/mnt/user` of de schijven zelf.** `/mnt/user` is een FUSE-laag (shfs): het makkelijkst, maar bij miljoenen
+bestanden merkbaar trager dan rechtstreeks op een schijf. Wil je de laag omzeilen, geef dan `/mnt` door:
+
+```
+NASA_SHARES_DIR=/mnt
+NASA_SHARES_MOUNT=/mnt
+```
+
+Je kunt dan `/mnt/disk1/media`, `/mnt/cache/appdata` en `/mnt/user/documenten` door elkaar gebruiken.
+
+* Een share die over meerdere schijven verdeeld is, voeg je per schijf toe (`/mnt/disk1/media`, `/mnt/disk2/media`).
+  Er is dan geen gecombineerd totaal voor die share.
+* Voeg dezelfde bestanden niet via twee paden toe (`/mnt/user/media` én `/mnt/disk1/media`); ze tellen dan dubbel.
+* `/mnt` laat ook `/mnt/remotes` en `/mnt/disks` (unassigned devices) zien aan de containers, read-only. Alleen wat je
+  toevoegt wordt gescand.
+* Heeft een share "Exclusive access" aan (Unraid 6.12 of nieuwer), dan is `/mnt/user/<share>` mogelijk een verwijzing
+  (symlink) naar de pool. De scanner volgt geen symlinks. Scan zo'n share via `/mnt/<pool>/<share>`.
+* Leesrechten: zie *Leesrechten* in de sectie over Unraid hierboven; op Unraid kan *Tools → New Permissions* ze
+  herstellen.
+
+Op andere NAS-systemen geef je het pad van het volume of de pool door (Synology bijvoorbeeld `/volume1`); controleer het
+via SSH met `ls`. Controleer na het starten of de share zichtbaar is met `docker compose exec worker ls /mnt/user`
+(of je eigen pad) en doe een eerste *Scan nu*.
+
+> Route (c) is getest tot en met de configuratie (`docker compose config`) en de pad-validatie in de unit tests, maar
+> niet op een echte Unraid- of andere NAS-machine, en niet met een draaiende container.
 
 ### Wat een share kan instellen
 
@@ -341,6 +396,7 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASA_SETUP_TOKEN` in `.env`. |
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASA_RP_ID` in. |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
+| Bij het toevoegen van een share: "must be inside …" | Het pad moet onder `NASA_SHARES_MOUNT` liggen (standaard `/mnt/shares`). Zet `NASA_SHARES_MOUNT` op het pad dat je wilt typen, of gebruik het pad dat de melding noemt; herstart daarna `docker compose up -d`. |
 | Scan mislukt met "permission denied" op het share-pad | De container draait als uid 10001; geef die leesrechten (`o+rx`), of mount met `uid=`/`gid=` voor SMB. Mappen die niet leesbaar zijn tellen als fout, de scan loopt door. |
 | `/metrics` geeft 401 of 403 | Zet `NASA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
@@ -354,6 +410,13 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
   uid 10001 with no capabilities and a read-only root file system.
 * **Shares, recommended (route b):** mount NFS/SMB on the Docker host read-only, set `NASA_SHARES_DIR` to the
   parent folder; it appears read-only as `/mnt/shares` in the containers. Add a share of type *Mounted path*.
+  `NASA_SHARES_MOUNT` changes where it appears in the containers; set it equal to `NASA_SHARES_DIR` and the paths you
+  type in the interface are the host paths.
+* **Shares, route c (the stack runs on the NAS itself, e.g. Unraid):** nothing to mount. Set `NASA_SHARES_DIR` and
+  `NASA_SHARES_MOUNT` to the folder that holds the shares (`/mnt/user`) and add each
+  share by its path (`/mnt/user/media`). `/mnt/user` is a FUSE layer and slower on millions of files; passing `/mnt`
+  allows `/mnt/disk1/...` and `/mnt/cache/...` directly (a share spread over several disks is then one scan per disk).
+  Verified up to the configuration and the path validation, not on a real NAS.
 * **Shares, route a:** `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d` lets the worker
   mount NFS/SMB itself, at the cost of root and `CAP_SYS_ADMIN` in the worker container only. This route is
   verified up to the privileges; it could not be tested against a real NFS/SMB server in the development sandbox.
