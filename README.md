@@ -81,6 +81,10 @@ NASA_SHARES_DIR=/srv/nas
 Voeg de share in de interface toe als type *Gemount pad* met het pad `/mnt/shares/media`. De containers kunnen dan
 niets op de NAS wijzigen en hebben geen speciale rechten nodig.
 
+Gebruik voor `NASA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
+`./shares` is een lege map in de stackmap. Zie
+[Unraid, Portainer, Dockge](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers).
+
 Draait de stack **op de NAS zelf** (route c)? Dan is er niets te mounten: de shares zijn gewone mappen. Geef die map
 door en zet `NASA_SHARES_MOUNT` op hetzelfde pad. In de interface typ je dan het pad dat je van de NAS kent. Voorbeeld
 voor Unraid:
@@ -89,7 +93,6 @@ voor Unraid:
 # .env
 NASA_SHARES_DIR=/mnt/user
 NASA_SHARES_MOUNT=/mnt/user
-NASA_SHARES_PROPAGATION=rprivate
 ```
 
 Voeg elke share apart toe, bijvoorbeeld `/mnt/user/media`. Alleen wat je toevoegt wordt gescand. Losse Unraid-schijven

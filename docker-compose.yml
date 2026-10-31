@@ -32,16 +32,18 @@ x-nasa: &nasa
     driver: json-file
     options: {max-size: 10m, max-file: "5"}
   volumes:
-    # The scan target, read-only. rslave makes mounts that the host adds or renews later visible here;
-    # set NASA_SHARES_PROPAGATION=rprivate if Docker refuses it ("not a shared or slave mount").
+    # The scan target, read-only. Use an absolute path on the host in NASA_SHARES_DIR (see docs/deploy.md).
     # It appears at NASA_SHARES_MOUNT in the container (default /mnt/shares). Setting that to the same
     # value as NASA_SHARES_DIR makes the paths in the interface identical to the paths on the host.
+    # rprivate works on every host and shows the mounts that exist when the containers start. rslave
+    # also shows mounts the host makes later (autofs), but Docker refuses it unless the host mount is
+    # shared or slave ("not a shared or slave mount"), which is not the case on Unraid and many NAS systems.
     - type: bind
       source: ${NASA_SHARES_DIR:-./shares}
       target: ${NASA_SHARES_MOUNT:-/mnt/shares}
       read_only: true
       bind:
-        propagation: ${NASA_SHARES_PROPAGATION:-rslave}
+        propagation: ${NASA_SHARES_PROPAGATION:-rprivate}
   environment: &nasa-env
     NASA_DB_HOST: db
     NASA_DB_NAME: ${NASA_DB_NAME:-nasa}
