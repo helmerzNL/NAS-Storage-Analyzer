@@ -564,8 +564,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) error {
 		return bad("%s", err.Error())
 	}
 	s.audit(r, "user.create", u.Username, map[string]any{"role": u.Role})
-	w.WriteHeader(http.StatusCreated)
-	return writeJSON(w, u)
+	return writeJSONStatus(w, http.StatusCreated, u)
 }
 
 func userID(r *http.Request) (int64, error) { return parseID(r.PathValue("id"), "user id") }

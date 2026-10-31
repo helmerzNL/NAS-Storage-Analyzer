@@ -44,6 +44,9 @@ type Server struct {
 	mux  *http.ServeMux
 	auth *auth.Service
 	opts Options
+	// patterns lists the registered routes ("GET /api/v1/shares"), which the
+	// contract test compares with the OpenAPI document.
+	patterns []string
 
 	catMu sync.Mutex
 	cats  map[int16]string
@@ -78,17 +81,25 @@ func (s *Server) now() time.Time {
 	return time.Now()
 }
 
+// Routes returns the registered "METHOD /path" patterns, without the web UI.
+func (s *Server) Routes() []string { return append([]string(nil), s.patterns...) }
+
+func (s *Server) handleFunc(pattern string, f http.HandlerFunc) {
+	s.patterns = append(s.patterns, pattern)
+	s.mux.HandleFunc(pattern, f)
+}
+
 func (s *Server) routes() {
 	h := func(pattern string, lv level, fn func(http.ResponseWriter, *http.Request) error) {
-		s.mux.HandleFunc(pattern, s.guard(lv, fn))
+		s.handleFunc(pattern, s.guard(lv, fn))
 	}
-	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+	s.handleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Write([]byte("ok\n"))
 	})
-	s.mux.HandleFunc("GET /readyz", s.ready)
+	s.handleFunc("GET /readyz", s.ready)
 	metrics := promhttp.HandlerFor(s.m.reg, promhttp.HandlerOpts{})
-	s.mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+	s.handleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		if s.auth != nil && !s.metricsAllowed(r) {
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			s.problemCode(w, r, http.StatusUnauthorized, "unauthorized", "Send the metrics token as a Bearer token.", "unauthenticated")
@@ -96,7 +107,7 @@ func (s *Server) routes() {
 		}
 		metrics.ServeHTTP(w, r)
 	})
-	s.mux.HandleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+	s.handleFunc("GET /openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/yaml")
 		w.Write(apispec.Spec)
 	})
@@ -121,6 +132,8 @@ func (s *Server) routes() {
 	h("GET "+v+"/extension-map", lvViewer, s.listExtensionMap)
 	if s.auth != nil {
 		s.authRoutes(h, v)
+		s.adminRoutes(h, v)
+		s.handleFunc("GET "+v+"/events", s.guardStream(lvViewer, s.events))
 	}
 	if s.opts.Static != nil {
 		s.mux.HandleFunc(v+"/", func(w http.ResponseWriter, r *http.Request) {
@@ -250,14 +263,14 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, query.ErrNotFound):
 		s.problem(w, r, http.StatusNotFound, "not found", "")
 	case errors.Is(err, query.ErrNoData):
-		s.problem(w, r, http.StatusConflict, "no data yet", err.Error())
+		s.problemCode(w, r, http.StatusConflict, "no data yet", err.Error(), "no_data")
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &pgErr) && pgErr.Code == "57014":
 		w.Header().Set("Retry-After", "5")
 		s.problem(w, r, http.StatusServiceUnavailable, "query took too long",
 			"Narrow the filters (a smaller folder, a category, a size range) and try again.")
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
-	case s.authFail(w, r, err):
+	case s.authFail(w, r, err), s.adminFail(w, r, err):
 	default:
 		s.log.Error("request failed", "request_id", requestID(r), "path", r.URL.Path, "error", err)
 		s.problem(w, r, http.StatusInternalServerError, "internal error", "")
@@ -271,7 +284,9 @@ type problemBody struct {
 	Detail string `json:"detail,omitempty"`
 	// Code is a stable machine-readable reason (unauthenticated, mfa_required,
 	// enroll_required, forbidden, csrf, locked, ...) the UI switches on.
-	Code      string `json:"code,omitempty"`
+	Code string `json:"code,omitempty"`
+	// Field names the form field a validation error is about.
+	Field     string `json:"field,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 }
 
@@ -281,8 +296,15 @@ func (s *Server) problem(w http.ResponseWriter, r *http.Request, status int, tit
 	json.NewEncoder(w).Encode(problemBody{Type: "about:blank", Title: title, Status: status, Detail: detail, RequestID: requestID(r)})
 }
 
-func writeJSON(w http.ResponseWriter, v any) error {
+func writeJSON(w http.ResponseWriter, v any) error { return writeJSONStatus(w, http.StatusOK, v) }
+
+// writeJSONStatus sets the content type before the status line: headers set
+// after WriteHeader are silently dropped.
+func writeJSONStatus(w http.ResponseWriter, status int, v any) error {
 	w.Header().Set("Content-Type", "application/json")
+	if status != http.StatusOK {
+		w.WriteHeader(status)
+	}
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	return enc.Encode(v)

@@ -85,13 +85,16 @@ type User struct {
 	Disabled      bool       `json:"disabled"`
 	CreatedAt     time.Time  `json:"created_at"`
 	LastLoginAt   *time.Time `json:"last_login_at"`
+	// Prefs are the user's interface settings: units (binary|decimal),
+	// language (nl|en), theme (system|light|dark).
+	Prefs map[string]string `json:"prefs"`
 
 	passwordHash *string
 }
 
 const userSelect = `
 	SELECT u.id, u.username, u.display_name, u.role, u.auth_source, u.password_hash, u.totp_enabled, u.disabled,
-	       u.created_at, u.last_login_at,
+	       u.created_at, u.last_login_at, u.prefs,
 	       (SELECT count(*) FROM webauthn_credentials w WHERE w.user_id = u.id),
 	       (SELECT count(*) FROM recovery_codes r WHERE r.user_id = u.id AND r.used_at IS NULL)
 	FROM users u`
@@ -99,8 +102,11 @@ const userSelect = `
 func scanUser(row pgx.Row) (*User, error) {
 	var u User
 	if err := row.Scan(&u.ID, &u.Username, &u.DisplayName, &u.Role, &u.AuthSource, &u.passwordHash, &u.TOTPEnabled,
-		&u.Disabled, &u.CreatedAt, &u.LastLoginAt, &u.Passkeys, &u.RecoveryCodes); err != nil {
+		&u.Disabled, &u.CreatedAt, &u.LastLoginAt, &u.Prefs, &u.Passkeys, &u.RecoveryCodes); err != nil {
 		return nil, err
+	}
+	if u.Prefs == nil {
+		u.Prefs = map[string]string{}
 	}
 	return &u, nil
 }
@@ -515,3 +521,21 @@ func (s *Service) CheckIPLocked(ctx context.Context, ip string) error {
 // RecordIPFailure counts a failed attempt that has no user (a wrong setup
 // token, a failed passwordless passkey login).
 func (s *Service) RecordIPFailure(ctx context.Context, ip string) { s.recordFailure(ctx, "ip", ip) }
+
+var prefValues = map[string]map[string]bool{
+	"units":    {"binary": true, "decimal": true},
+	"language": {"nl": true, "en": true},
+	"theme":    {"system": true, "light": true, "dark": true},
+}
+
+// SetPrefs stores interface settings; unknown keys and values are rejected.
+func (s *Service) SetPrefs(ctx context.Context, userID int64, prefs map[string]string) (map[string]string, error) {
+	for k, v := range prefs {
+		if !prefValues[k][v] {
+			return nil, fmt.Errorf("invalid preference %s=%q", k, v)
+		}
+	}
+	var out map[string]string
+	err := s.pool.QueryRow(ctx, `UPDATE users SET prefs = prefs || $2::jsonb WHERE id = $1 RETURNING prefs`, userID, prefs).Scan(&out)
+	return out, err
+}

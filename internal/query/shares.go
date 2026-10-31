@@ -46,7 +46,19 @@ func scanScan(row pgx.Row) (*ScanInfo, error) {
 	return &s, nil
 }
 
-// ShareInfo describes a share and the state of its scans.
+// ActiveJob is the queued or running job of a share, with live progress.
+type ActiveJob struct {
+	ID          int64           `json:"id"`
+	Kind        string          `json:"kind"`
+	State       string          `json:"state"` // queued | running
+	Trigger     string          `json:"trigger"`
+	RequestedBy string          `json:"requested_by"`
+	RequestedAt time.Time       `json:"requested_at"`
+	ScanID      *int64          `json:"scan_id"`
+	Progress    json.RawMessage `json:"progress"`
+}
+
+// ShareInfo describes a share, its settings and the state of its scans.
 type ShareInfo struct {
 	ID            int64     `json:"id"`
 	Name          string    `json:"name"`
@@ -57,17 +69,49 @@ type ShareInfo struct {
 	MaxOpsPerSec  int       `json:"max_ops_per_sec"`
 	CreatedAt     time.Time `json:"created_at"`
 	RootDirID     *int64    `json:"root_dir_id"`
-	// LastScan is the scan whose data is currently published; LatestScan is
+
+	// Config holds the kind-specific, non-secret settings (path, server, export,
+	// share, username, domain, version, mount_options).
+	Config         map[string]string `json:"config"`
+	HasPassword    bool              `json:"has_password"`
+	Cron           string            `json:"cron"`
+	NextRunAt      *time.Time        `json:"next_run_at"`
+	LastRunAt      *time.Time        `json:"last_run_at"`
+	FullScanEvery  int               `json:"full_scan_every"`
+	MaxOpsDay      int               `json:"max_ops_day"`
+	DayStartHour   int               `json:"day_start_hour"`
+	DayEndHour     int               `json:"day_end_hour"`
+	RetentionScans int               `json:"retention_scans"`
+	RetentionDays  int               `json:"retention_days"`
+	SnapshotDepth  int               `json:"snapshot_depth"`
+
+	// LastScan is the scan whose data is published; LatestScan is
 	// the most recent attempt (it may be running or have failed).
-	LastScan   *ScanInfo `json:"last_scan"`
-	LatestScan *ScanInfo `json:"latest_scan"`
+	LastScan   *ScanInfo  `json:"last_scan"`
+	LatestScan *ScanInfo  `json:"latest_scan"`
+	ActiveJob  *ActiveJob `json:"active_job"`
 }
 
 const shareSelect = `
 	SELECT s.id, s.name, s.kind, s.last_used_basis, s.excludes, s.workers, s.max_ops_per_sec, s.created_at,
 	       (SELECT d.id FROM dirs d WHERE d.share_id = s.id AND d.parent_id IS NULL),
+	       s.config, s.secret_enc IS NOT NULL, s.cron, s.next_run_at, s.last_run_at, s.full_scan_every, s.max_ops_day,
+	       s.day_start_hour, s.day_end_hour, s.retention_scans, s.retention_days, s.snapshot_depth,
 	       s.last_scan_id, (SELECT max(id) FROM scans WHERE share_id = s.id)
 	FROM shares s`
+
+func scanShare(row pgx.Row) (s ShareInfo, last, latest *int64, err error) {
+	var cfg []byte
+	err = row.Scan(&s.ID, &s.Name, &s.Kind, &s.LastUsedBasis, &s.Excludes, &s.Workers, &s.MaxOpsPerSec, &s.CreatedAt, &s.RootDirID,
+		&cfg, &s.HasPassword, &s.Cron, &s.NextRunAt, &s.LastRunAt, &s.FullScanEvery, &s.MaxOpsDay, &s.DayStartHour, &s.DayEndHour,
+		&s.RetentionScans, &s.RetentionDays, &s.SnapshotDepth, &last, &latest)
+	s.Config = map[string]string{}
+	_ = json.Unmarshal(cfg, &s.Config)
+	if s.Excludes == nil {
+		s.Excludes = []string{}
+	}
+	return
+}
 
 func (q *DB) scanByID(ctx context.Context, id int64) (*ScanInfo, error) {
 	s, err := scanScan(q.pool.QueryRow(ctx, `SELECT `+scanCols+` FROM scans sc WHERE sc.id = $1`, id))
@@ -77,78 +121,82 @@ func (q *DB) scanByID(ctx context.Context, id int64) (*ScanInfo, error) {
 	return s, err
 }
 
-func (q *DB) fillShare(ctx context.Context, row pgx.Row) (*ShareInfo, error) {
-	var s ShareInfo
-	var last, latest *int64
-	if err := row.Scan(&s.ID, &s.Name, &s.Kind, &s.LastUsedBasis, &s.Excludes, &s.Workers, &s.MaxOpsPerSec,
-		&s.CreatedAt, &s.RootDirID, &last, &latest); err != nil {
-		return nil, err
+func (q *DB) activeJob(ctx context.Context, shareID int64) (*ActiveJob, error) {
+	var a ActiveJob
+	err := q.pool.QueryRow(ctx, `
+		SELECT j.id, j.kind, j.state, j.trigger, j.requested_by, j.requested_at, j.scan_id, sc.progress
+		FROM jobs j LEFT JOIN scans sc ON sc.id = j.scan_id AND sc.status = 'running'
+		WHERE j.share_id = $1 AND j.state IN ('queued', 'running') ORDER BY j.id DESC LIMIT 1`, shareID).
+		Scan(&a.ID, &a.Kind, &a.State, &a.Trigger, &a.RequestedBy, &a.RequestedAt, &a.ScanID, &a.Progress)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
 	}
+	return &a, err
+}
+
+// complete fills in the scans and the active job of a share.
+func (q *DB) complete(ctx context.Context, s *ShareInfo, last, latest *int64) error {
 	var err error
 	if last != nil {
 		if s.LastScan, err = q.scanByID(ctx, *last); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if latest != nil {
 		if s.LatestScan, err = q.scanByID(ctx, *latest); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return &s, nil
+	s.ActiveJob, err = q.activeJob(ctx, s.ID)
+	return err
 }
 
 // Shares lists all shares ordered by name.
 func (q *DB) Shares(ctx context.Context) ([]ShareInfo, error) {
-	rows, err := q.pool.Query(ctx, shareSelect+` ORDER BY s.name`)
+	rows, err := q.pool.Query(ctx, shareSelect+` ORDER BY lower(s.name)`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var shares []ShareInfo
 	type raw struct {
 		s            ShareInfo
 		last, latest *int64
 	}
 	var raws []raw
 	for rows.Next() {
-		var r raw
-		if err := rows.Scan(&r.s.ID, &r.s.Name, &r.s.Kind, &r.s.LastUsedBasis, &r.s.Excludes, &r.s.Workers,
-			&r.s.MaxOpsPerSec, &r.s.CreatedAt, &r.s.RootDirID, &r.last, &r.latest); err != nil {
+		s, last, latest, err := scanShare(rows)
+		if err != nil {
+			rows.Close()
 			return nil, err
 		}
-		raws = append(raws, r)
+		raws = append(raws, raw{s, last, latest})
 	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	rows.Close()
+	out := make([]ShareInfo, 0, len(raws))
 	for _, r := range raws {
-		if r.last != nil {
-			if r.s.LastScan, err = q.scanByID(ctx, *r.last); err != nil {
-				return nil, err
-			}
+		if err := q.complete(ctx, &r.s, r.last, r.latest); err != nil {
+			return nil, err
 		}
-		if r.latest != nil {
-			if r.s.LatestScan, err = q.scanByID(ctx, *r.latest); err != nil {
-				return nil, err
-			}
-		}
-		shares = append(shares, r.s)
+		out = append(out, r.s)
 	}
-	if shares == nil {
-		shares = []ShareInfo{}
-	}
-	return shares, nil
+	return out, nil
 }
 
 // ShareByID returns one share.
 func (q *DB) ShareByID(ctx context.Context, id int64) (*ShareInfo, error) {
-	s, err := q.fillShare(ctx, q.pool.QueryRow(ctx, shareSelect+` WHERE s.id = $1`, id))
+	s, last, latest, err := scanShare(q.pool.QueryRow(ctx, shareSelect+` WHERE s.id = $1`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
-	return s, err
+	if err != nil {
+		return nil, err
+	}
+	if err := q.complete(ctx, &s, last, latest); err != nil {
+		return nil, err
+	}
+	return &s, nil
 }
 
 // ScanPage is a page of scans, newest first.

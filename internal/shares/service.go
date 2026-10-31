@@ -211,3 +211,31 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 	}
 	return tx.Commit(ctx)
 }
+
+// SetExtension maps an extension to a category (creating or changing the
+// mapping). It reports whether the extension is new.
+func (s *Service) SetExtension(ctx context.Context, ext string, category int16) (isNew bool, err error) {
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM categories WHERE id = $1)`, category).Scan(&exists); err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, bad("category_id", "unknown category")
+	}
+	err = s.pool.QueryRow(ctx, `
+		INSERT INTO extension_map (ext, category_id) VALUES ($1, $2)
+		ON CONFLICT (ext) DO UPDATE SET category_id = EXCLUDED.category_id RETURNING (xmax = 0)`, ext, category).Scan(&isNew)
+	return isNew, err
+}
+
+// DeleteExtension removes a mapping; the extension falls back to "other".
+func (s *Service) DeleteExtension(ctx context.Context, ext string) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM extension_map WHERE ext = $1`, ext)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}

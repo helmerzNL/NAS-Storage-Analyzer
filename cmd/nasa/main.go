@@ -14,6 +14,7 @@ Usage:
 
 Commands:
   serve     run the web interface and REST API
+  worker    run queued scans (mounts NFS/SMB shares when needed)
   genkey    print a new encryption key for NASA_ENCRYPTION_KEY
   migrate   apply database migrations and seed default categories
   scan      scan a directory tree (read-only) and store the result
@@ -29,6 +30,8 @@ func main() {
 	}
 	var err error
 	switch os.Args[1] {
+	case "worker":
+		err = runWorker(os.Args[2:])
 	case "genkey":
 		err = runGenKey(os.Args[2:])
 	case "serve":

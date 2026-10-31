@@ -16,7 +16,9 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
+	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 )
 
@@ -37,6 +39,20 @@ func env(name, def string) string {
 func envBool(name string) bool {
 	v := strings.ToLower(env(name, ""))
 	return v == "1" || v == "true" || v == "yes"
+}
+
+// location returns the time zone for cron schedules and the day/night limit
+// (NASA_TZ, else TZ, else UTC).
+func location() (*time.Location, error) {
+	name := env("NASA_TZ", os.Getenv("TZ"))
+	if name == "" {
+		return time.UTC, nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, fmt.Errorf("unknown time zone %q (NASA_TZ): %w", name, err)
+	}
+	return loc, nil
 }
 
 func runGenKey(args []string) error {
@@ -93,9 +109,18 @@ func runServe(args []string) error {
 	}
 	defer ro.Close()
 
+	loc, err := location()
+	if err != nil {
+		return err
+	}
+	sharesRoot := env("NASA_SHARES_ROOT", "/mnt/shares")
+	queue := jobs.NewQueue(rw.Pool)
 	svc := auth.NewService(rw.Pool, box, auth.DefaultConfig())
 	opts := api.Options{
 		Auth:           svc,
+		Shares:         shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc),
+		Queue:          queue,
+		SharesRoot:     sharesRoot,
 		TrustedProxies: proxies,
 		SetupToken:     env("NASA_SETUP_TOKEN", ""),
 		MetricsToken:   env("NASA_METRICS_TOKEN", ""),
@@ -124,6 +149,7 @@ func runServe(args []string) error {
 			"setup_token", opts.SetupToken)
 	}
 
+	go jobs.NewScheduler(rw.Pool, queue, loc, log).Run(ctx)
 	go func() {
 		t := time.NewTicker(10 * time.Minute)
 		defer t.Stop()
@@ -132,6 +158,9 @@ func runServe(args []string) error {
 			case <-t.C:
 				if err := svc.Maintain(ctx); err != nil && ctx.Err() == nil {
 					log.Error("maintenance failed", "error", err)
+				}
+				if err := queue.Prune(ctx); err != nil && ctx.Err() == nil {
+					log.Error("pruning jobs failed", "error", err)
 				}
 			case <-ctx.Done():
 				return

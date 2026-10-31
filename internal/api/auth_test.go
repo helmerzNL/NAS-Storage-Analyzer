@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,20 +13,86 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
+	"github.com/getkin/kin-openapi/routers/legacy"
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/pquerna/otp/totp"
 
+	apispec "github.com/helmerznl/nas-storage-analyzer/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
+	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
+	"github.com/helmerznl/nas-storage-analyzer/internal/worker"
 )
 
 const pw = "correct horse battery"
+
+// startWorker runs a real worker against the environment's database.
+func (e *authEnv) startWorker() {
+	box, _ := secrets.New(make([]byte, secrets.KeySize))
+	m := mounts.New(e.t.TempDir())
+	w := worker.New(e.st, shares.NewService(e.st.Pool, box, shares.Options{}, time.UTC), m,
+		worker.Config{ID: "api-test", PollEvery: 20 * time.Millisecond, Beat: 50 * time.Millisecond}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	wctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.Run(wctx); close(done) }()
+	e.t.Cleanup(func() { cancel(); <-done })
+}
+
+var (
+	specOnce   sync.Once
+	specRouter routers.Router
+)
+
+// validateExchange checks one request/response pair of a test against the
+// OpenAPI document: every HTTP test thereby doubles as a contract test.
+func validateExchange(t *testing.T, method, rawURL string, reqBody []byte, reqHdr http.Header, status int, respHdr http.Header, respBody []byte) {
+	t.Helper()
+	specOnce.Do(func() {
+		doc, err := openapi3.NewLoader().LoadFromData(apispec.Spec)
+		if err != nil {
+			t.Fatalf("load spec: %v", err)
+		}
+		if specRouter, err = legacy.NewRouter(doc); err != nil {
+			t.Fatal(err)
+		}
+	})
+	u, _ := url.Parse(rawURL)
+	if !strings.HasPrefix(u.Path, "/api/v1/") || u.Path == "/api/v1/events" {
+		return
+	}
+	req, _ := http.NewRequest(method, u.RequestURI(), bytes.NewReader(reqBody)) // path only: the spec has a relative server URL
+	req.Header = reqHdr.Clone()
+	route, params, err := specRouter.FindRoute(req)
+	if err != nil {
+		t.Errorf("%s %s is not in the OpenAPI document: %v", method, u.Path, err)
+		return
+	}
+	in := &openapi3filter.RequestValidationInput{Request: req, PathParams: params, Route: route,
+		Options: &openapi3filter.Options{AuthenticationFunc: openapi3filter.NoopAuthenticationFunc}}
+	if status < 300 { // error cases are tested with deliberately wrong requests
+		if err := openapi3filter.ValidateRequest(context.Background(), in); err != nil {
+			t.Errorf("%s %s: request violates the spec: %v", method, u.Path, err)
+		}
+	}
+	if err := openapi3filter.ValidateResponse(context.Background(), &openapi3filter.ResponseValidationInput{
+		RequestValidationInput: in, Status: status, Header: respHdr, Body: io.NopCloser(bytes.NewReader(respBody)),
+		Options: &openapi3filter.Options{IncludeResponseStatus: true},
+	}); err != nil {
+		t.Errorf("%s %s -> %d: response violates the spec: %v\n%.500s", method, u.Path, status, err, respBody)
+	}
+}
 
 type authEnv struct {
 	t    *testing.T
@@ -33,6 +100,8 @@ type authEnv struct {
 	svc  *auth.Service
 	srv  *httptest.Server
 	opts api.Options
+	// routes lists the patterns the server registered.
+	routes func() []string
 }
 
 func newAuthEnv(t *testing.T, mut func(*api.Options)) *authEnv {
@@ -48,14 +117,15 @@ func newAuthEnv(t *testing.T, mut func(*api.Options)) *authEnv {
 		t.Fatal(err)
 	}
 	t.Cleanup(ro.Close)
-	opts := api.Options{Auth: svc, SetupToken: "setup-token-123"}
+	opts := api.Options{Auth: svc, SetupToken: "setup-token-123", Queue: jobs.NewQueue(st.Pool),
+		Shares: shares.NewService(st.Pool, box, shares.Options{}, time.UTC)}
 	if mut != nil {
 		mut(&opts)
 	}
 	h := api.New(ro, slog.New(slog.NewTextHandler(io.Discard, nil)), api.Config{}, opts)
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
-	return &authEnv{t: t, st: st, svc: svc, srv: srv, opts: opts}
+	return &authEnv{t: t, st: st, svc: svc, srv: srv, opts: opts, routes: h.Routes}
 }
 
 // client is a browser-like HTTP client: it keeps cookies and the CSRF token.
@@ -99,12 +169,17 @@ func (c *client) do(method, path string, body any, hdr ...string) reply {
 			req.Header.Set(hdr[i], hdr[i+1])
 		}
 	}
+	var reqBytes []byte
+	if body != nil {
+		reqBytes, _ = json.Marshal(body)
+	}
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		c.t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(resp.Body)
+	validateExchange(c.t, method, c.base+path, reqBytes, req.Header, resp.StatusCode, resp.Header, raw)
 	r := reply{Status: resp.StatusCode, Raw: string(raw), Header: resp.Header}
 	json.Unmarshal(raw, &r.Body)
 	if tok, ok := r.Body["csrf_token"].(string); ok && tok != "" {
@@ -602,4 +677,44 @@ func rebuildAssertion(t *testing.T, options any) *protocol.CredentialAssertion {
 		t.Fatal(err)
 	}
 	return &a
+}
+
+// codeFor returns the TOTP code for a base32 secret now.
+func codeFor(secret string) string {
+	c, _ := totp.GenerateCode(secret, time.Now())
+	return c
+}
+
+func TestSpecAndRoutesMatchExactly(t *testing.T) {
+	e := newAuthEnv(t, nil)
+	doc, err := openapi3.NewLoader().LoadFromData(apispec.Spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := doc.Validate(context.Background()); err != nil {
+		t.Fatalf("the OpenAPI document is invalid: %v", err)
+	}
+	inSpec := map[string]bool{}
+	for path, item := range doc.Paths.Map() {
+		for method := range item.Operations() {
+			inSpec[method+" "+path] = true
+		}
+	}
+	inCode := map[string]bool{}
+	for _, p := range e.routes() {
+		inCode[p] = true
+	}
+	for p := range inSpec {
+		if !inCode[p] {
+			t.Errorf("documented but not routed: %s", p)
+		}
+	}
+	for p := range inCode {
+		if !inSpec[p] {
+			t.Errorf("routed but not documented: %s", p)
+		}
+	}
+	if len(inSpec) < 50 {
+		t.Errorf("only %d operations in the spec", len(inSpec))
+	}
 }

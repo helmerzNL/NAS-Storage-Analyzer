@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 )
 
 // Options turn on authentication. Without Auth the server serves everything
@@ -35,6 +37,12 @@ type Options struct {
 	// RequireHTTPS refuses sign-in over plain http (unless via a trusted proxy
 	// that says https).
 	RequireHTTPS bool
+	// Shares and Queue enable share management and scan control (both need a
+	// read-write database pool, unlike the query side).
+	Shares *shares.Service
+	Queue  *jobs.Queue
+	// SharesRoot is shown to the UI as the place bind shares must lie in.
+	SharesRoot string
 	// Static serves the web UI for every non-API path (nil: no UI).
 	Static http.Handler
 }
@@ -213,7 +221,19 @@ func isSafeMethod(m string) bool {
 // guard authorises a request for the given level, then runs fn with the usual
 // deadline and error handling.
 func (s *Server) guard(lv level, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
-	inner := s.handle(fn)
+	return s.guardWith(lv, s.handle(fn))
+}
+
+// guardStream is guard for long-lived responses (server-sent events): no deadline.
+func (s *Server) guardStream(lv level, fn func(http.ResponseWriter, *http.Request) error) http.HandlerFunc {
+	return s.guardWith(lv, func(w http.ResponseWriter, r *http.Request) {
+		if err := fn(w, r); err != nil {
+			s.fail(w, r, err)
+		}
+	})
+}
+
+func (s *Server) guardWith(lv level, inner http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.auth == nil {
 			inner(w, r)
