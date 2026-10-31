@@ -1,0 +1,156 @@
+# App-engineering conformance: NAS Storage Analyzer
+
+The record that this app was held against Flux76's
+[app-engineering topics](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/framework/app-engineering/README.md)
+(baseline [section 18](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/project-baseline.md#18-apps-are-held-against-the-app-engineering-topics)),
+and the input for a performance, security and operations review.
+
+`scripts/check_app_engineering.py` (CI job `app-engineering-conformance`) checks that every topic is answered. It cannot check that the
+answer is true; the evidence is what lets a reviewer do that. Re-answer after a major change and before a public release. The topic
+list in the script is a copy of App-Guidance's index: when a topic is added there, add it to the script and to this file in one commit.
+
+- **Status:** `applies` (in place, with evidence), `partial` (the core is in place; a `Gap:` names what is missing), `not-now` (not in place or
+  not assessed, with the reason and when it is revisited) or `n/a` (does not apply, with the reason).
+- **Control:** the CI job, test or review that keeps it true. Empty is honest: the topic is guidance here, not a guarded rule.
+
+| Field | Value |
+|---|---|
+| App | NAS Storage Analyzer |
+| Version | 0.1.0 |
+| Date | 2026-10-31 |
+| Reviewer | Drafted by Claude Code; the owner reviews it in the pull request that introduces it |
+
+## Measured gates
+
+The numbers a performance, security and operations review checks the running app against, and how they are measured. "Not measured" is an
+answer; a blank is not.
+
+| Area | Gate | Target | Measured by |
+|---|---|---|---|
+| Performance | Interactive read latency (P95 / P99, topics 91, 93) | Common views under 500 ms and free filter combinations under 2 s at 10 million files; judged on p95, p99 not reported | `nasabench queries` (20 runs per scenario) on a synthetic 10-million-file dataset, results in docs/bench-phase2.md; run by hand, not in CI |
+| Performance | Throughput at that latency (92) | Not set | Not measured (requests are sent one at a time; see topic 92) |
+| Performance | Largest accepted request, as a number (baseline section 6) | 64 KiB of JSON; the app accepts no uploads | `io.LimitReader` in `internal/api/authmw.go`; the full table of limits is docs/operations.md section 6 |
+| Performance | Time to first byte / largest contentful paint | Not set | Not measured; the interface is one bundle of about 217 kB JavaScript (74 kB gzipped) |
+| Reliability | Availability SLO and window (63, 64) | None defined (single-owner installation) | Not measured |
+| Reliability | RPO / RTO and date of last restore test (83, 84) | RPO is the age of the last manual backup; no RTO defined | Restore tested once on 2026-10-31 (a `pg_dump` restored into an empty database, identical row counts); no schedule |
+| Security | TLS version, HSTS, certificate expiry alert (71) | TLS is the reverse proxy's; the app sends no HSTS | Not measured by this repository; docs/deploy.md section 3 shows the proxy setup |
+| Security | CSP, CORS allow-list, cookie flags (76, 77, 79) | CSP `default-src 'self'`, `script-src 'self'`, `frame-ancestors 'none'`; no CORS headers; cookies `HttpOnly`, `SameSite=Lax`, `Secure` and `__Host-` over https | Unit tests (`internal/webui`, `TestCSRFProtection`) in `go-tests` |
+| Security | Dependency and secret scanning in CI (67, 108) | None yet | Not measured; recorded as the gap in topics 67 and 108 |
+| Security | Rate limits on auth and recovery routes (1) | 5 failed sign-ins per user and 30 per client address per hour, then a growing lockout; second-factor and recovery codes count | `TestAuthenticateAndLockout`, `TestIPLockoutAcrossUsernames`, `TestSecondFactorFailuresCountTowardLockout` in `go-tests` |
+| Operations | Health, readiness and alert runbooks present (56, 57, 62) | Health and readiness present; troubleshooting in docs/deploy.md section 10; no alert runbooks | Health: `TestHealthyWhileThePollLoopReachesTheQueue` in `go-tests` and the Compose health checks |
+
+## Topics
+
+| # | Topic | Status | Evidence / reason | Control |
+|--:|---|---|---|---|
+| 1 | Rate limiting | partial | Sign-in lockout: 5 failed attempts per user and 30 per client address per hour, with growing back-off; wrong second-factor codes count too (`internal/auth/service.go`). Gap: the other API routes have no rate limit (they need a session and run read-only with a 10 s statement timeout). | `go-tests` (`TestAuthenticateAndLockout`, `TestLockoutOverHTTP`) |
+| 2 | Caching | partial | Assets are content-hashed and served `immutable` for a year (`internal/webui/webui.go`); the query layer caches directory paths in memory (a directory id never changes path). Gap: API responses are `no-cache` with no ETag, so every request reads PostgreSQL (fast on the aggregates, see docs/bench-phase2.md). |  |
+| 3 | Load balancing | n/a | One `app` instance behind at most one reverse proxy; the worker pulls jobs from the database instead of being balanced. |  |
+| 4 | Reverse proxies | applies | Caddy, nginx and Traefik examples in docs/deploy.md section 3; `NASA_TRUSTED_PROXIES` decides whose `X-Forwarded-*` is believed and the client address is the right-most untrusted entry (`internal/api/authmw.go`); what the proxy must allow is a table of numbers in docs/operations.md section 6. | `go-tests` (`TestTrustedProxyHeaders`) |
+| 5 | API gateways | n/a | No gateway: the app is the only API and enforces authentication, CSRF and roles itself. |  |
+| 6 | CI/CD | partial | `ci.yml` runs go-tests, web-checks, browser-e2e and docker-build on every pull request and on `beta`; versions and releases go through `bump-version.yml` and `release.yml`. Gap: no workflow publishes the container image yet (the deployment-layout pull request adds it), and `bump-version` and `release.yml` have never run. | `go-tests`, `web-checks`, `browser-e2e`, `docker-build` |
+| 7 | Docker | applies | Multi-stage `Dockerfile` (Svelte build, static Go binary, Alpine runtime), uid 10001, read-only root file system, `cap_drop: ALL`, `no-new-privileges`, health checks through `nasa healthcheck`; builds for amd64 and arm64. | `docker-build` |
+| 8 | Kubernetes | n/a | Deployed with Docker Compose on a NAS or small server; there is no cluster. |  |
+| 9 | Service discovery | n/a | The Compose service name (`db`) is the only discovery there is. |  |
+| 10 | Circuit breakers | n/a | The only dependency is PostgreSQL, which the process cannot run without (readiness fails and Compose restarts it); the NAS is protected by per-directory timeouts instead (topic 11). |  |
+| 11 | Timeouts | applies | Every layer has one, as numbers in docs/operations.md section 6: headers 10 s, request read 30 s, idle 2 min, JSON request 15 s, database statement 10 s, CSV export 30 min, one directory scan 10 min; sessions idle 12 h, absolute 7 days. | `go-tests` (`TestWalkTimeoutOnHungDirectory`) |
+| 12 | Retries | partial | A queued job of a worker that stopped is reaped (`Reap`, `internal/jobs/queue.go`), the worker re-polls after a claim error, and the scheduler picks up a due schedule on its next tick. Gap: a directory that fails to read is recorded as an error and is not retried within the same scan (the next scan reads it again). | `go-tests` (`internal/jobs`) |
+| 13 | Exponential backoff | partial | Sign-in lockouts back off from 1 minute, doubling to 30 minutes (`lockedUntil` in `internal/auth/service.go`). Gap: the worker re-polls the queue at a fixed 2 s after an error, and the database connection is retried only by the container restart policy. | `go-tests` |
+| 14 | Idempotency | applies | One active job per share and kind is a unique partial index (`jobs_one_active_idx`, migration 0004) and a second request answers 409 `already_active`; migrations run under an advisory lock and each version is applied once; a scan publishes in one transaction, so repeating it replaces rather than duplicates. | `go-tests` |
+| 15 | Message queues | applies | A PostgreSQL job queue (`internal/jobs/queue.go`: `FOR UPDATE SKIP LOCKED`, heartbeats, reaping) carries scans from `app` to `worker`; no external broker is needed at this volume. | `go-tests` |
+| 16 | Pub/Sub | n/a | Live status is read from PostgreSQL once a second per open page (topic 24); there is no pub/sub channel. |  |
+| 17 | Event-driven architecture | n/a | Request and response plus a job queue; there is no event bus. |  |
+| 18 | Distributed transactions | n/a | One database; a scan publishes its result in a single transaction. |  |
+| 19 | Saga pattern | n/a | No multi-service transaction exists to compensate. |  |
+| 20 | Dead letter queues | partial | A job that fails keeps state `failed` with its error, shown on the dashboard (`jobs` table). Gap: failed jobs are never retried automatically and there is no separate dead-letter view; a person starts a new scan. |  |
+| 21 | Cron jobs | applies | Per-share five-field cron (`robfig/cron/v3`) evaluated by the scheduler (`internal/jobs/scheduler.go`) with a persistent `next_run_at`, in the time zone `NASA_TZ`, and an advisory lock so exactly one scheduler fires; an invalid expression is refused with a 400. | `go-tests` (`internal/jobs`) |
+| 22 | WebSockets | n/a | Not needed: the only push to the browser is one-way status, done with server-sent events. |  |
+| 23 | Long polling | n/a | Not needed: server-sent events cover the live status. |  |
+| 24 | Server-Sent Events | applies | `GET /api/v1/events` sends a status event only when something changed, a `: ping` after 15 s of silence and `X-Accel-Buffering: no`; the proxy requirements are in docs/operations.md section 6. | `go-tests`, `browser-e2e` |
+| 25 | Database indexing | applies | Indexes follow the queries: `(share_id, parent_id, size_total DESC)`, `(share_id, ext, size DESC)`, a trigram GIN index for names and the partial unique job index; docs/bench-phase2.md records which index each measured query uses. |  |
+| 26 | Query optimization | applies | Driven by measurement at 10 million files: docs/bench-phase2.md records each slow query, its cause and the fix (custom plans, `random_page_cost`, keyset pagination, one-pass grouping). |  |
+| 27 | N+1 queries | applies | Lists are one query: children with their aggregates in one statement, the live status of all shares in one (`internal/query`); the interface loads no row per item. |  |
+| 28 | Connection pooling | applies | `pgxpool`: a read-write pool and a separate read-only pool (`-max-conns`, default 20) with `statement_timeout`; use is exported as `nasa_db_pool_*`. |  |
+| 29 | Read replicas | n/a | One PostgreSQL instance; the read-only pool is a session setting on the same server, not a replica. |  |
+| 30 | Sharding | n/a | Tens of millions of rows fit one server; partitioning (topic 31) covers the growth that matters. |  |
+| 31 | Partitioning | applies | `dirs`, `files` and the aggregate tables are LIST-partitioned per share (docs/ontwerp.md), so rescanning or deleting a share touches one partition and queries prune to it. | `go-tests` |
+| 32 | Replication | n/a | Single node; recovery is by backup (topic 84). |  |
+| 33 | Leader election | applies | PostgreSQL advisory lock 7003 makes exactly one scheduler fire; workers claim jobs with `FOR UPDATE SKIP LOCKED`. | `go-tests` |
+| 34 | CAP theorem | n/a | There is no distributed state: one database node. |  |
+| 35 | Eventual consistency | applies | Everything shown is as of the last published scan; a scan publishes in one transaction, so no reader sees a half-written scan, and the interface shows when that scan finished. | `go-tests` |
+| 36 | Optimistic locking | not-now | Share, user and file-type settings are last-write-wins: two administrators editing the same record at once overwrite each other. Revisit if more than a few administrators use one installation. |  |
+| 37 | Pessimistic locking | applies | `FOR UPDATE SKIP LOCKED` for job claims; advisory locks 7001 (setup), 7002 (user administration, last-administrator protection) and one for migrations. | `go-tests` |
+| 38 | Distributed locks | applies | App and worker coordinate through PostgreSQL advisory locks (setup, users, scheduler, migrations); no external lock service. | `go-tests` |
+| 39 | Race conditions | applies | `go test -race` on every pull request, atomic scan counters, a writer whose COPY goroutine and callers never share a lock (a deadlock found and fixed during development), single-use TOTP steps stored atomically. | `go-tests` |
+| 40 | Deadlocks | partial | Lock order is fixed (advisory locks, then rows); PostgreSQL aborts a deadlocked statement, which fails the scan and keeps the old data. Gap: no test provokes a database deadlock or a lock timeout. |  |
+| 41 | Memory leaks | not-now | No soak test or heap profile has been run. Known growth: one directory is read in one go, so a directory with millions of entries uses memory in the worker (docs/deploy.md section 9). Revisit with the first long-running deployment's numbers. |  |
+| 42 | Garbage collection | not-now | Go defaults; `GOGC` and `GOMEMLIMIT` are neither set nor measured. Revisit if the worker's memory is a problem on a small host. |  |
+| 43 | Thread safety | applies | Shared state is atomics (scan progress), mutexes (writer, path cache) or the database; the race detector runs on every pull request. | `go-tests` |
+| 44 | Backpressure | applies | A bounded worker pool (`NASA_WORKER_PARALLEL`), a per-share IO throttle with a day and night window (`internal/scanner/throttle.go`), batched COPY, and live status that sends nothing when nothing changed. | `go-tests` |
+| 45 | Autoscaling | n/a | A single-owner installation; there is nothing to scale automatically. |  |
+| 46 | Horizontal scaling | partial | Several worker containers can run (job claims use `SKIP LOCKED` and a worker id) and the app keeps its sessions in the database. Gap: never tested with more than one app replica or worker container. |  |
+| 47 | Vertical scaling | applies | docs/deploy.md section 6 sizes PostgreSQL by RAM; `NASA_WORKER_PARALLEL` and the per-share worker count scale the scan; about 420 MB of disk per million files. |  |
+| 48 | CDN | n/a | Self-hosted behind the owner's proxy; the interface is one small bundle (about 217 kB JavaScript, 74 kB gzipped). |  |
+| 49 | Edge caching | n/a | As topic 48. |  |
+| 50 | Cache invalidation | applies | The only caches are content-hashed assets (the file name changes with the content) and a directory-path cache whose keys never change meaning; nothing needs purging. |  |
+| 51 | Feature flags | n/a | No runtime flags; behaviour is chosen with environment variables (`.env.example`) and the beta channel. |  |
+| 52 | Blue-green deployment | n/a | A single instance; there is no second environment to switch to. |  |
+| 53 | Canary releases | n/a | The `beta` channel (baseline section 20) is the staged release; there is no percentage rollout. |  |
+| 54 | Rolling deployments | n/a | Single-instance Compose: an update recreates the containers with `docker compose up -d`. |  |
+| 55 | Rollbacks | partial | Images and versions are tagged; data goes back from a backup. Gap: migrations are forward-only (no down-migrations), so rolling the image back after a migration needs the database restored as well; pinned version tags arrive with the image publishing. |  |
+| 56 | Health checks | applies | `/healthz`, `/readyz` (database), worker `:8081/healthz` (queue reachable, or every slot busy) and Compose health checks through `nasa healthcheck` (docs/operations.md section 2). | `go-tests` (`TestHealthyWhileThePollLoopReachesTheQueue`) |
+| 57 | Liveness and readiness probes | applies | `/healthz` is liveness; `/readyz` checks the database and Compose uses it for `depends_on: service_healthy`. |  |
+| 58 | Monitoring | partial | `/metrics` (Prometheus) with HTTP latency, pool and per-share series, and scrape and alert examples in docs/operations.md. Gap: no dashboards or alert rules are shipped. | `go-tests` (`TestMetricsAccess`) |
+| 59 | Logging | applies | JSON to stdout (`slog`), a `request_id` on every request and error body, scans log start, end and errors; passwords and keys are never logged (the one-time setup token is, on purpose, until the first administrator exists). |  |
+| 60 | Distributed tracing | n/a | One service and a database; the `request_id` correlates a request across log lines. |  |
+| 61 | Metrics | applies | `nasa_http_request_duration_seconds`, `nasa_http_requests_in_flight`, `nasa_db_pool_*` and per share: size, allocated size, files, last scan time, duration, errors, success and free space. | `go-tests` (`TestMetricsAccess`) |
+| 62 | Alerts | not-now | No alert rules are shipped; docs/deploy.md section 7 suggests `time() - nasa_share_last_scan_timestamp_seconds > 2 * 86400`. Alerts belong to the operator's Prometheus; revisit with a sample rule file. |  |
+| 63 | SLOs | partial | Latency objective: common views under 500 ms and free filters under 2 s at 10 million files (docs/bench-phase2.md). Gap: no availability SLO or window (single-owner installation). |  |
+| 64 | SLIs | partial | Request duration is a histogram per route (`nasa_http_request_duration_seconds`). Gap: no error-rate or availability SLI is defined or graphed. |  |
+| 65 | Error budgets | n/a | No availability SLO is set (topic 63), so there is no budget to spend. |  |
+| 66 | Observability | partial | Logs with a `request_id`, Prometheus metrics and health endpoints. Gap: no traces and no shipped dashboards; diagnosing relies on logs plus `/metrics`. |  |
+| 67 | Secrets management | partial | Database password and encryption key come from `.env` or Docker secrets (`*_FILE`, docker-compose.secrets.yml); SMB passwords are AES-256-GCM encrypted at rest; `.env` and `secrets/` are gitignored; secrets never appear in the API. Gap: no secret scanning in CI. | `docker-build` (validates the secrets Compose variant) |
+| 68 | IAM | applies | Roles Admin and Viewer are enforced on the server per route (`authorize` in `internal/api/authmw.go`), the last administrator cannot be removed, a second factor is mandatory and sign-ins and changes are in the audit log. | `go-tests` |
+| 69 | OAuth | n/a | Local accounts with TOTP and passkeys; OIDC is not implemented (docs/deploy.md section 9). |  |
+| 70 | JWT rotation | n/a | Sessions are random tokens of which only a hash is stored server-side; there are no JWTs. |  |
+| 71 | TLS | partial | Terminated by the reverse proxy (docs/deploy.md section 3); the app sets `Secure` and `__Host-` cookies over https and refuses sign-in over http with `NASA_REQUIRE_HTTPS=true`. Gap: the app itself sends no HSTS header and cannot terminate TLS; certificate expiry alerts are the operator's. | `go-tests` |
+| 72 | Encryption at rest | partial | SMB passwords are AES-256-GCM encrypted with a key kept outside the database; account passwords are Argon2id hashes. Gap: the database files and the file index are not encrypted by the app; disk encryption is the host's. |  |
+| 73 | Encryption in transit | partial | Browser traffic over https through the proxy. Gap: the app-to-database link inside Compose uses `sslmode=disable` by default (`NASA_DB_SSLMODE` can change it) and the app listens in plain http behind the proxy. |  |
+| 74 | WAF | n/a | Left to the operator's proxy or CDN; the app validates every parameter and refuses unknown routes. |  |
+| 75 | DDoS protection | n/a | A self-hosted application for a handful of users; protection is the operator's network and proxy, and lockout plus request deadlines bound what one client can cost. |  |
+| 76 | CORS | applies | No CORS headers are sent, so browsers allow only same-origin use; the CSP also sets `connect-src 'self'` (`internal/webui/webui.go`). | `go-tests` (`internal/webui`) |
+| 77 | CSRF | applies | Unsafe requests need a per-session CSRF header and an `Origin` that matches the host (or a configured origin); `Sec-Fetch-Site` is checked when `Origin` is absent; cookies are `SameSite=Lax`. | `go-tests` (`TestCSRFProtection`) |
+| 78 | SQL injection | applies | All values are bind parameters (`pgx`); the only built SQL fragments are sort keys and directions chosen from fixed allow-lists (`childSorts`, `fileSorts`, `normSort`), and an unknown value is a 400. | `go-tests` |
+| 79 | XSS | applies | Svelte escapes output; `{@html}` is used only for the QR code generated from our own `otpauth` URL; CSP `default-src 'self'`, `script-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'` (`style-src` allows inline styles for Svelte style bindings); file names are shown as text. | `go-tests` (`internal/webui`) |
+| 80 | SSRF | partial | The server makes no outbound request on a user's behalf; the worker mounts hosts that an administrator enters, validated by a host-name pattern and an allow-list of mount options (`internal/shares/validate.go`). Gap: an administrator can point a share at any host the worker can reach (by design); there is no allow-list of destinations. | `go-tests` |
+| 81 | Database migrations | partial | Numbered SQL migrations (`internal/store/migrations/`), applied at start under an advisory lock, each in a transaction and recorded in `schema_migrations`; every database test migrates a fresh database. Gap: baseline section 2 asks for a test that opens version N, applies N+1 and compares with a committed schema; none exists, and no checksum is stored, so an edited shipped migration goes unnoticed. | `go-tests` (fresh databases only) |
+| 82 | Schema versioning | partial | `schema_migrations(version, name)` and append-only files numbered in the file name. Gap: no committed schema snapshot per shipped version, which baseline section 2 says cannot be recovered later. |  |
+| 83 | Disaster recovery | partial | Backup and restore are documented (docs/deploy.md section 5, docs/operations.md section 4) and the restore was run once end to end (2026-10-31, identical row counts). Gap: no RPO or RTO is defined, and no backup is scheduled or kept off-site. |  |
+| 84 | Backups | partial | `pg_dump -Fc` plus `NASA_ENCRYPTION_KEY` kept separately, with the exact commands; restore verified on 2026-10-31. Gap: manual only; the in-app backup and restore is not built yet. |  |
+| 85 | Failover | n/a | Single node; the restart policy recovers a crashed container. |  |
+| 86 | Multi-region deployment | n/a | A single-site, self-hosted installation. |  |
+| 87 | Chaos engineering | n/a | A single-owner installation with no redundancy to exercise. |  |
+| 88 | Cost optimization | n/a | Runs on the owner's own hardware; the footprint is sized in docs/deploy.md section 6. |  |
+| 89 | Cold starts | n/a | Long-running containers; startup applies migrations in seconds. |  |
+| 90 | Serverless limits | n/a | Not deployed on a serverless platform. |  |
+| 91 | Latency | partial | Measured at 10 million files with `nasabench queries` (p50, p95 and max over 20 runs per scenario, docs/bench-phase2.md): common views under 500 ms, two broad age filters 2.0 to 2.6 s. Gap: measured by hand on one machine and not guarded in CI. |  |
+| 92 | Throughput | not-now | API throughput at the latency target is not measured: the benchmark sends requests one at a time and an installation has a handful of users. Revisit if shared use grows. |  |
+| 93 | P99 latency | partial | The benchmark reports p50, p95 and max per scenario and judges on p95. Gap: p99 is not reported. |  |
+| 94 | Tail latency | partial | The maximum is reported per scenario and the two slow filters are documented with their cause (docs/bench-phase2.md). Gap: no tail-latency objective beyond p95. |  |
+| 95 | Network partitions | partial | An unreachable database fails `/readyz` and the worker's health and Compose restarts them; an unreachable NAS shows as directory timeouts counted as errors, and an empty mount is refused instead of published (`scanrun.ErrEmptyShare`). Gap: no test simulates a network partition. | `go-tests` (`TestEmptyRootIsRefusedAsAMissingMount`) |
+| 96 | Clock skew | applies | TOTP accepts one 30 s step either way and stores the step it used; lockout windows and session expiry are evaluated with the database's `now()`, not the app's clock (`internal/auth`). | `go-tests` |
+| 97 | DNS | n/a | Compose resolves `db`; NAS host names are resolved by the mount helper. |  |
+| 98 | TCP vs UDP | n/a | HTTP over TCP; NFS mounts use TCP by default (`proto=udp` is reachable only through the allow-listed mount options). |  |
+| 99 | HTTP/2 and HTTP/3 | n/a | The proxy terminates TLS and speaks h2 or h3 to browsers; the app serves HTTP/1.1. |  |
+| 100 | gRPC | n/a | No gRPC; the API is REST described by `api/openapi.yaml`. |  |
+| 101 | Webhooks | n/a | The app sends and receives no webhooks. |  |
+| 102 | API versioning | applies | All routes live under `/api/v1`; `api/openapi.yaml` is the contract and a test fails when a route and the spec differ. | `go-tests` (`TestSpecAndRoutesMatchExactly`) |
+| 103 | Semantic versioning | applies | `VERSION` (MAJOR.MINOR.PATCH) is raised by the pipeline after a promotion (ADR 0001); tags `vX.Y.Z` come only from `release.yml` with reviewed notes. | `enforce-version-bump` |
+| 104 | Infrastructure as Code | applies | `Dockerfile`, `docker-compose.yml` with its mounts and secrets overrides and `.env.example` describe the whole deployment; nothing is configured by hand. | `docker-build` |
+| 105 | Terraform | n/a | No cloud resources to provision. |  |
+| 106 | Helm charts | n/a | Not deployed on Kubernetes. |  |
+| 107 | Build caching | applies | Dockerfile layers order dependency downloads (`go mod download`, `npm ci`) before sources; CI caches npm, the Go build and the arm64 buildx layers (`ci.yml`). | `docker-build` |
+| 108 | Dependency hell | partial | `go.sum` and `package-lock.json` are committed, base images and Playwright are pinned by version, and standards use maintained modules (ADR 0003 lists the one exception). Gap: no automated dependency updates or vulnerability scanning (Dependabot, `govulncheck`, `npm audit`). |  |
+| 109 | Production incidents | not-now | No incident process is written; the owner runs one installation. First step: record incidents as GitHub issues with the regression template. |  |
+| 110 | On-call | n/a | A self-hosted application without an operator rota. |  |
+| 111 | Postmortems | not-now | None written yet; the first candidate (the `rslave` default that failed on Unraid) is described in the pull request that fixed it. Revisit with a postmortem template. |  |

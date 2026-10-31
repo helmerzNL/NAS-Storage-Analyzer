@@ -1,5 +1,8 @@
 # Operations: the documents an operator needs
 
+The engineering conformance declaration (every one of 111 topics answered, with the measured gates) is
+[`app-engineering-conformance.md`](app-engineering-conformance.md).
+
 The six things every app repository documents (App-Guidance
 [`project-baseline.md` §6](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/project-baseline.md#6-required-operational-docs)),
 in one place. The detail is in [`deploy.md`](deploy.md) (Dutch, with an English summary at the end); this page says where

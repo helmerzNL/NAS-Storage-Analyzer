@@ -48,6 +48,9 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
 - Tests: `go vet ./... && go test -race ./...` (database tests need `NASA_TEST_DSN` and `NASA_REQUIRE_DB=1`),
   `cd web && npm run check && npx vitest run`, and the browser test in [`web/e2e`](web/e2e/e2e.cjs).
 - Do not weaken a check to make it pass. A test that fails is reported with its output; a skipped control is a missing control.
+- [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is re-answered after a major change and before a public
+  release (baseline §18). A change that makes a row untrue updates the row in the same pull request; the checker only sees that a
+  question is answered, so the evidence stays honest by review.
 
 ## 2. Versioning discipline
 
@@ -71,6 +74,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | Job name | What it checks |
   |---|---|
   | `agent-instructions-lint` | that this file stays canonical, the entry files point at it, nothing is duplicated and the links work |
+  | `app-engineering-conformance` | that every one of the 111 engineering topics in [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is answered, with evidence or a reason, and that the measured gates are filled in |
   | `enforce-version-bump` | that a pull request does not change `VERSION` |
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped database test |
