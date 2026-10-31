@@ -81,13 +81,31 @@ Alles onder `/srv/nas` verschijnt als `/mnt/shares/...` in de containers (dus `/
 * **`ro`**: de scan kan de NAS dan niet eens per ongeluk wijzigen.
 * **`noatime`** (op de client) is niet nodig om te scannen, maar voorkomt dat de client zelf toegangstijden
   schrijft. Het beïnvloedt niet wat de server als atime bijhoudt, zie [bekende beperkingen](#9-bekende-beperkingen).
-* **Late mounts.** Standaard staat `NASA_SHARES_PROPAGATION=rslave`: mounts die de host *na* het starten van de
-  containers maakt of herstelt (autofs, `x-systemd.automount`, een NAS die later opstart) worden zichtbaar.
-  Weigert Docker dat ("is mounted on / but it is not a shared or slave mount"), zet dan
-  `NASA_SHARES_PROPAGATION=rprivate` en herstart de containers na elke remount.
+* **Late mounts.** Standaard staat `NASA_SHARES_PROPAGATION=rprivate`: dat werkt op elke host en toont de mounts
+  die bestaan als de containers starten. Mounts die de host *daarna* maakt of herstelt (autofs,
+  `x-systemd.automount`, een NAS die later opstart) zijn pas zichtbaar na een herstart van de containers
+  (`docker compose restart app worker`). Wil je dat ze vanzelf verschijnen, zet dan
+  `NASA_SHARES_PROPAGATION=rslave`; dat werkt alleen als de host-mount `shared` of `slave` is
+  (`findmnt -o TARGET,PROPAGATION /srv/nas`). Anders weigert Docker te starten met "is mounted on / but it is not a
+  shared or slave mount", en dat is bijvoorbeeld op Unraid het geval.
 * **Een share die niet gemount is** laat een lege map achter. Een scan die dan nul bestanden ziet terwijl de
   vorige er meer dan 100 vond, wordt **geweigerd** met de melding dat de share mogelijk niet gemount is; de oude
   gegevens blijven staan. Heb je de share echt leeggemaakt: `docker compose run --rm worker scan -path /mnt/shares/media -name <naam> -allow-empty`.
+
+#### Unraid, Portainer, Dockge en andere stack-managers
+
+* **Gebruik een absoluut pad voor `NASA_SHARES_DIR`.** De standaard `./shares` is relatief aan de map van de stack,
+  en die bewaart een manager waar hij wil; je scant dan een lege map in plaats van je NAS. Zet de variabelen in het
+  `.env`-bestand van de stack (of in de omgevingsvariabelen-editor van je manager).
+* **Unraid:** de array-shares staan onder `/mnt/user`. Met `NASA_SHARES_DIR=/mnt/user` verschijnt elke share als
+  `/mnt/shares/<share>`, dus je voegt bijvoorbeeld `/mnt/shares/media` toe als *Gemount pad*. Wil je maar een deel
+  scannen, wijs dan naar die map (`/mnt/user/media`) of sluit mappen uit in de share-instellingen.
+* **Leesrechten:** de containers draaien als uid 10001. Op Unraid zijn shares standaard voor iedereen leesbaar. Zijn
+  ze dat bij jou niet, geef `others` dan leesrechten of zet in een override `user: "99:100"` (nobody:users) op `app`
+  en `worker`.
+* **Read-only tot in de submounts:** volgens de Docker-documentatie wordt een read-only bind-mount alleen recursief
+  read-only bij Docker 25 of nieuwer met kernel 5.12 of nieuwer. De scanner schrijft nooit, maar mount NFS/SMB op de
+  host daarom ook zelf met `ro`, zoals in het fstab-voorbeeld hierboven.
 
 ### Route (a): de worker mount zelf (NFS/SMB in de container)
 
@@ -318,7 +336,8 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
 
 | Symptoom | Oorzaak en oplossing |
 |---|---|
-| `docker compose up` meldt "is mounted on / but it is not a shared or slave mount" | Zet `NASA_SHARES_PROPAGATION=rprivate` in `.env`. |
+| `docker compose up` meldt "is mounted on / but it is not a shared or slave mount" | `NASA_SHARES_PROPAGATION` staat op `rslave` (of je gebruikt een oudere versie van dit bestand waar dat de standaard was). Zet het op `rprivate` of haal de regel weg, en haal de laatste versie van de repository op. |
+| De scan vindt niets, of de share-map is leeg | `NASA_SHARES_DIR` is niet gezet (dan is het `./shares` in de stackmap) of wijst niet naar de map met je mounts. Gebruik een absoluut pad op de host. |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASA_SETUP_TOKEN` in `.env`. |
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASA_RP_ID` in. |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
