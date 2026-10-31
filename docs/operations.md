@@ -11,11 +11,11 @@ each answer is and holds the numbers.
 ## 1. Local setup and run/stop
 
 ```bash
-./scripts/init-env.sh                # once: creates .env with a random database password, encryption key and setup token
-docker compose up -d --build         # start app, worker and db
+./scripts/init-env.sh                # once: creates .env with the data and shares folders (absolute), a random database password, encryption key and setup token
+docker compose up -d                 # start app, worker and db (pulls the image chosen by NASA_TAG; nothing is built)
 docker compose logs -f app worker    # follow the JSON logs
 docker compose stop                  # stop, keeping the data
-docker compose down                  # remove the containers, keeping the data (never `down -v`: it removes the database volume)
+docker compose down                  # remove the containers, keeping the data (it lives in the host folder DATA_PATH, which `down -v` and a prune do not touch)
 ```
 
 Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the administrator and set up a second factor. For
@@ -37,7 +37,17 @@ development without Docker, see "Ontwikkelen en testen" in the [README](../READM
 
 The recommended deployment, the two ways to give the stack access to the NAS, reverse proxy examples and update steps are in
 [`deploy.md`](deploy.md#1-installatie-in-vier-stappen) and [§8 Bijwerken](deploy.md#8-bijwerken). A deploy tool (Dockhand,
-Komodo, Portainer) runs `docker compose pull` and `up` itself, so a script in the update path is not run by it.
+Komodo, Portainer) runs `docker compose pull` and `up` itself, so a script in the update path is not run by it. That is why the one
+data move this project has ever needed, from the Docker volume `db-data` to `DATA_PATH/postgres`, is a script you run **once by
+hand, before you deploy** (`scripts/migrate_data.sh`, [`deploy.md` §8](deploy.md#8-bijwerken)); the containers also log a warning when
+`DATA_PATH` is relative.
+
+Which image runs is one variable, `NASA_TAG` (`latest`, `beta` or a version number). A push to `beta` publishes `beta` and
+`beta-<sha>`; a promotion to `main` publishes `latest` and, while its git tag does not exist yet, the version number
+(`publish-beta.yml`, `publish.yml`; both `linux/amd64` and `linux/arm64`). To roll back, set `NASA_TAG` to the previous version
+number and run `docker compose pull && docker compose up -d`. Migrations run when the new version starts and are not undone by
+starting an older one, so an older version is only safe if the release notes (`docs/releases/`) say its schema is compatible;
+otherwise restore the backup you took before the update (`deploy.md` §5).
 
 ## 4. Backup and restore basics
 
@@ -51,7 +61,7 @@ decrypted. Commands, the restore sequence and what does not need saving (the sca
 |---|---|---|
 | `app` | web interface (embedded), REST API, scheduler | none of its own |
 | `worker` | claims scan jobs, scans a share read-only, publishes the result | none of its own; reads the share |
-| `db` (PostgreSQL 16) | file index, precomputed aggregates, history, accounts, job queue | the database volume `db-data` (to become the absolute host folder `DATA_PATH`, baseline §21) |
+| `db` (PostgreSQL 16) | file index, precomputed aggregates, history, accounts, job queue | the host folder `DATA_PATH/postgres` (`DATA_PATH` is absolute and required; baseline §21) |
 | the NAS share | the thing being measured | never written to |
 
 A diagram and the reasoning are in the [README](../README.md#architectuur) and [`ontwerp.md`](ontwerp.md). Secrets live in `.env`

@@ -5,6 +5,7 @@
   import { errMessage } from '../lib/errors';
   import { passkeysSupported, decodeRequest, encodeAssertion } from '../lib/webauthn';
   import Enroll from '../components/Enroll.svelte';
+  import BetaBadge from '../components/BetaBadge.svelte';
   import RecoveryCodes from '../components/RecoveryCodes.svelte';
 
   let { onfinished }: { onfinished: () => void } = $props();
@@ -69,6 +70,7 @@
     <h1>
       <svg viewBox="0 0 32 32" width="32" height="32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f766e"/><path d="M16 16V5.5a10.5 10.5 0 0 1 9.4 5.8z" fill="#5eead4"/><circle cx="16" cy="16" r="4" fill="#0f766e"/></svg>
       NAS Storage Analyzer
+      <BetaBadge />
     </h1>
 
     {#if session.httpsRequired}<div class="alert warn">{t('auth.httpsrequired')}</div>{/if}

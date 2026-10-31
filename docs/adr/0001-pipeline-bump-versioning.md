@@ -12,8 +12,8 @@ that each raise the number conflict as soon as the other merges, however correct
 ## Decision
 
 The **pipeline-bump** model. `VERSION` holds `MAJOR.MINOR.PATCH`; a pull request that changes it fails `enforce-version-bump`;
-the `bump-version` workflow raises it when a promotion reaches `main` (patch by default, `version:minor` / `version:major` on
-the promotion pull request choose the part) and merges `main` back into `beta`.
+the `publish` workflow raises it when a promotion reaches `main` (patch by default, `version:minor` / `version:major` on
+the promotion pull request choose the part), builds the stable image from that commit and merges `main` back into `beta`.
 
 ## Consequences
 
@@ -25,7 +25,7 @@ the promotion pull request choose the part) and merges `main` back into `beta`.
 
 - The Actions bot must be allowed to push to `main` (a ruleset bypass), a setting that cannot be made from the repository.
 - A commit pushed with `GITHUB_TOKEN` starts no workflow, so the image publish step has to be in the same workflow as the bump
-  or be dispatched by it.
+  or be dispatched by it. Here it is the same workflow (`publish.yml`), so the image is built from the commit that carries the new number.
 
 ## Alternatives considered
 
@@ -33,4 +33,4 @@ the promotion pull request choose the part) and merges `main` back into `beta`.
 
 ## Enforcement / follow-up
 
-`enforce-version-bump` (CI), `scripts/check_version_bump.py`, `scripts/bump_version.py` with its tests, `.github/workflows/bump-version.yml`.
+`enforce-version-bump` (CI), `scripts/check_version_bump.py`, `scripts/bump_version.py` with its tests, `.github/workflows/publish.yml`.

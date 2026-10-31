@@ -60,7 +60,8 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
 
 - Version source of truth is the `VERSION` file (`MAJOR.MINOR.PATCH`).
 - **Who raises it: the pipeline, after the merge** (baseline §1, pipeline-bump model). A pull request never changes `VERSION`;
-  `enforce-version-bump` fails it when it does. The `bump-version` workflow raises it when a promotion reaches `main`.
+  `enforce-version-bump` fails it when it does. The `publish` workflow raises it when a promotion reaches `main`, and builds the
+  stable image from that commit.
   For a minor or major version, put the label `version:minor` or `version:major` on the **promotion** pull request
   (`beta` → `main`); without a label it is a patch.
 - Protected paths (a push that changes one of them, other than documentation, earns a new version): `cmd/`, `internal/`,
@@ -71,7 +72,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
 ## 3. Local enforcement and CI controls
 
 - Activate hooks once per clone: `python scripts/setup_hooks.py` (sets `core.hooksPath` to `.githooks/`).
-- The pre-commit hook runs the fast, deterministic checks; heavier checks belong in CI.
+- The pre-commit hook runs the fast, deterministic checks (the agent-instruction and conformance checkers and the deploy-layout tests); heavier checks belong in CI.
 - Every MUST rule needs an automated enforcement point (CI or hook).
 - CI jobs on every pull request, and what each one is named:
 
@@ -81,6 +82,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `app-engineering-conformance` | that every one of the 111 engineering topics in [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is answered, with evidence or a reason, and that the measured gates are filled in |
   | `enforce-version-bump` | that a pull request does not change `VERSION` |
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
+  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped database test |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
   | `browser-e2e` | the whole application in a real browser, including passkeys and the worker |
@@ -96,8 +98,9 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
 - `NASA_ENCRYPTION_KEY` encrypts the stored SMB passwords. It is never logged, never in a backup file and never
   in the database; a new secret follows the same rule.
 - Persistent data lives in one absolute host folder (`DATA_PATH`, baseline §21): required by Compose, never `./data`, plain
-  folders and never Docker volumes. Until the pull request that introduces it has landed, the database is in the named
-  volume `db-data`; do not add other volumes or relative data paths in the meantime.
+  folders and never Docker volumes. The database is `DATA_PATH/postgres`, mounted by the `db` service only; the scan target
+  `NASA_SHARES_DIR` is required and absolute for the same reason. A new kind of persistent data (a backup folder, uploads) gets
+  its own sub-folder of `DATA_PATH`, not a new variable and not a volume. The containers warn when `DATA_PATH` is relative.
 - Rotate sensitive keys before public releases.
 
 ## 5. Branch topology and pull request workflow
@@ -107,8 +110,10 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   one, merged with a merge commit (baseline §20). `only-from-beta` fails every other pull request into `main`; the
   owner makes it required, and forbids direct pushes to `main`, in the branch protection.
 - A push to `beta` publishes the `beta` channel only; a promotion publishes `latest` and the release.
-  `NASA_TAG` (`latest` or `beta`, in `.env`) picks the image in `docker-compose.yml` and is passed into the app, which shows
-  a **beta** label on a beta build. Until the pull request that introduces it has landed, Compose builds the image itself.
+  `NASA_TAG` (`latest`, `beta` or a version number, in `.env`) picks the image `ghcr.io/helmerznl/nas-storage-analyzer` in
+  `docker-compose.yml` and is passed into the containers; the app reports its channel at `GET /api/v1/version` and shows a **beta**
+  label on a beta build. There is no second variable that names the whole image; building from a checkout is the override
+  `docker-compose.build.yml`.
 - Develop on a feature branch off `beta`; never commit directly to `beta` or `main`.
 - Give a new feature its own worktree and its own agent session.
 - Check for an existing open PR before opening a new one; never push without a PR; never add commits to a branch whose PR is

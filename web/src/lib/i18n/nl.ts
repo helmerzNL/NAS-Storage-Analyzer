@@ -2,7 +2,7 @@ export const nl: Record<string, string> = {
   // algemeen
   'common.add': 'Toevoegen', 'common.cancel': 'Annuleren', 'common.close': 'Sluiten', 'common.continue': 'Doorgaan', 'common.delete': 'Verwijderen',
   'common.edit': 'Wijzigen', 'common.loading': 'Laden…', 'common.more': 'Meer laden', 'common.retry': 'Opnieuw proberen', 'common.save': 'Opslaan',
-  'app.notfound': 'Deze pagina bestaat niet.', 'app.unreachable': 'De server is niet bereikbaar',
+  'app.beta.title': 'Beta-versie: bevat nieuwe functies die nog getest worden', 'app.notfound': 'Deze pagina bestaat niet.', 'app.unreachable': 'De server is niet bereikbaar',
   'nav.main': 'Hoofdmenu', 'nav.dashboard': 'Dashboard', 'nav.browse': 'Mappen', 'nav.lists': 'Lijsten', 'nav.search': 'Zoeken', 'nav.shares': 'Shares',
   'nav.extensions': 'Bestandstypes', 'nav.users': 'Gebruikers', 'nav.audit': 'Auditlog', 'nav.account': 'Mijn account',
   'live.running': 'Er loopt een scan', 'live.running.n': '{n} scan(s) actief',

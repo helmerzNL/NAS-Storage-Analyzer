@@ -66,6 +66,20 @@ paths:
       summary: This document
       responses:
         "200": {description: "The OpenAPI document.", content: {application/yaml: {schema: {type: string}}}}
+  /api/v1/version:
+    get:
+      tags: [operations]
+      operationId: getVersion
+      summary: Which version and release channel is running (public)
+      description: |
+        The channel comes from `NASA_TAG`, the variable that also picks the image in `docker-compose.yml`:
+        a tag that contains `beta` is a `beta` build, anything else (`latest`, a version number, unset) is `stable`.
+        The web interface shows a **beta** label next to its name on a beta build.
+      security: []
+      responses:
+        "200":
+          description: The running build.
+          content: {application/json: {schema: {$ref: "#/components/schemas/Version"}}}
 
   /api/v1/shares:
     post:
@@ -1231,6 +1245,13 @@ components:
         size: {type: integer, format: int64}
         mtime: {type: string, format: date-time, nullable: true}
 
+    Version:
+      type: object
+      required: [version, commit, channel]
+      properties:
+        version: {type: string, description: "MAJOR.MINOR.PATCH the image was built for, `dev` for a build from a checkout.", example: "0.1.0"}
+        commit: {type: string, description: "The git commit the image was built from; empty when unknown.", example: "5d74b70"}
+        channel: {type: string, enum: [stable, beta]}
     AuthStatus:
       type: object
       required: [setup_required, authenticated, min_password_length, https_required]

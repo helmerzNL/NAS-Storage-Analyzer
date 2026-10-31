@@ -10,6 +10,9 @@ commands = (
     [sys.executable, "scripts/check_agent_instructions.py"],
     # Cheap and deterministic: parses one markdown table. Catches a topic left unanswered before the commit exists.
     [sys.executable, "scripts/check_app_engineering.py"],
+    # Under a second, no Docker needed: reads docker-compose.yml and .env.example as text. Catches a named volume, a relative
+    # DATA_PATH or a drifted NASA_TAG before the commit exists (baseline sections 20 and 21).
+    [sys.executable, "-m", "unittest", "discover", "-s", "scripts", "-p", "test_deploy_layout.py"],
 )
 
 for cmd in commands:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pull-request guard: a pull request must not change VERSION.
 
-VERSION is raised by the pipeline after the merge (`bump_version.py`, run by the `bump-version` workflow). A pull request that
+VERSION is raised by the pipeline after the merge (`bump_version.py`, run by the `publish` workflow). A pull request that
 raises it itself collides with every other pull request that does the same, which is the conflict this rule exists to remove.
 
 The one exception is the pull request that introduces VERSION: when the base branch has no VERSION yet, adding it is allowed.

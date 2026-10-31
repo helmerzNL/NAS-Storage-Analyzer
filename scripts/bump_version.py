@@ -2,7 +2,7 @@
 """Bump VERSION after a merge, so that no pull request has to touch it.
 
 Two pull requests that each raise VERSION collide as soon as the other one merges, however correct both are. So a pull request
-does not change VERSION (`check_version_bump.py` fails it when it does); the `bump-version` workflow runs this after every push to
+does not change VERSION (`check_version_bump.py` fails it when it does); the `publish` workflow runs this after every push to
 main and commits the new number itself.
 
   python scripts/bump_version.py --before <sha main had> --after <sha it has now> [--part patch|minor|major]

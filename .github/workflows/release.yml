@@ -109,5 +109,8 @@ jobs:
             --title "NAS Storage Analyzer ${TAG}" \
             --notes-file "${NOTES_FILE}" \
             ${FLAGS}
-      # The step that dispatches the image publish workflow on the new tag is added with that workflow
-      # (the deployment-layout change): a tag created with GITHUB_TOKEN starts no `on: push: tags` workflow.
+      # No publish workflow is dispatched here, on purpose. Images are built when a branch moves, not from a tag:
+      # publish.yml pushes `latest` and the version tag `X.Y.Z` when a promotion lands (and only while this tag did
+      # not exist yet), publish-beta.yml pushes `beta` and `beta-<sha>`. A tag created with GITHUB_TOKEN would start
+      # no `on: push: tags` workflow anyway; if one is ever needed, dispatch it here with `gh workflow run`, which
+      # does start a run (and needs `actions: write` in the permissions above).

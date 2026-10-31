@@ -11,6 +11,7 @@ import { folderCrumbs, startFolder } from './folders';
 import { b64urlToBuf, bufToB64url } from './webauthn';
 import { nl } from './i18n/nl';
 import { en } from './i18n/en';
+import { pageTitle, APP_NAME } from './version.svelte';
 
 describe('formatBytes', () => {
   it('uses 1024 or 1000 steps', () => {
@@ -217,5 +218,17 @@ describe('folder picker helpers', () => {
     expect(startFolder('')).toBe('');
     expect(startFolder('media')).toBe('');
     expect(startFolder('/')).toBe('/');
+  });
+});
+
+describe('release channel', () => {
+  it('puts beta in the tab title of a beta build only', () => {
+    expect(pageTitle('beta')).toBe(`${APP_NAME} (beta)`);
+    expect(pageTitle('stable')).toBe(APP_NAME);
+    expect(pageTitle('')).toBe(APP_NAME);
+  });
+  it('is the title index.html starts with, so a stable build never flashes another one', () => {
+    const html = readFileSync(join(__dirname, '../../index.html'), 'utf8');
+    expect(html).toContain(`<title>${APP_NAME}</title>`);
   });
 });

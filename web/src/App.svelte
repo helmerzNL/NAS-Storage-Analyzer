@@ -5,6 +5,7 @@
   import { t, i18n } from './lib/i18n.svelte';
   import { live, startLive, stopLive } from './lib/live.svelte';
   import Toasts from './components/Toasts.svelte';
+  import BetaBadge from './components/BetaBadge.svelte';
   import Auth from './routes/Auth.svelte';
   import Dashboard from './routes/Dashboard.svelte';
   import Browse from './routes/Browse.svelte';
@@ -53,6 +54,7 @@
         <a class="brand" href="/" use:link>
           <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f766e"/><path d="M16 16V5.5a10.5 10.5 0 0 1 9.4 5.8z" fill="#5eead4"/><path d="M16 16l9.4-4.7A10.5 10.5 0 1 1 16 5.5z" fill="#ccfbf1" opacity=".55"/><circle cx="16" cy="16" r="4" fill="#0f766e"/></svg>
           <span class="hide-md">NAS Storage Analyzer</span>
+          <BetaBadge />
         </a>
         <nav class="nav" aria-label={t('nav.main')}>
           {#each nav as n}<a href={n.href} use:link class:active={n.on} aria-current={n.on ? 'page' : undefined}>{n.label}</a>{/each}

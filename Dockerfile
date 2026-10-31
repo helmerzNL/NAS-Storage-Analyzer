@@ -23,7 +23,8 @@ RUN go mod download
 COPY . .
 COPY --from=web /src/internal/webui/dist/ ./internal/webui/dist/
 ARG VERSION=dev
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/nasa ./cmd/nasa
+ARG GIT_COMMIT=
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT}" -o /out/nasa ./cmd/nasa
 
 # 3. Runtime. nfs-utils and cifs-utils are only used by the worker, and only
 #    when a share is mounted from inside the container (see docs/deploy.md).

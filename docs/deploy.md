@@ -25,8 +25,8 @@ Vereist: Docker met Compose v2 en een host met een of meer gemounte NAS-shares.
 ```bash
 git clone https://github.com/helmerzNL/NAS-Storage-Analyzer.git
 cd NAS-Storage-Analyzer
-./scripts/init-env.sh              # maakt .env met een willekeurig database-wachtwoord, encryptiesleutel en setup-token
-docker compose up -d --build
+./scripts/init-env.sh              # maakt .env: data- en shares-map (absoluut), een willekeurig database-wachtwoord, encryptiesleutel en setup-token
+docker compose up -d
 ```
 
 Open daarna <http://127.0.0.1:8080>. De eerste keer vraagt het scherm om de **setup-token** (staat in `.env`
@@ -37,9 +37,33 @@ standaardwachtwoorden.
 Daarna: **Shares → Share toevoegen**, kies het type *Gemount pad (aanbevolen)*, klik op **Bladeren…** en kies de map
 (of typ het pad, bijvoorbeeld `/mnt/shares/media`) en klik op *Scan nu* op het dashboard.
 
-Docker moet de image bouwen (Node, Go, Alpine; een paar minuten de eerste keer). Wil je op een andere machine
-deployen zonder te bouwen: `docker build -t nas-storage-analyzer .` op de ene, `docker save | docker load` of een
-eigen registry, en zet `NASA_IMAGE` in `.env`.
+**Welke image.** De stack haalt `ghcr.io/helmerznl/nas-storage-analyzer:${NASA_TAG}` op; er wordt op de server niets gebouwd,
+dus een stackmanager heeft alleen `docker-compose.yml` en `.env` nodig. `NASA_TAG` (in `.env`) is `latest` (stabiel, standaard),
+`beta` (de build waar elke wijziging eerst in landt; de interface toont een **beta**-label) of een versienummer om vast te zetten
+(en om terug te gaan, zie §8). Gebruik voor `beta` een aparte `DATA_PATH`. De images zijn multi-arch (`linux/amd64` en `linux/arm64`).
+Het GHCR-pakket moet **publiek** zijn om zonder inloggen te kunnen pullen (instelling van de eigenaar). Zolang er nog geen promotie
+naar `main` is geweest, bestaat `latest` niet: zet `NASA_TAG=beta`. Zelf bouwen uit een checkout:
+
+```bash
+NASA_COMMIT=$(git rev-parse --short HEAD) docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+### Waar de data staat (Where the data lives)
+
+Alles wat niet verloren mag gaan staat in één map op de host: **`DATA_PATH`**. De database is `DATA_PATH/postgres`; alleen de
+`db`-service mount die map. Het zijn gewone mappen, geen Docker-volumes, dus `docker compose down -v`, `docker volume prune`
+en een herbouw kunnen er niet bij. Regels:
+
+* `DATA_PATH` is **verplicht** (Compose weigert te starten zonder) en een **absoluut** pad van de machine waarop Docker draait,
+  nooit `./data`. Een relatief pad wordt niet door de app opgelost maar door de tool die de stack start: Dockhand op Unraid maakte er bij een andere
+  Flux76-app een map in het RAM-schijfgeheugen van (baseline §21), zodat de database tot de volgende herstart goed leek te werken. Hier
+  loste Dockhand het relatieve `./shares` op naar zijn eigen datamap, niet naar je NAS. De containers loggen een
+  waarschuwing bij een relatief pad, en `init-env.sh` weigert het.
+* Unraid: een map op de array of cache, bijvoorbeeld `/mnt/cache/appdata/nas-storage-analyzer` (een schijfpad slaat de FUSE-laag van
+  `/mnt/user` over) of `/mnt/user/appdata/nas-storage-analyzer`; nooit `/appdata` of `/data`: dat is het RAM-schijfgeheugen.
+  Andere servers: `/srv/nas-storage-analyzer`, op een lokale schijf.
+* `NASA_SHARES_DIR` (de map met je gemounte shares) is om dezelfde reden verplicht en absoluut.
+* Back-up: bewaar `pg_dump` (§5), of de hele `DATA_PATH` met de stack gestopt, en `NASA_ENCRYPTION_KEY` apart.
 
 **Wat draait er?**
 
@@ -47,7 +71,7 @@ eigen registry, en zet `NASA_IMAGE` in `.env`.
 |---|---|---|---|
 | `app` | web-interface, REST API, scheduler | 8080 (standaard alleen op `127.0.0.1`) | geen root, geen capabilities, alleen-lezen rootfs |
 | `worker` | voert scans uit, mount zo nodig NFS/SMB | 8081 intern (health check) | idem; route (a) verhoogt dit **alleen voor de worker** |
-| `db` | PostgreSQL 16 | niet gepubliceerd | volume `db-data` |
+| `db` | PostgreSQL 16 | niet gepubliceerd | map `${DATA_PATH}/postgres` |
 
 `app` en `worker` praten alleen via de database met elkaar (een jobwachtrij met `FOR UPDATE SKIP LOCKED`), dus
 je kunt ze onafhankelijk herstarten; een lopende scan overleeft een herstart van `app`.
@@ -98,8 +122,9 @@ Kies een absoluut pad dat de container zelf niet gebruikt: niet `/`, `/usr`, `/e
 
 #### Unraid, Portainer, Dockge en andere stack-managers
 
-* **Gebruik een absoluut pad voor `NASA_SHARES_DIR`.** De standaard `./shares` is relatief aan de map van de stack,
-  en die bewaart een manager waar hij wil; je scant dan een lege map in plaats van je NAS. Zet de variabelen in het
+* **Gebruik een absoluut pad voor `NASA_SHARES_DIR` en `DATA_PATH`.** Een relatief pad is relatief aan de map van de stack,
+  en die bewaart een manager waar hij wil; je scant dan een lege map in plaats van je NAS, en de database kan in het
+  RAM-schijfgeheugen belanden. Compose weigert daarom te starten als ze ontbreken. Zet de variabelen in het
   `.env`-bestand van de stack (of in de omgevingsvariabelen-editor van je manager).
 * **Unraid:** de array-shares staan onder `/mnt/user`. Met `NASA_SHARES_DIR=/mnt/user` verschijnt elke share als
   `/mnt/shares/<share>`, dus je voegt bijvoorbeeld `/mnt/shares/media` toe als *Gemount pad*. Zet je ook
@@ -318,7 +343,7 @@ docker compose up -d
   opgeslagen SMB-wachtwoorden onleesbaar; shares moeten dan opnieuw worden ingevoerd. Al het andere herstelt gewoon.
 * De historie (snapshots) en de bestandsindex zitten in de dump. Een herstelde database werkt direct; een volledige
   scan (*Volledige scan* op het dashboard) bouwt de index desgewenst opnieuw op.
-* Een bestandssysteem-snapshot van het volume `db-data` met de database gestopt werkt ook (`docker compose stop db`).
+* Een bestandssysteem-snapshot of kopie van `DATA_PATH/postgres` met de database gestopt werkt ook (`docker compose stop db`).
 * Een grote database (tientallen miljoenen bestanden) dumpt in minuten tot een uur; plan dat buiten de scantijd.
 
 ## 6. PostgreSQL afstellen
@@ -371,13 +396,48 @@ Zet de datadirectory van de database op SSD's. Dat is, meer dan elke parameter, 
 ## 8. Bijwerken
 
 ```bash
-git pull
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
+
+Een stackmanager (Dockhand, Komodo, Portainer) doet dat zelf bij "bijwerken". Welke versie je krijgt hangt af van `NASA_TAG`:
+`latest` volgt de stabiele lijn, een versienummer blijft staan tot je het wijzigt. Terug naar een vorige versie: zet `NASA_TAG`
+op het vorige nummer en pull opnieuw; migraties worden niet teruggedraaid, dus een oudere versie werkt alleen als de
+release-notes (`docs/releases/`) zeggen dat het schema compatibel is. Herstel anders de back-up van vóór de update.
 
 Migraties draaien bij het starten (onder een advisory lock, dus `app` en `worker` kunnen tegelijk starten).
 Maak vooraf een [back-up](#5-back-up-en-herstel). Een nieuwe versie die een nieuwe categorie of extensie
 toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
+
+### Eenmalig: de database van het volume `db-data` naar `DATA_PATH` verplaatsen
+
+Alleen nodig als je stack draait met een versie waarin de database in het Docker-volume `db-data` staat (`docker volume ls`
+toont dan `nas-storage-analyzer_db-data`). Een nieuwe installatie slaat dit over. Een stackmanager voert dit script nooit
+uit; je draait het **één keer zelf, vóór je de nieuwe versie uitrolt**:
+
+1. Maak een [back-up](#5-back-up-en-herstel) en kies de map: een absoluut pad op de host, bijvoorbeeld
+   `/mnt/cache/appdata/nas-storage-analyzer` (Unraid) of `/srv/nas-storage-analyzer`.
+2. Op de Docker-host, als root (een Docker-volume is van root), met `scripts/migrate_data.sh` uit deze repository (het
+   is één bestand; kopieer het mee als je alleen de Compose-bestanden op de server hebt):
+
+   ```bash
+   sh scripts/migrate_data.sh --check --data-path /mnt/cache/appdata/nas-storage-analyzer   # zegt wat het zou doen, verandert niets
+   sh scripts/migrate_data.sh         --data-path /mnt/cache/appdata/nas-storage-analyzer
+   ```
+
+   Het script zoekt de `db`-container via de labels van Docker Compose (project `nas-storage-analyzer`; heet jouw project anders,
+   bijvoorbeeld omdat je stackmanager een eigen naam gebruikt, geef dan `--project <naam>` mee), **stopt de stack**, kopieert de
+   database naar `DATA_PATH/postgres` (eigenaar en rechten blijven behouden), controleert de kopie en zet haar pas dan op haar
+   plaats. Het verwijdert niets: het volume blijft staan. Het weigert als `DATA_PATH/postgres` al een *andere* database bevat, en doet niets
+   als de data er al staat of al is gekopieerd, dus je kunt het zonder risico nog eens draaien.
+3. Zet `DATA_PATH` (en eventueel `NASA_TAG`) in `.env` of in de omgevingsvariabelen van je stackmanager, vervang
+   `docker-compose.yml` door de nieuwe, en rol uit: `docker compose pull && docker compose up -d`.
+4. Controleer dat de interface je shares en geschiedenis toont. Pas daarna verwijder je het oude volume zelf:
+   `docker volume rm nas-storage-analyzer_db-data`.
+
+**Heb je de nieuwe versie uitgerold vóór je het script draaide?** Dan startte `db` op een lege map en vraagt de app opnieuw om de
+setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (niet verwijderen) `DATA_PATH/postgres` weg, en draai
+`sh scripts/migrate_data.sh --data-path <DATA_PATH> --from-volume`; start daarna opnieuw. Het script herkent die situatie ook en zegt het.
 
 ## 9. Bekende beperkingen
 
@@ -415,7 +475,7 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
 |---|---|
 | `docker compose up` meldt "is mounted on / but it is not a shared or slave mount" | `NASA_SHARES_PROPAGATION` staat op `rslave` (of je gebruikt een oudere versie van dit bestand waar dat de standaard was). Zet het op `rprivate` of haal de regel weg, en haal de laatste versie van de repository op. |
 | **Bladeren…** toont "Geen mappen gevonden" | De share-map is leeg in de container: er is niets gemount, of `NASA_SHARES_DIR` wijst naar een andere map dan je denkt. Zie de rij hieronder. |
-| De scan vindt niets, of de share-map is leeg | Het auditlog toont dan `scan.empty`. `NASA_SHARES_DIR` is niet gezet (dan is het `./shares` in de stackmap) of wijst niet naar de map met je mounts. Gebruik een absoluut pad op de host. |
+| De scan vindt niets, of de share-map is leeg | Het auditlog toont dan `scan.empty`. `NASA_SHARES_DIR` wijst niet naar de map met je mounts (of is relatief en door je stackmanager ergens anders opgelost). Gebruik een absoluut pad op de host. |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASA_SETUP_TOKEN` in `.env`. |
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASA_RP_ID` in. |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
@@ -426,9 +486,19 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
 
 ## 11. English summary
 
-* **Install:** `./scripts/init-env.sh && docker compose up -d --build`, open <http://127.0.0.1:8080>, enter the setup
+* **Install:** `./scripts/init-env.sh && docker compose up -d`, open <http://127.0.0.1:8080>, enter the setup
   token from `.env`, create the administrator, enrol a second factor (authenticator app or passkey, mandatory) and
   store the recovery codes. There are no default passwords.
+* **Image and channel:** the stack pulls `ghcr.io/helmerznl/nas-storage-analyzer:${NASA_TAG}` (multi-arch); nothing is built on the
+  server. `NASA_TAG` is `latest` (stable, default), `beta` (what changes land in first; the interface shows a **beta** label; use
+  a separate `DATA_PATH`) or a version number to pin or roll back to. Until the first promotion to `main` there is no `latest`: use
+  `NASA_TAG=beta`, or build from a checkout with `-f docker-compose.yml -f docker-compose.build.yml`. The package on GHCR must be public.
+* **Where the data lives:** one absolute host folder, `DATA_PATH` (required; the database is `DATA_PATH/postgres`), plain folders and
+  never Docker volumes; a relative path is refused by `init-env.sh` and warned about by the containers. `NASA_SHARES_DIR` is required and
+  absolute too. **Upgrading from the Docker volume `db-data`:** before deploying the new version run `sh scripts/migrate_data.sh --check
+  --data-path <DATA_PATH>`, then without `--check`, as root on the Docker host (it stops the stack, copies and verifies, never deletes the
+  volume; a deploy tool does not run it). If the new version was deployed first and the app asks for the setup token again, your data is
+  still in the volume: stop the stack, move `DATA_PATH/postgres` away and run the script with `--from-volume`. Details: §8.
 * **Services:** `app` (UI, API, scheduler), `worker` (runs scans), `db` (PostgreSQL 16). `app` and `worker` run as
   uid 10001 with no capabilities and a read-only root file system.
 * **Shares, recommended (route b):** mount NFS/SMB on the Docker host read-only, set `NASA_SHARES_DIR` to the
@@ -455,7 +525,9 @@ toevoegt, raakt je eigen wijzigingen aan de extensietabel niet.
   response buffering for `/api/v1/events`. Examples for Caddy, nginx and Traefik are above. Passkeys need a host
   name (not an IP address) and https.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` stored separately. Without the key the
-  stored SMB passwords cannot be decrypted.
+  stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
+* **Update / rollback:** `docker compose pull && docker compose up -d`. A rollback is `NASA_TAG` set to the previous version number; migrations
+  are not undone, so back up first and check the release notes.
 * **Limits:** atime is often unreliable (warned in the UI, switchable to mtime); incremental scans miss in-place
   edits and new hardlinks in unchanged folders until the next full scan (every 7th by default); two broad age
   filters over a whole 10M-file share take 2.0-2.6 s, everything else is under 500 ms.
