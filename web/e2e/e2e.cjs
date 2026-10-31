@@ -916,13 +916,17 @@ const expectText = async (page, sel, re, msg) => {
       for (const sel of ['[data-testid=accent-0f766e]', '.settings-nav a[aria-current=page]', '[data-testid=pref-units]', '[data-testid=user-menu]']) {
         await page.focus(sel);
         await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Tab');   // arrive by keyboard so :focus-visible applies
-        await page.waitForTimeout(300);   // the field's ring fades in (a 150 ms transition): measure the end state, not the first frame
+        // The field's ring fades in (a 150 ms transition): measure the end state, not a frame on the way. A fixed wait is a guess that a slow runner
+        // loses (CI once measured 2.97 px of 3 px), so wait for the style recalculation that starts the transition, then until nothing animates.
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+        await page.waitForFunction(() => document.activeElement.getAnimations().length === 0, null, { timeout: 5000 });
         const ring = await page.evaluate(() => { const e = document.activeElement, s = getComputedStyle(e); return [s.outlineStyle, parseFloat(s.outlineWidth), s.boxShadow, e.tagName + '[' + (e.getAttribute('data-testid') || e.className) + ']', e.matches(':focus-visible')].join('|'); });
         const [style, width, shadow, who, fv] = ring.split('|');
         if (!(await page.evaluate((x) => document.activeElement.matches(x), sel))) throw new Error('focus is on ' + who + ', not on ' + sel);
         if (fv !== 'true') throw new Error(sel + ' is focused by keyboard but does not match :focus-visible');
-        // The outline, or the field's own ring (a colour-mix shadow with a real spread), must be there.
-        if ((style === 'none' || width < 2) && !/ [1-9]\d*px$/.test(shadow.replace(/\s*inset\s*/, ' ').trim())) throw new Error(sel + ' shows no focus indicator: ' + ring);
+        // The outline, or the field's own ring (a colour-mix shadow with a real spread, a decimal once the browser has rounded the colour), must be there.
+        const spread = parseFloat((shadow.replace(/\s*inset\s*/, ' ').trim().match(/(-?\d*\.?\d+)px$/) || [])[1]);
+        if ((style === 'none' || width < 2) && !(spread >= 2)) throw new Error(sel + ' shows no focus indicator: ' + ring);
       }
     });
 
