@@ -99,7 +99,7 @@ export const en: Record<string, string> = {
   'users.pw.set': 'Password set', 'users.resetmfa': 'Clear second factor', 'users.mfa.reset': 'Second factor cleared', 'users.reset.title': 'Clear the second factor?',
   'users.reset.body': '{name} loses the authenticator app, passkeys and recovery codes and is signed out. At the next sign-in a new second factor must be set up.',
   'users.delete.title': 'Delete user?', 'users.delete.body': 'The account “{name}” will be deleted permanently.',
-  'audit.intro': 'Sign-ins, scan starts and configuration changes.', 'audit.filter': 'Kind of event', 'audit.all': 'Everything', 'audit.when': 'When', 'audit.who': 'Who',
+  'audit.intro': 'Sign-ins, changes to the configuration and the outcome of scans: finished, failed or nothing found.', 'audit.filter': 'Kind of event', 'audit.all': 'Everything', 'audit.when': 'When', 'audit.who': 'Who',
   'audit.action': 'Event', 'audit.target': 'Subject', 'audit.none': 'No events.',
   'ext.intro': 'Which file type belongs to which category. Case does not matter; files without an extension are “Other”.', 'ext.add': 'Extension', 'ext.category': 'Category', 'ext.filter': 'Find extension…',
   'ext.note': 'After a change the sizes per category are updated in the background, without rescanning. Historical charts keep their original grouping.',

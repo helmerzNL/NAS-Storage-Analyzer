@@ -337,7 +337,7 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'user.create', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'user.create', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
     });
 
@@ -361,6 +361,31 @@ const expectText = async (page, sel, re, msg) => {
       await page.goto(BASE + '/admin/extensions');
       await page.waitForSelector('[data-testid=ext-mkv]');
       await moved('→ Video');
+    });
+
+    await step('a scan that finds nothing is flagged in the audit log', async () => {
+      // A wrong NASA_SHARES_DIR or an unmounted share is an empty folder: the scan succeeds, and used to leave no trace.
+      fs.mkdirSync(path.join(SHARE_DIR, 'leeg'), { recursive: true });
+      await page.goto(BASE + '/admin/shares');
+      await page.click('[data-testid=add-share]');
+      await page.fill('[data-testid=f-name]', 'Leeg');
+      await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'leeg'));
+      await page.click('[data-testid=f-save]');
+      await page.waitForSelector('[data-testid=share-row]:has-text("Leeg")');
+      await page.click('[data-testid=share-row]:has-text("Leeg") >> text=Scan nu');
+      let row = null;
+      for (let i = 0; i < 40 && !row; i++) {
+        await page.goto(BASE + '/admin/audit');
+        await page.waitForSelector('[data-testid=audit-table] tbody tr');
+        row = await page.$('[data-testid=audit-table] tbody tr:has-text("scan.empty")');
+        if (!row) await page.waitForTimeout(500);
+      }
+      if (!row) throw new Error('no scan.empty entry in the audit log');
+      const text = (await row.textContent()).replace(/\s+/g, ' ');
+      if (!text.includes('Leeg') || !text.includes('worker') || !/mounted/.test(text)) throw new Error('the entry does not say what to check: ' + text);
+      if (!(await row.$('.badge.warn'))) throw new Error('an empty scan must stand out (amber badge)');
+      if (!(await page.$('[data-testid=audit-table] tbody tr:has-text("scan.finished"):has-text("Media")'))) throw new Error('the scan of Media is missing as scan.finished');
+      await shot('14-audit-empty-scan');
     });
 
     await step('no JavaScript errors occurred', async () => { if (errors.length) throw new Error(errors.join('\n')); });

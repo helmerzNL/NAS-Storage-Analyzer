@@ -169,6 +169,9 @@ func (w *Worker) execute(ctx context.Context, job *jobs.Job) {
 	default:
 		state, msg = jobs.StateFailed, "unknown job kind"
 	}
+	if state == jobs.StateFailed {
+		w.auditFailure(log, job, msg)
+	}
 	done, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := w.q.Finish(done, job.ID, state, msg); err != nil {
@@ -291,6 +294,16 @@ func (w *Worker) runScan(ctx context.Context, job *jobs.Job, log *slog.Logger) (
 		_, _ = w.st.Pool.Exec(context.Background(), `UPDATE shares SET last_run_at = now() WHERE id = $1`, f.ID)
 		log.Info("scan finished", "scan_id", res.ScanID, "mode", res.Mode, "files", res.Totals.Files, "bytes", res.Totals.Bytes,
 			"errors", res.Progress.Errors, "seconds", res.Duration.Seconds())
+		action, hint := scanOutcome(res.Totals, res.Progress.Errors)
+		detail := jobDetail(job)
+		detail["scan_id"], detail["mode"] = res.ScanID, res.Mode
+		detail["files"], detail["dirs"], detail["bytes"] = res.Totals.Files, res.Totals.Dirs, res.Totals.Bytes
+		detail["errors"], detail["seconds"] = res.Progress.Errors, float64(res.Duration.Round(100*time.Millisecond).Milliseconds())/1000
+		if hint != "" {
+			detail["hint"] = hint
+			log.Warn("scan needs attention", "action", action, "hint", hint)
+		}
+		w.audit(log, action, f.Input.Name, detail)
 		return jobs.StateDone, ""
 	case wasCancelled:
 		return jobs.StateCancelled, ""
@@ -300,4 +313,58 @@ func (w *Worker) runScan(ctx context.Context, job *jobs.Job, log *slog.Logger) (
 		return jobs.StateFailed, "another scan of this share is already running"
 	}
 	return jobs.StateFailed, fmt.Sprint(err)
+}
+
+// scanOutcome says how a published scan went, as the audit-log action it is recorded under, and for the
+// ones that need attention what to check. A scan that finds nothing is not an error for the scanner (a new,
+// empty share is legitimate), so without this it would pass without a trace: a share folder that is not
+// mounted, or a NASA_SHARES_DIR that points at the wrong folder, looks exactly like that.
+func scanOutcome(t store.ScanTotals, readErrors int64) (action, hint string) {
+	switch {
+	case t.Files == 0 && t.Dirs <= 1:
+		return "scan.empty", "The scan found no files. Is the share mounted on the host, and does the path point at the right " +
+			"folder (NASA_SHARES_DIR, NASA_SHARES_MOUNT)? Use Browse in the share form to see what the container sees."
+	case readErrors > 0:
+		return "scan.errors", fmt.Sprintf("%d folders or files could not be read (permission denied, or a network share that stopped "+
+			"answering). The scan is published without them; the dashboard lists them per scan.", readErrors)
+	}
+	return "scan.finished", ""
+}
+
+func jobDetail(job *jobs.Job) map[string]any {
+	d := map[string]any{"job": job.ID, "trigger": job.Trigger}
+	if job.RequestedBy != "" {
+		d["requested_by"] = job.RequestedBy
+	}
+	return d
+}
+
+// auditFailure records why a job failed. The job's own error is kept in the jobs table and shown on the
+// dashboard, but only the audit log is a place to look back through, and it is the one admins read.
+func (w *Worker) auditFailure(log *slog.Logger, job *jobs.Job, msg string) {
+	action := "scan.failed"
+	if job.Kind != jobs.KindScan {
+		action = "share.recategorize_failed"
+	}
+	target := fmt.Sprintf("share #%d", job.ShareID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var name string
+	if err := w.st.Pool.QueryRow(ctx, `SELECT name FROM shares WHERE id = $1`, job.ShareID).Scan(&name); err == nil {
+		target = name
+	}
+	detail := jobDetail(job)
+	detail["error"] = msg
+	w.audit(log, action, target, detail)
+}
+
+// audit appends a job outcome to the audit log, as "worker" (nobody signed in did this). Writing it must
+// never change what happened to the job, so a failure is only logged.
+func (w *Worker) audit(log *slog.Logger, action, target string, detail map[string]any) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := w.st.Pool.Exec(ctx, `INSERT INTO audit_log (user_id, username, ip, action, target, detail) VALUES (NULL, 'worker', '', $1, $2, $3)`,
+		action, target, detail); err != nil {
+		log.Error("cannot write the audit log", "action", action, "error", err)
+	}
 }

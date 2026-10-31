@@ -16,7 +16,9 @@
   }
   $effect(() => { void prefix; void load(); });
   const detail = (e: AuditEntry) => Object.entries(e.detail).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : v}`).join(' ');
-  const badge = (a: string) => (a.endsWith('failure') || a.endsWith('locked') || a.includes('bad_token') ? 'bad' : a.startsWith('login.success') ? 'ok' : '');
+  // Red: something failed. Amber: the scan went through but found nothing, or could not read everything.
+  const badge = (a: string) => (a.endsWith('failure') || a.endsWith('locked') || a.endsWith('failed') || a.includes('bad_token') ? 'bad'
+    : a === 'scan.empty' || a === 'scan.errors' ? 'warn' : a.startsWith('login.success') || a === 'scan.finished' ? 'ok' : '');
 </script>
 
 <div class="page-head"><div class="grow"><h1>{t('nav.audit')}</h1><p class="muted" style="margin:0">{t('audit.intro')}</p></div>
@@ -28,7 +30,7 @@
     <tbody>
       {#each items as e (e.id)}
         <tr><td class="nowrap small">{formatDateTime(e.at, i18n.lang)}</td><td>{e.username || '–'}</td>
-          <td><span class="badge {badge(e.action)}">{e.action}</span>{#if detail(e)}<div class="muted small mono truncate" style="max-width:40ch" title={detail(e)}>{detail(e)}</div>{/if}</td>
+          <td><span class="badge {badge(e.action)}">{e.action}</span>{#if detail(e)}<div class="muted small mono audit-detail" title={detail(e)}>{detail(e)}</div>{/if}</td>
           <td class="hide-sm small truncate" style="max-width:28ch">{e.target}</td><td class="hide-sm small mono">{e.ip}</td></tr>
       {:else}<tr><td colspan="5" class="muted">{loading ? t('common.loading') : t('audit.none')}</td></tr>{/each}
     </tbody>

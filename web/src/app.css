@@ -49,6 +49,7 @@ button.ghost { border-color: transparent; background: transparent; } button.smal
 
 label.field, div.field { display: flex; flex-direction: column; gap: 4px; font-weight: 500; font-size: .92rem; } label.field .hint, div.field .hint { font-weight: 400; color: var(--muted); font-size: .82rem; }
 .input-row { display: flex; gap: 8px; align-items: stretch; } .input-row input { flex: 1 1 auto; } .input-row button { flex: none; }
+.audit-detail { max-width: 70ch; overflow-wrap: anywhere; }
 .folders { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 8px; max-height: 50vh; overflow: auto; } .folders[aria-busy="true"] { opacity: .6; }
 .folders li { display: flex; align-items: center; gap: 8px; padding: 2px 6px; } .folders li + li { border-top: 1px solid var(--border); } .folders li.pad { padding: 12px; } .folders button.left { justify-content: flex-start; text-align: left; min-width: 0; }
 input, select, textarea { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; width: 100%; min-width: 0; }

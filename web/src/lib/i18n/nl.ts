@@ -99,7 +99,7 @@ export const nl: Record<string, string> = {
   'users.pw.set': 'Wachtwoord ingesteld', 'users.resetmfa': 'Tweede factor wissen', 'users.mfa.reset': 'Tweede factor gewist', 'users.reset.title': 'Tweede factor wissen?',
   'users.reset.body': '{name} verliest de authenticator-app, passkeys en herstelcodes en wordt afgemeld. Bij het volgende inloggen moet een nieuwe tweede factor worden ingesteld.',
   'users.delete.title': 'Gebruiker verwijderen?', 'users.delete.body': 'Het account “{name}” wordt definitief verwijderd.',
-  'audit.intro': 'Aanmeldingen, scanstarts en wijzigingen aan de configuratie.', 'audit.filter': 'Soort gebeurtenis', 'audit.all': 'Alles', 'audit.when': 'Wanneer', 'audit.who': 'Wie',
+  'audit.intro': 'Aanmeldingen, wijzigingen aan de configuratie en de uitkomst van scans: gelukt, mislukt of niets gevonden.', 'audit.filter': 'Soort gebeurtenis', 'audit.all': 'Alles', 'audit.when': 'Wanneer', 'audit.who': 'Wie',
   'audit.action': 'Gebeurtenis', 'audit.target': 'Onderwerp', 'audit.none': 'Geen gebeurtenissen.',
   'ext.intro': 'Welk bestandstype bij welke categorie hoort. Hoofdletters maken niet uit; bestanden zonder extensie zijn “Overig”.', 'ext.add': 'Extensie', 'ext.category': 'Categorie', 'ext.filter': 'Zoek extensie…',
   'ext.note': 'Na een wijziging worden de groottes per categorie op de achtergrond bijgewerkt, zonder opnieuw te scannen. De historische grafieken houden hun oorspronkelijke indeling.',
