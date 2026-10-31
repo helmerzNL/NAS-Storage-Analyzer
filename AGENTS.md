@@ -83,7 +83,8 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `enforce-version-bump` | that a pull request does not change `VERSION` |
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
   | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
-  | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped database test |
+  | `delete-script-shells` | that the delete scripts of `internal/delscript` really delete exactly the selected files: `sh`, `dash` and `bash` on Linux and macOS, `cmd.exe` and PowerShell (5.1 and 7) on Windows, with no skipped test (suffixed with the operating system on the pull request) |
+  | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped test, and with every shell the delete-script tests need present |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
   | `browser-e2e` | the whole application in a real browser, including passkeys and the worker |
   | `docker-build` | the image builds for `linux/amd64` and `linux/arm64` and the Compose files are valid for `.env.example` |

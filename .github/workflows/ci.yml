@@ -28,6 +28,7 @@ jobs:
     env:
       NASA_TEST_DSN: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
       NASA_REQUIRE_DB: "1"      # a database test that cannot run fails instead of skipping
+      NASA_REQUIRE_SHELLS: sh,dash,bash,bash-posix   # same for the shells the delete-script tests run scripts in
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -107,6 +108,38 @@ jobs:
       - uses: actions/checkout@v4
       - name: Compose layout, init-env.sh and migrate_data.sh
         run: python -m unittest discover -s scripts -p "test_deploy_layout.py" -v
+
+  # The delete scripts (internal/delscript) are run for real, in the shell they are written for, against files with the
+  # names that break scripts. cmd.exe and Windows PowerShell 5.1 only exist on Windows, and the BSD stat of macOS is
+  # what the sh script has to cope with there, so this cannot be proven on one operating system. The package needs
+  # no database. A shell that is missing fails the job (NASA_REQUIRE_SHELLS) and so does a skipped test.
+  delete-script-shells:
+    name: delete-script-shells (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            shells: sh,dash,bash,bash-posix
+          - os: macos-latest
+            shells: sh,bash,bash-posix
+          - os: windows-latest
+            shells: pwsh
+    env:
+      NASA_REQUIRE_SHELLS: ${{ matrix.shells }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./internal/delscript/
+      - name: Run the scripts in the real shells
+        shell: bash
+        run: |
+          set -o pipefail
+          go test -count=1 -v ./internal/delscript/ | tee "$RUNNER_TEMP/delscript.out"
+          ! grep -q -- "--- SKIP" "$RUNNER_TEMP/delscript.out"
 
   docker-build:
     runs-on: ubuntu-latest
