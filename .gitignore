@@ -1,0 +1,13 @@
+/nasa
+/bin/
+*.test
+*.out
+.env
+/internal/webui/dist/*
+!/internal/webui/dist/.gitkeep
+node_modules/
+/web/node_modules/
+
+# Local deployment state: never commit
+/secrets/
+/shares/

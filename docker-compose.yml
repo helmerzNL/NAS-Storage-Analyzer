@@ -1,0 +1,122 @@
+# NAS Storage Analyzer: web interface + API (app), scan runner (worker) and database (db).
+#
+#   ./scripts/init-env.sh          # once: creates .env with a random database password and encryption key
+#   docker compose up -d --build
+#
+# Shares are scanned read-only. The recommended route is to mount the NFS/SMB share on the
+# Docker host and point NASA_SHARES_DIR at the folder that holds the mounts; see docs/deploy.md.
+
+name: nas-storage-analyzer
+
+x-nasa: &nasa
+  image: ${NASA_IMAGE:-nas-storage-analyzer:latest}
+  build:
+    context: .
+    args:
+      VERSION: ${NASA_VERSION:-dev}
+  restart: unless-stopped
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  depends_on:
+    db:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options: {max-size: 10m, max-file: "5"}
+  volumes:
+    # The scan target, read-only. rslave makes mounts that the host adds or renews later visible here;
+    # set NASA_SHARES_PROPAGATION=rprivate if Docker refuses it ("not a shared or slave mount").
+    - type: bind
+      source: ${NASA_SHARES_DIR:-./shares}
+      target: /mnt/shares
+      read_only: true
+      bind:
+        propagation: ${NASA_SHARES_PROPAGATION:-rslave}
+  environment: &nasa-env
+    NASA_DB_HOST: db
+    NASA_DB_NAME: ${NASA_DB_NAME:-nasa}
+    NASA_DB_USER: ${NASA_DB_USER:-nasa}
+    NASA_DB_PASSWORD: ${NASA_DB_PASSWORD:-}
+    NASA_ENCRYPTION_KEY: ${NASA_ENCRYPTION_KEY:-}
+    NASA_TZ: ${NASA_TZ:-Europe/Amsterdam}
+    NASA_SHARES_ROOT: /mnt/shares
+
+services:
+  app:
+    <<: *nasa
+    command: ["serve"]
+    ports:
+      - "${NASA_HTTP_BIND:-127.0.0.1}:${NASA_HTTP_PORT:-8080}:8080"
+    environment:
+      <<: *nasa-env
+      NASA_SETUP_TOKEN: ${NASA_SETUP_TOKEN:-}
+      NASA_RP_ID: ${NASA_RP_ID:-}
+      NASA_RP_ORIGINS: ${NASA_RP_ORIGINS:-}
+      NASA_RP_NAME: ${NASA_RP_NAME:-NAS Storage Analyzer}
+      NASA_TRUSTED_PROXIES: ${NASA_TRUSTED_PROXIES:-}
+      NASA_REQUIRE_HTTPS: ${NASA_REQUIRE_HTTPS:-false}
+      NASA_METRICS_TOKEN: ${NASA_METRICS_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "nasa", "healthcheck", "-url", "http://127.0.0.1:8080/readyz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  worker:
+    <<: *nasa
+    command: ["worker"]
+    environment:
+      <<: *nasa-env
+      NASA_WORKER_PARALLEL: ${NASA_WORKER_PARALLEL:-2}
+      NASA_WORKER_HEALTH_LISTEN: 127.0.0.1:8081
+    healthcheck:
+      test: ["CMD", "nasa", "healthcheck", "-url", "http://127.0.0.1:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    shm_size: 256mb
+    stop_grace_period: 1m
+    environment:
+      POSTGRES_DB: ${NASA_DB_NAME:-nasa}
+      POSTGRES_USER: ${NASA_DB_USER:-nasa}
+      POSTGRES_PASSWORD: ${NASA_DB_PASSWORD:-}
+    # Sizing for the queries on the aggregate tables: about 25% of RAM for shared_buffers and
+    # 50-75% for effective_cache_size. The defaults suit a few million files; see docs/deploy.md.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=${PG_SHARED_BUFFERS:-512MB}
+      - -c
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-2GB}
+      - -c
+      - work_mem=${PG_WORK_MEM:-32MB}
+      - -c
+      - max_parallel_workers_per_gather=${PG_PARALLEL_WORKERS:-2}
+      - -c
+      - random_page_cost=${PG_RANDOM_PAGE_COST:-1.5}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    logging:
+      driver: json-file
+      options: {max-size: 10m, max-file: "5"}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  db-data:

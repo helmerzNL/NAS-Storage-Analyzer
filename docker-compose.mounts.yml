@@ -1,0 +1,19 @@
+# Route (a): let the worker mount NFS/SMB shares itself.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d
+#
+# This gives the worker container CAP_SYS_ADMIN and runs it as root, which is a lot more privilege
+# than the recommended route (mount on the host, bind read-only). Only the worker gets it, never the
+# web application. Scans themselves stay read-only: shares are mounted with "ro".
+services:
+  worker:
+    user: "0:0"
+    cap_add:
+      - SYS_ADMIN
+    # Hosts with AppArmor (Ubuntu, Debian) refuse mount(2) in containers unless the profile is relaxed.
+    security_opt:
+      - apparmor:unconfined
+    # Mount points are created here; the credentials of SMB shares go to a tmpfs and are removed again.
+    tmpfs:
+      - /tmp
+      - /mnt/managed
