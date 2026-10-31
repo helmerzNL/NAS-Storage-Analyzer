@@ -11,3 +11,6 @@ node_modules/
 # Local deployment state: never commit
 /secrets/
 /shares/
+
+__pycache__/
+.worktrees/

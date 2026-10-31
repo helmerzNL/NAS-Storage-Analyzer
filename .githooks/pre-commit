@@ -1,0 +1,22 @@
+#!/usr/bin/env python3
+import subprocess
+import sys
+
+commands = (
+    # The version is raised by the pipeline after the merge (baseline §1), so no hook checks it here.
+    # Runs here, not only in CI, because this is the one check whose subject is what the *other*
+    # clients see: work done in one client that adds a skill or an MCP server leaves the others
+    # behind, and nothing about that is visible from inside it. See AGENTS.md section 7.
+    [sys.executable, "scripts/check_agent_instructions.py"],
+)
+
+for cmd in commands:
+    result = subprocess.run(cmd)
+    if result.returncode != 0:
+        print(
+            f"Fix and rerun: {' '.join(cmd)}",
+            file=sys.stderr,
+        )
+        sys.exit(result.returncode)
+
+sys.exit(0)

@@ -1,0 +1,22 @@
+name: agent-instructions
+
+on:
+  pull_request:
+    branches:
+      - beta
+      - main
+
+jobs:
+  # `agent-instructions-lint` has its own job so that its name can be found on the pull request:
+  # baseline §17 cites it as `[Control: agent-instructions-lint]`, and a control that cannot be
+  # found under the name a document cites it by is not a control.
+  agent-instructions-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The validator's own tests first: if the script fails, you want to know whether the script
+      # is broken or the documents are.
+      - name: Test the agent-instructions validator
+        run: python -m unittest discover -s scripts -p "test_check_agent_instructions.py" -v
+      - name: Validate the agent instruction surfaces
+        run: python scripts/check_agent_instructions.py

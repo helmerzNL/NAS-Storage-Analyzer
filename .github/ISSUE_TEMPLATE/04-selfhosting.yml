@@ -1,0 +1,96 @@
+name: Self-hosting / deployment
+description: Problem installing, starting or updating a self-hosted installation
+title: "[Deployment]: "
+labels: ["bug", "platform:selfhosting", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for problems installing, starting or updating NAS Storage Analyzer with Docker
+        Compose, mounting a share, or running it behind a reverse proxy.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: What went wrong?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hosting
+    attributes:
+      label: How are you running NAS Storage Analyzer?
+      options:
+        - Self-hosted via Docker
+        - Self-hosted via Docker Compose
+        - Self-hosted, manual installation
+        - Local development environment
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: App / server version or image tag
+      placeholder: "0.1.0 or ghcr.io/helmerznl/nas-storage-analyzer:0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      placeholder: "Chrome 140 / Safari 18.5 / Firefox 141"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: infra
+    attributes:
+      label: Relevant infrastructure (self-hosting only)
+      multiple: true
+      options:
+        - Reverse proxy (Nginx / Traefik / Caddy)
+        - Cloudflare or another CDN
+        - Custom TLS certificate
+        - Non-standard port or subpath
+        - Database in a separate container
+        - Shares mounted on the host (route b) or by the worker (route a)
+        - Unraid, Portainer, Dockge or another stack manager
+        - None of the above / not self-hosted
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console and network errors
+      description: Open DevTools → Console and Network, then paste any relevant errors.
+      render: shell
+
+  - type: textarea
+    id: serverlogs
+    attributes:
+      label: Server logs (self-hosting only)
+      description: For example `docker logs nas-storage-analyzer-app-1 --tail 100`. Please redact secrets and tokens.
+      render: shell
+
+  - type: checkboxes
+    id: tried
+    attributes:
+      label: Already tried
+      options:
+        - label: Hard refresh and cleared the cache
+        - label: Tested in a private window or a different browser
+        - label: Checked docs/deploy.md (troubleshooting) and that NASA_SHARES_DIR is an absolute path
+        - label: I searched for existing reports of this problem
+          required: true
