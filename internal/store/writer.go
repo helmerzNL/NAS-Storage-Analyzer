@@ -256,6 +256,9 @@ func (w *ScanWriter) Commit(ctx context.Context, sum Summary) (ScanTotals, error
 	if err := aggregate(ctx, tx, w.shareID, false); err != nil {
 		return tot, err
 	}
+	if err := writeSnapshot(ctx, tx, w.shareID, w.scanID); err != nil {
+		return tot, err
+	}
 	err = tx.QueryRow(ctx, `
 		SELECT 1 + dirs_total, files_total, size_total, alloc_total FROM dirs
 		WHERE share_id = $1 AND parent_id IS NULL`, w.shareID).Scan(&tot.Dirs, &tot.Files, &tot.Bytes, &tot.Alloc)
@@ -265,7 +268,7 @@ func (w *ScanWriter) Commit(ctx context.Context, sum Summary) (ScanTotals, error
 	if _, err := tx.Exec(ctx, `
 		UPDATE scans SET status = 'succeeded', finished_at = now(), dirs = $2, reused_dirs = $3, files = $4,
 			bytes = $5, alloc_bytes = $6, error_count = $7, atime_quality = $8,
-			fs_total_bytes = $9, fs_free_bytes = $10
+			fs_total_bytes = $9, fs_free_bytes = $10, progress = NULL
 		WHERE id = $1`, w.scanID, tot.Dirs, sum.ReusedDirs, tot.Files, tot.Bytes, tot.Alloc, sum.ErrorCount, aq,
 		sum.FsTotal, sum.FsFree); err != nil {
 		return tot, err

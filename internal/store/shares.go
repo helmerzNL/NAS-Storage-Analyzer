@@ -97,7 +97,7 @@ func (s *Store) FailScan(ctx context.Context, scanID int64, cancelled bool, caus
 		status = "cancelled"
 	}
 	_, err := s.Pool.Exec(ctx, `
-		UPDATE scans SET status = $2, finished_at = now(), error = $3, error_count = $4 WHERE id = $1`,
+		UPDATE scans SET status = $2, finished_at = now(), error = $3, error_count = $4, progress = NULL WHERE id = $1`,
 		scanID, status, cause.Error(), errorCount)
 	return err
 }
@@ -105,7 +105,7 @@ func (s *Store) FailScan(ctx context.Context, scanID int64, cancelled bool, caus
 // StaleRunningScans marks scans left 'running' by a crashed process as failed.
 func (s *Store) StaleRunningScans(ctx context.Context, shareID int64) (int64, error) {
 	tag, err := s.Pool.Exec(ctx, `
-		UPDATE scans SET status = 'failed', finished_at = now(), error = 'interrupted'
+		UPDATE scans SET status = 'failed', finished_at = now(), error = 'interrupted', progress = NULL
 		WHERE share_id = $1 AND status = 'running'`, shareID)
 	return tag.RowsAffected(), err
 }

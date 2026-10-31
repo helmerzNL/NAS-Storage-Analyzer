@@ -27,6 +27,11 @@ type Options struct {
 	ProgressEvery time.Duration
 	// FS replaces the real file system (tests).
 	FS scanner.FS
+	// OnStart is called with the new scan's id as soon as it exists.
+	OnStart func(scanID int64)
+	// Throttle replaces the one built from the share's max_ops_per_sec, so the
+	// caller can change the rate while the scan runs.
+	Throttle *scanner.Throttle
 }
 
 // Progress is a live view of a running scan.
@@ -83,6 +88,9 @@ func Run(ctx context.Context, st *store.Store, share *store.Share, o Options) (*
 	if err != nil {
 		return nil, err
 	}
+	if o.OnStart != nil {
+		o.OnStart(scanID)
+	}
 	fail := func(cause error, errCount int64) error {
 		// The caller's context may be the reason for failing; record on a fresh one.
 		bg, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -114,7 +122,7 @@ func Run(ctx context.Context, st *store.Store, share *store.Share, o Options) (*
 		Workers:     share.Workers,
 		Excludes:    excl,
 		Incremental: plan.Mode == "incremental",
-		Throttle:    scanner.NewThrottle(float64(share.MaxOpsPerSec)),
+		Throttle:    throttleFor(o, share),
 		DirTimeout:  o.DirTimeout,
 		Mapper:      mapper,
 		FS:          fsys,
@@ -229,4 +237,11 @@ func fsCapacity(path string) (total, free *int64) {
 	}
 	t, f := int64(st.Blocks)*int64(st.Bsize), int64(st.Bavail)*int64(st.Bsize)
 	return &t, &f
+}
+
+func throttleFor(o Options, share *store.Share) *scanner.Throttle {
+	if o.Throttle != nil {
+		return o.Throttle
+	}
+	return scanner.NewThrottle(float64(share.MaxOpsPerSec))
 }

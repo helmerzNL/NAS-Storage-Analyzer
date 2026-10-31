@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/helmerznl/nas-storage-analyzer/internal/query"
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanner"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
@@ -473,5 +474,113 @@ func TestScanStoresFilesystemCapacity(t *testing.T) {
 	st.Pool.QueryRow(context.Background(), `SELECT fs_total_bytes, fs_free_bytes FROM scans WHERE id = $1`, res.ScanID).Scan(&total, &free)
 	if total == nil || free == nil || *total <= 0 || *free < 0 || *free > *total {
 		t.Errorf("capacity total=%v free=%v", total, free)
+	}
+}
+
+func TestHistorySnapshotsGrowAndAreRetained(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	ts.Write(t, root+"/video/a.mkv", 1000)
+	ts.Write(t, root+"/docs/b.pdf", 100)
+	sh := newShare(t, st, "hist", root, nil)
+	ctx := context.Background()
+	var scans []int64
+	for i := 1; i <= 4; i++ {
+		ts.Settle()
+		res := run(t, st, sh, Options{})
+		scans = append(scans, res.ScanID)
+		ts.Write(t, root+"/video/more"+string(rune('0'+i))+".mkv", 1000*i)
+	}
+	var n int
+	st.Pool.QueryRow(ctx, `SELECT count(*) FROM snapshots WHERE share_id = $1`, sh.ID).Scan(&n)
+	if n != 4 {
+		t.Fatalf("snapshots = %d, want one per scan", n)
+	}
+	q := query.New(st.Pool)
+	hist, err := q.History(ctx, sh.ID, nil)
+	if err != nil || len(hist) != 4 {
+		t.Fatalf("history: %d %v", len(hist), err)
+	}
+	// Sizes after the scans: 1100, 2100, 4100, 7100.
+	for i, want := range []int64{1100, 2100, 4100, 7100} {
+		if hist[i].Size != want {
+			t.Errorf("point %d size = %d, want %d", i, hist[i].Size, want)
+		}
+	}
+	if len(hist[3].Categories) != 2 || hist[3].Categories[0].ID != 1 || hist[3].Categories[0].Size != 7000 {
+		t.Errorf("categories of the last point: %+v", hist[3].Categories)
+	}
+	if hist2, _ := q.History(ctx, sh.ID, &hist[2].At); len(hist2) != 2 {
+		t.Errorf("history since the third scan has %d points", len(hist2))
+	}
+	var videoID int64
+	st.Pool.QueryRow(ctx, `SELECT id FROM dirs WHERE share_id = $1 AND name = 'video'`, sh.ID).Scan(&videoID)
+	dh, err := q.DirHistory(ctx, sh.ID, videoID)
+	if err != nil || len(dh) != 4 || dh[0].Size != 1000 || dh[3].Size != 7000 {
+		t.Errorf("folder history: %+v %v", dh, err)
+	}
+	if rh, _ := q.DirHistory(ctx, sh.ID, 0); len(rh) != 4 || rh[3].Size != 7100 {
+		t.Errorf("root history: %+v", rh)
+	}
+
+	// Retention keeps the newest two scans.
+	st.Pool.Exec(ctx, `UPDATE shares SET retention_scans = 2 WHERE id = $1`, sh.ID)
+	removed, err := st.PruneHistory(ctx, sh.ID)
+	if err != nil || removed != 2 {
+		t.Fatalf("prune removed %d: %v", removed, err)
+	}
+	if hist, _ = q.History(ctx, sh.ID, nil); len(hist) != 2 || hist[0].ScanID != scans[2] {
+		t.Errorf("after pruning: %+v", hist)
+	}
+	var orphans int
+	st.Pool.QueryRow(ctx, `SELECT count(*) FROM snapshot_category WHERE scan_id = $1`, scans[0]).Scan(&orphans)
+	if orphans != 0 {
+		t.Error("snapshot detail rows survived their snapshot")
+	}
+	// The published scan is never pruned, however strict the retention.
+	st.Pool.Exec(ctx, `UPDATE shares SET retention_days = 1, retention_scans = 0 WHERE id = $1`, sh.ID)
+	st.Pool.Exec(ctx, `UPDATE scans SET started_at = now() - interval '40 days' WHERE share_id = $1`, sh.ID)
+	st.PruneHistory(ctx, sh.ID)
+	if hist, _ = q.History(ctx, sh.ID, nil); len(hist) != 1 || hist[0].ScanID != scans[3] {
+		t.Errorf("age-based pruning must keep the published scan: %+v", hist)
+	}
+	if _, err := q.Dir(ctx, sh.ID, 0, query.Filter{}); err != nil {
+		t.Errorf("share unusable after pruning: %v", err)
+	}
+}
+
+func TestEveryNthAutomaticScanIsFull(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	ts.Write(t, root+"/a", 1)
+	sh := newShare(t, st, "cadence", root, nil)
+	ctx := context.Background()
+	st.Pool.Exec(ctx, `UPDATE shares SET full_scan_every = 3 WHERE id = $1`, sh.ID)
+	// With full_scan_every = 3 the scans 1, 4, 7 are full: what ShouldForceFull
+	// answers before scans 1..6 (the answer before scan 1 is not used).
+	want := []bool{false, false, false, true, false, false}
+	for i, w := range want {
+		force, err := st.ShouldForceFull(ctx, sh.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// With no scan yet the first scan is full anyway; ShouldForceFull only counts scans since the last full one.
+		if i > 0 && force != w {
+			t.Errorf("before scan %d: force=%v, want %v", i+1, force, w)
+		}
+		res := run(t, st, sh, Options{ForceFull: force})
+		if i == 0 && res.Mode != "full" {
+			t.Errorf("first scan mode = %s", res.Mode)
+		}
+		if i > 0 && force && res.Mode != "full" {
+			t.Errorf("scan %d should be full", i+1)
+		}
+		if i > 0 && !force && res.Mode != "incremental" {
+			t.Errorf("scan %d should be incremental", i+1)
+		}
+	}
+	st.Pool.Exec(ctx, `UPDATE shares SET full_scan_every = 0 WHERE id = $1`, sh.ID)
+	if force, _ := st.ShouldForceFull(ctx, sh.ID); force {
+		t.Error("full_scan_every=0 must never force")
 	}
 }

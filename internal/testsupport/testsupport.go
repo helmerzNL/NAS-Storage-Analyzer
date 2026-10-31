@@ -180,3 +180,6 @@ func FSExpect(t *testing.T, root string, excludes []string) Expectation {
 
 // Settle waits long enough for directory mtimes to differ between two scans.
 func Settle() { time.Sleep(25 * time.Millisecond) }
+
+// DBHandle wraps a Store so tests of other packages can share a helper type.
+type DBHandle struct{ Store *store.Store }
