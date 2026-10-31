@@ -54,7 +54,10 @@ than the file.
   this share, whatever share it belongs to, is reported as gone, so the answer tells nothing about another share. A file or a
   folder above it that has a sibling whose name differs only in case is left out (`ReasonAmbiguous`): SMB from Windows and a
   Mac cannot tell the two apart. The comparison is the database's `lower()`, so for a database whose locale is `C` that is
-  ASCII only; the official PostgreSQL image is a UTF-8 locale.
+  ASCII only; the official PostgreSQL image is a UTF-8 locale. Names that differ only in Unicode normalisation (the NFC and NFD
+  forms of an accented letter, which a Mac treats as one) are not looked for; the script's size and time check is what is left
+  between such a twin and a wrong deletion. Only files are compared with files and folders with folders: a file and a folder
+  that differ only in case make a script find something that is not the regular file it expects, which every script keeps.
 - **The base path is stored per share and per kind of machine** (`client_windows`, `client_posix` in the share's `config`,
   validated with `NormalizeRoot` when saved, and again when a script is made), and can be overridden in the request. The app
   never guesses it: the container path is not the path of the person's machine, and a wrong guess would aim a script at a copy.
