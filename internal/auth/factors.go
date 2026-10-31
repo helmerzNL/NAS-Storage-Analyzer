@@ -179,15 +179,6 @@ func (s *Service) ChangePassword(ctx context.Context, u *User, current, next str
 	return s.setPassword(ctx, u, next, keep)
 }
 
-// SetPassword is the administrator's reset; it does not need the old password.
-func (s *Service) SetPassword(ctx context.Context, userID int64, next string) error {
-	u, err := s.GetUser(ctx, userID)
-	if err != nil {
-		return err
-	}
-	return s.setPassword(ctx, u, next, nil)
-}
-
 func (s *Service) setPassword(ctx context.Context, u *User, next string, keep *Session) error {
 	if err := CheckPasswordPolicy(next, u.Username); err != nil {
 		return err

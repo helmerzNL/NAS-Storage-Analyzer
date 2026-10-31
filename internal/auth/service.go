@@ -196,30 +196,6 @@ func (s *Service) CreateFirstAdmin(ctx context.Context, username, password strin
 	return s.GetUser(ctx, id)
 }
 
-// CreateUser adds an account (by an administrator). The user must enrol a
-// second factor at the first sign-in.
-func (s *Service) CreateUser(ctx context.Context, username, displayName, password, role string) (*User, error) {
-	if !usernameRE.MatchString(username) {
-		return nil, ErrBadUsername
-	}
-	if role != "admin" && role != "viewer" {
-		return nil, fmt.Errorf("role must be admin or viewer")
-	}
-	if err := CheckPasswordPolicy(password, username); err != nil {
-		return nil, err
-	}
-	var id int64
-	err := s.pool.QueryRow(ctx, `INSERT INTO users (username, display_name, role, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`,
-		username, displayName, role, HashPassword(password)).Scan(&id)
-	if isUnique(err) {
-		return nil, ErrConflict
-	}
-	if err != nil {
-		return nil, err
-	}
-	return s.GetUser(ctx, id)
-}
-
 // ---- password sign-in and lockout ------------------------------------------
 
 func normKey(s string) string { return strings.ToLower(strings.TrimSpace(s)) }

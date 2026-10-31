@@ -319,25 +319,43 @@ const expectText = async (page, sel, re, msg) => {
 
     await step('users: add a viewer who must enrol a second factor; viewers cannot administer', async () => {
       await page.goto(BASE + '/admin/users');
-      await page.click('[data-testid=add-user]');
-      await page.fill('[data-testid=u-name]', 'kijker');
-      await page.fill('[data-testid=u-pw]', 'kijker-wachtwoord-1');
-      await page.click('[data-testid=u-save]');
-      // Exact username, not :has-text(): every row's role dropdown contains the word "Kijker".
-      await page.waitForSelector('[data-testid=user-row][data-username=kijker]');
-      await shot('13-users');
+      // The administrator makes a link; the guest opens it and chooses their own password, so the administrator never learns it.
+      await page.fill('[data-testid=invite-name]', 'kijker');
+      await page.selectOption('[data-testid=invite-role]', 'viewer');
+      await page.click('[data-testid=invite-create]');
+      await page.waitForSelector('[data-testid=invite-box]');
+      const link = await page.inputValue('[data-testid=invite-link]');
+      if (!/\/#invite=[A-Za-z0-9_-]{43}$/.test(link)) throw new Error('the invitation link looks wrong: ' + link);
+      if (!link.startsWith(BASE)) throw new Error('the link is not built from the address in use: ' + link);
+      await shot('13a-invite-link');
+      if (await page.$('[data-testid=invite-box]') === null) throw new Error('no link box');
+      // The link is shown once: a reload shows an open invitation, but no link.
+      await page.reload();
+      await page.waitForSelector('[data-testid=invitation-row][data-kind=new]');
+      if (await page.$('[data-testid=invite-box]') || (await page.content()).includes(link.split('#invite=')[1])) throw new Error('the link is shown again after a reload');
       const v = await browser.newContext({ locale: 'nl-NL' });
       const vp = await v.newPage();
-      await vp.goto(BASE + '/');
-      await vp.fill('[data-testid=login-username]', 'kijker');
-      await vp.fill('[data-testid=login-password]', 'kijker-wachtwoord-1');
-      await vp.click('[data-testid=login-submit]');
+      await vp.goto(link);
+      await vp.waitForSelector('[data-testid=invite-guest] [data-testid=invite-username]');
+      if (await vp.inputValue('[data-testid=invite-username]') !== 'kijker') throw new Error('the suggested name is not filled in');
+      if (await vp.$('[data-testid=login-username]') || await vp.$('[data-testid=setup-token]')) throw new Error('an open invitation shows the sign-in or setup screen');
+      await vp.screenshot({ path: path.join(SHOTS, '13b-invite-guest.png'), fullPage: true });
+      await vp.fill('[data-testid=invite-password]', 'kijker-wachtwoord-1');
+      await vp.fill('[data-testid=invite-confirm]', 'kijker-wachtwoord-1');
+      await vp.click('[data-testid=invite-submit]');
+      // The token leaves the address bar and the history once it is used, and a password alone is not enough: a second factor next.
       await vp.waitForSelector('text=Tweede factor instellen');
+      if ((await vp.evaluate(() => location.hash)) !== '') throw new Error('the token is still in the address bar');
       await vp.click('text=Authenticator-app instellen');
       await vp.waitForSelector('[data-testid=totp-secret]', { state: 'attached' });
       const vs = (await vp.textContent('[data-testid=totp-secret]')).trim();
       await vp.fill('[data-testid=totp-code]', totp(vs));
       await vp.click('text=Bevestigen');
+      // Exact username, not :has-text(): every row's role dropdown contains the word "Kijker".
+      await page.reload();
+      await page.waitForSelector('[data-testid=user-row][data-username=kijker]');
+      if (await page.$('[data-testid=invitation-row]')) throw new Error('the invitation is still open after it was used');
+      await shot('13-users');
       await vp.check('[data-testid=codes-saved]');
       await vp.click('[data-testid=codes-continue]');
       await vp.waitForSelector('[data-testid=share-Media]');
@@ -362,8 +380,88 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'user.create', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
+    });
+
+    await step('invitations: a guest can choose a passkey, a user gets a new login link, a link can be revoked', async () => {
+      const made = async (name, role) => {
+        await page.goto(BASE + '/admin/users');
+        await page.fill('[data-testid=invite-name]', name);
+        await page.selectOption('[data-testid=invite-role]', role);
+        await page.click('[data-testid=invite-create]');
+        await page.waitForSelector('[data-testid=invite-box]');
+        return page.inputValue('[data-testid=invite-link]');
+      };
+      // A guest with a passkey: a virtual authenticator that verifies the user, in a browser of their own.
+      const pkLink = await made('pia', 'viewer');
+      const g = await browser.newContext({ locale: 'nl-NL' });
+      const gp = await g.newPage();
+      const gcdp = await g.newCDPSession(gp);
+      await gcdp.send('WebAuthn.enable');
+      await gcdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
+      await gp.goto(pkLink);
+      await gp.waitForSelector('[data-testid=invite-passkey]:not([disabled])');
+      await gp.click('[data-testid=invite-passkey]');
+      await gp.waitForSelector('[data-testid=share-Media]');   // a passkey verifies the user: signed in completely, no password ever existed
+      if ((await gp.evaluate(() => location.hash)) !== '') throw new Error('the token is still in the address bar after a passkey');
+      await g.close();
+
+      // A new login link for an existing user changes nothing until they have finished, then replaces everything.
+      await page.goto(BASE + '/admin/users');
+      await page.waitForSelector('[data-testid=user-row][data-username=kijker]');
+      await page.click('[data-testid=user-row][data-username=kijker] [data-testid=user-reset-link]');
+      await page.waitForSelector('[data-testid=invite-box]');
+      const resetLink = await page.inputValue('[data-testid=invite-link]');
+      if (!(await page.$('[data-testid=invitation-row][data-kind=reset]'))) throw new Error('the reset is not listed as open');
+      const r = await browser.newContext({ locale: 'nl-NL' });
+      const rp = await r.newPage();
+      await rp.goto(resetLink);
+      await rp.waitForSelector('[data-testid=invite-username]');
+      if (!(await rp.getAttribute('[data-testid=invite-username]', 'readonly') !== null)) throw new Error('the name of a reset is not read-only');
+      // Walking away costs the user nothing: the old password still works.
+      const old = await browser.newContext({ locale: 'nl-NL' });
+      const op = await old.newPage();
+      await op.goto(BASE + '/');
+      await op.fill('[data-testid=login-username]', 'kijker');
+      await op.fill('[data-testid=login-password]', 'kijker-wachtwoord-1');
+      await op.click('[data-testid=login-submit]');
+      await op.waitForSelector('[data-testid=mfa-code]');
+      await old.close();
+      await rp.fill('[data-testid=invite-password]', 'nieuw-wachtwoord-2x');
+      await rp.fill('[data-testid=invite-confirm]', 'nieuw-wachtwoord-2x');
+      await rp.click('[data-testid=invite-submit]');
+      await rp.waitForSelector('text=Tweede factor instellen');   // the old second factor is gone with the old password
+      await r.close();
+      const fresh = await browser.newContext({ locale: 'nl-NL' });
+      const fp = await fresh.newPage();
+      await fp.goto(BASE + '/');
+      await fp.fill('[data-testid=login-username]', 'kijker');
+      await fp.fill('[data-testid=login-password]', 'kijker-wachtwoord-1');
+      await fp.click('[data-testid=login-submit]');
+      await fp.waitForSelector('[data-testid=auth-error]');   // the old password no longer works
+      await fresh.close();
+
+      // Revoke: the link stops working at once, for the guest the same as any bad token.
+      const revLink = await made('tijdelijk', 'viewer');
+      await page.reload();
+      await page.waitForSelector('[data-testid=invitation-row]');
+      const rows = await page.$$('[data-testid=invitation-row]');
+      for (const row of rows) if ((await row.textContent()).includes('tijdelijk')) { await (await row.$('[data-testid=invitation-revoke]')).click(); break; }
+      await page.waitForFunction(() => ![...document.querySelectorAll('[data-testid=invitation-row]')].some((r) => r.textContent.includes('tijdelijk')));
+      const rv = await browser.newContext({ locale: 'nl-NL' });
+      const rvp = await rv.newPage();
+      await rvp.goto(revLink);
+      await rvp.waitForSelector('[data-testid=invite-invalid]');
+      await rvp.screenshot({ path: path.join(SHOTS, '13c-invite-invalid.png'), fullPage: true });
+      await rv.close();
+
+      // Nothing in the audit log carries a token or a password.
+      await page.goto(BASE + '/admin/audit');
+      await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=invitation.create');
+      const audit = await page.textContent('[data-testid=audit-table]');
+      for (const a of ['invitation.create', 'invitation.accept', 'invitation.revoke']) if (!audit.includes(a)) throw new Error('missing ' + a);
+      for (const secret of [pkLink.split('#invite=')[1], resetLink.split('#invite=')[1], revLink.split('#invite=')[1], 'kijker-wachtwoord-1', 'nieuw-wachtwoord-2x']) if (audit.includes(secret)) throw new Error('a secret is in the audit log');
     });
 
     await step('file types: move an extension and see sizes follow without rescanning', async () => {

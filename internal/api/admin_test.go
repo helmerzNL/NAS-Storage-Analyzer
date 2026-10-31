@@ -37,11 +37,7 @@ func waitFor(t *testing.T, what string, f func() bool) {
 func TestShareManagementRequiresAdmin(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	admin, _, _ := e.setupAdmin()
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 201, "")
-	v := e.client()
-	v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
-	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
-	v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)})
+	v, _ := e.newUser(admin, "viewer1", "viewer")
 
 	root := t.TempDir()
 	for _, r := range []reply{
@@ -93,11 +89,7 @@ func TestFolderPickerIsAdminOnlyAndStaysInsideTheRoot(t *testing.T) {
 	// Nobody signed in, and a viewer, are refused.
 	expect(t, browse(e.client(), ""), 401, "unauthenticated")
 	admin, _, _ := e.setupAdmin()
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 201, "")
-	v := e.client()
-	v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
-	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
-	v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)})
+	v, _ := e.newUser(admin, "viewer1", "viewer")
 	expect(t, browse(v, ""), 403, "forbidden")
 
 	// The root: folders only, sorted, no parent, and the link that leaves the root is not offered.
@@ -453,11 +445,7 @@ func TestUpdateCheckIsForTheAdministratorOnly(t *testing.T) {
 	expect(t, anon.do("POST", "/api/v1/system/update/check", nil), 401, "unauthenticated")
 
 	admin, _, _ := e.setupAdmin()
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 201, "")
-	v := e.client()
-	v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
-	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
-	v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)})
+	v, _ := e.newUser(admin, "viewer1", "viewer")
 	expect(t, v.do("GET", "/api/v1/system/update", nil), 403, "forbidden")
 	expect(t, v.do("POST", "/api/v1/system/update/check", nil), 403, "forbidden")
 	if hits.Load() != 0 {

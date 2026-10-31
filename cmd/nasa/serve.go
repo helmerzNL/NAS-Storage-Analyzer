@@ -128,6 +128,7 @@ func runServe(args []string) error {
 	}
 	opts := api.Options{
 		Updates:        checker,
+		PublicURL:      env("NASA_PUBLIC_URL", ""),
 		Auth:           svc,
 		Shares:         shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc),
 		Queue:          queue,

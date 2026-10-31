@@ -159,6 +159,10 @@ A pull request that raises a size, rate or timeout limit states the new value as
   accent; the accent as text is `--accent-ink`; a new token goes in `tokens.css` for light *and* dark; targets are 44 px. `design/components.css` stays
   a copy of the starter (changes go in `app.css`). `lib/design.test.ts` and `lib/appearance.test.ts` hold what a test can; look at a screen in light and
   dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots).
+- **User management follows App-Guidance's [`user-management.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/user-management.md)**
+  (`internal/auth/invitations.go`, [ADR 0006](docs/adr/0006-invitation-links.md)): no route lets an administrator choose or learn a credential; an invitation is a 32-byte token of which
+  only the SHA-256 is stored, shown once, usable once, valid seven days, carried in the URL fragment and never logged or audited; every bad token is one and the same answer; a reset replaces credentials only
+  in the transaction that stores the new ones; the role is the administrator's choice at the moment the link is made; and a passkey goes through the same registration ceremony as any other.
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
   the installation; it never updates anything; and `NASA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.

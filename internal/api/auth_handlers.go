@@ -39,11 +39,10 @@ func (s *Server) authRoutes(h routeFn, v string) {
 	h("POST "+a+"/password", lvViewer, s.changePassword)
 
 	h("GET "+v+"/users", lvAdmin, s.listUsers)
-	h("POST "+v+"/users", lvAdmin, s.createUser)
+	s.invitationRoutes(h, v) // a new account comes from an invitation link: no route lets an administrator choose a password for someone
 	h("PATCH "+v+"/users/{id}", lvAdmin, s.patchUser)
 	h("DELETE "+v+"/users/{id}", lvAdmin, s.deleteUser)
 	h("POST "+v+"/users/{id}/reset-mfa", lvAdmin, s.resetUserMFA)
-	h("POST "+v+"/users/{id}/password", lvAdmin, s.setUserPassword)
 	h("GET "+v+"/audit", lvAdmin, s.auditList)
 }
 
@@ -64,6 +63,12 @@ func (s *Server) authFail(w http.ResponseWriter, r *http.Request, err error) boo
 		return pc(http.StatusUnauthorized, "invalid username or password", "invalid_credentials")
 	case errors.Is(err, auth.ErrInvalidCode):
 		return pc(http.StatusUnauthorized, "invalid code", "invalid_code")
+	case errors.Is(err, auth.ErrInvalidInvitation):
+		// One answer for unknown, expired, used, revoked and malformed: the route cannot be used to ask which tokens exist.
+		s.problemCode(w, r, http.StatusNotFound, "invitation not valid", "This invitation is not valid (anymore). Ask for a new link.", "invalid_invitation")
+		return true
+	case errors.Is(err, auth.ErrTooMany):
+		return pc(http.StatusConflict, "limit reached", "limit_reached")
 	case errors.Is(err, auth.ErrNotFound):
 		return pc(http.StatusNotFound, "not found", "not_found")
 	case errors.Is(err, auth.ErrConflict):
@@ -546,27 +551,6 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, items[auth.User]{Items: list})
 }
 
-func (s *Server) createUser(w http.ResponseWriter, r *http.Request) error {
-	var in struct {
-		Username    string `json:"username"`
-		DisplayName string `json:"display_name"`
-		Password    string `json:"password"`
-		Role        string `json:"role"`
-	}
-	if err := readJSON(r, &in); err != nil {
-		return err
-	}
-	u, err := s.auth.CreateUser(r.Context(), in.Username, in.DisplayName, in.Password, in.Role)
-	if err != nil {
-		if errors.Is(err, auth.ErrBadUsername) || errors.Is(err, auth.ErrWeakPassword) || errors.Is(err, auth.ErrConflict) {
-			return err
-		}
-		return bad("%s", err.Error())
-	}
-	s.audit(r, "user.create", u.Username, map[string]any{"role": u.Role})
-	return writeJSONStatus(w, http.StatusCreated, u)
-}
-
 func userID(r *http.Request) (int64, error) { return parseID(r.PathValue("id"), "user id") }
 
 func (s *Server) patchUser(w http.ResponseWriter, r *http.Request) error {
@@ -623,27 +607,6 @@ func (s *Server) resetUserMFA(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	s.audit(r, "user.mfa_reset", target.Username, nil)
-	w.WriteHeader(http.StatusNoContent)
-	return nil
-}
-
-func (s *Server) setUserPassword(w http.ResponseWriter, r *http.Request) error {
-	id, err := userID(r)
-	if err != nil {
-		return err
-	}
-	var in struct{ Password string }
-	if err := readJSON(r, &in); err != nil {
-		return err
-	}
-	target, err := s.auth.GetUser(r.Context(), id)
-	if err != nil {
-		return err
-	}
-	if err := s.auth.SetPassword(r.Context(), id, in.Password); err != nil {
-		return err
-	}
-	s.audit(r, "user.password_reset", target.Username, nil)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

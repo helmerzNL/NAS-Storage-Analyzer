@@ -35,8 +35,8 @@ export function qs(params: Record<string, string | number | boolean | undefined 
   return s ? `?${s}` : '';
 }
 
-export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' };
+export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal, extra?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json', ...extra };
   let payload: BodyInit | undefined;
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -58,8 +58,8 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   return data as T;
 }
 
-export const get = <T = unknown>(path: string, signal?: AbortSignal) => api<T>('GET', path, undefined, signal);
-export const post = <T = unknown>(path: string, body?: unknown) => api<T>('POST', path, body ?? {});
+export const get = <T = unknown>(path: string, signal?: AbortSignal, headers?: Record<string, string>) => api<T>('GET', path, undefined, signal, headers);
+export const post = <T = unknown>(path: string, body?: unknown, headers?: Record<string, string>) => api<T>('POST', path, body ?? {}, undefined, headers);
 export const patch = <T = unknown>(path: string, body: unknown) => api<T>('PATCH', path, body);
 export const put = <T = unknown>(path: string, body: unknown) => api<T>('PUT', path, body);
 export const del = <T = unknown>(path: string, body?: unknown) => api<T>('DELETE', path, body);
@@ -78,6 +78,14 @@ export interface AuthStatus {
   setup_required: boolean; authenticated: boolean; min_password_length: number; https_required: boolean;
   stage?: 'pending' | 'enroll' | 'active'; csrf_token?: string; methods?: string[]; user?: User;
 }
+/** An open invitation (never carries the token: that exists only in the answer that makes it). */
+export interface Invitation {
+  id: number; kind: 'new' | 'reset'; user_id: number | null; username: string; role: 'admin' | 'viewer'; created_by: string; created_at: string; expires_at: string;
+}
+/** The answer that makes an invitation: the only place the token and the link are ever shown. */
+export interface InvitationCreated extends Invitation { token: string; url: string }
+/** What the guest sees of an invitation. */
+export interface InviteInfo { kind: 'new' | 'reset'; username: string; role: 'admin' | 'viewer'; invited_by: string; expires_at: string }
 /** GET /api/v1/system/update: what the update check knows (administrators only). */
 export interface UpdateStatus {
   enabled: boolean; current: string; latest: string; available: boolean; url: string;

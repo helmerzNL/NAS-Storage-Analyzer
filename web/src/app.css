@@ -188,3 +188,4 @@ td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }  
 .update-dot { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--surface-solid); flex: none; }
 .stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 8rem; }
 .nav a, .settings-nav a { position: relative; }   /* a screen-reader-only text inside a link stays inside it: otherwise it sits where the page ends and widens it */
+.table-title { text-align: left; font-weight: 700; padding: 14px 16px 6px; font-size: 1.05rem; caption-side: top; }
