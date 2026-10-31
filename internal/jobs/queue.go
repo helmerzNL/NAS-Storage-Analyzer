@@ -24,7 +24,7 @@ const (
 	StateCancelled = "cancelled"
 )
 
-// ErrAlreadyActive: the share already has a waiting or running job of this kind.
+// ErrAlreadyActive: the share already has a waiting or running scan, or a waiting re-categorisation (a running one does not count: see Enqueue).
 var ErrAlreadyActive = errors.New("a job of this kind is already queued or running for this share")
 
 // Job is one queue entry.
@@ -57,23 +57,35 @@ type Queue struct{ pool *pgxpool.Pool }
 
 func NewQueue(pool *pgxpool.Pool) *Queue { return &Queue{pool: pool} }
 
-// Enqueue adds a job. mode "full" forces a full scan, "auto" lets the worker
-// decide. It fails with ErrAlreadyActive when the share has one waiting or running.
+// Enqueue adds a job. mode "full" forces a full scan, "auto" lets the worker decide.
+//
+// It fails with ErrAlreadyActive when the share already has a waiting or running scan, and when it already has a WAITING re-categorisation.
+// A re-categorisation that is RUNNING does not block a new one: it read the file-type map when it started, so an edit made since is not in it,
+// and the job that follows is the one that applies it. A waiting one will read the map when it starts, so another would add nothing, which is
+// why that refusal is safe to ignore (the API does).
 func (q *Queue) Enqueue(ctx context.Context, kind string, shareID int64, mode, trigger, by string) (*Job, error) {
 	j, err := scanJob(q.pool.QueryRow(ctx, `INSERT INTO jobs (kind, share_id, mode, trigger, requested_by) VALUES ($1, $2, $3, $4, $5)
 		RETURNING `+jobCols, kind, shareID, mode, trigger, by))
-	var pg *pgconn.PgError
-	if errors.As(err, &pg) && pg.Code == "23505" {
+	if isUnique(err) {
 		return nil, ErrAlreadyActive
 	}
 	return j, err
 }
 
-// Claim takes the oldest waiting job for a worker, or returns nil.
+func isUnique(err error) bool {
+	var pg *pgconn.PgError
+	return errors.As(err, &pg) && pg.Code == "23505"
+}
+
+// Claim takes the oldest waiting job for a worker, or returns nil. A waiting re-categorisation is passed over while another one of the same
+// share is running: they would rewrite the same rows, and the waiting one exists exactly to run after the running one. The unique index on running
+// re-categorisations is the backstop; the guard keeps the blocked job from being chosen again and again ahead of the work behind it.
 func (q *Queue) Claim(ctx context.Context, workerID string) (*Job, error) {
 	j, err := scanJob(q.pool.QueryRow(ctx, `
 		UPDATE jobs SET state = 'running', started_at = now(), heartbeat_at = now(), locked_by = $1
-		WHERE id = (SELECT id FROM jobs WHERE state = 'queued' ORDER BY id FOR UPDATE SKIP LOCKED LIMIT 1)
+		WHERE id = (SELECT w.id FROM jobs w WHERE w.state = 'queued'
+			AND NOT (w.kind = 'recategorize' AND EXISTS (SELECT 1 FROM jobs r WHERE r.share_id = w.share_id AND r.kind = 'recategorize' AND r.state = 'running'))
+			ORDER BY w.id FOR UPDATE SKIP LOCKED LIMIT 1)
 		RETURNING `+jobCols, workerID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
