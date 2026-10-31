@@ -1,0 +1,5 @@
+/nasa
+/bin/
+*.test
+*.out
+.env
