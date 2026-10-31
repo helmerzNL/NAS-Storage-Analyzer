@@ -209,3 +209,49 @@ func human(n int64) string {
 	}
 	return fmt.Sprintf("%.2f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
+
+func runRecategorize(args []string) error {
+	fs := flag.NewFlagSet("recategorize", flag.ExitOnError)
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN)")
+	name := fs.String("share", "", "share name (default: all shares)")
+	fs.Parse(args)
+	if *dsn == "" {
+		return errors.New("no database: pass -db or set NASA_DB_DSN")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	st, err := store.Open(ctx, *dsn)
+	if err != nil {
+		return fmt.Errorf("connect: %w", err)
+	}
+	defer st.Close()
+	rows, err := st.Pool.Query(ctx, `SELECT id, name FROM shares WHERE $1 = '' OR name = $1 ORDER BY id`, *name)
+	if err != nil {
+		return err
+	}
+	type sh struct {
+		id   int64
+		name string
+	}
+	var shares []sh
+	for rows.Next() {
+		var x sh
+		if err := rows.Scan(&x.id, &x.name); err != nil {
+			return err
+		}
+		shares = append(shares, x)
+	}
+	rows.Close()
+	if len(shares) == 0 {
+		return errors.New("no matching share")
+	}
+	log := newLogger()
+	for _, x := range shares {
+		n, err := st.Recategorize(ctx, x.id)
+		if err != nil {
+			return fmt.Errorf("share %q: %w", x.name, err)
+		}
+		log.Info("recategorized", "share", x.name, "files_changed", n)
+	}
+	return nil
+}

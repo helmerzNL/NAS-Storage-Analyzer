@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanner"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
 )
@@ -139,8 +141,10 @@ func Run(ctx context.Context, st *store.Store, share *store.Share, o Options) (*
 			}
 		}
 	}
+	fsTotal, fsFree := fsCapacity(share.Path)
 	tot, err := w.Commit(ctx, store.Summary{
 		ReusedDirs: prog.ReusedDirs.Load(), ErrorCount: prog.Errors.Load(), AtimeQuality: quality,
+		FsTotal: fsTotal, FsFree: fsFree,
 	})
 	if err != nil {
 		return nil, fail(fmt.Errorf("publish scan: %w", err), prog.Errors.Load())
@@ -214,4 +218,15 @@ func mountOf(path string) *scanner.MountInfo {
 		return nil
 	}
 	return mi
+}
+
+// fsCapacity returns the size and free space (available to unprivileged
+// users) of the file system holding path, or nils when statfs fails.
+func fsCapacity(path string) (total, free *int64) {
+	var st unix.Statfs_t
+	if err := unix.Statfs(path, &st); err != nil {
+		return nil, nil
+	}
+	t, f := int64(st.Blocks)*int64(st.Bsize), int64(st.Bavail)*int64(st.Bsize)
+	return &t, &f
 }

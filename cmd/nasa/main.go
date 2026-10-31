@@ -15,6 +15,7 @@ Usage:
 Commands:
   migrate   apply database migrations and seed default categories
   scan      scan a directory tree (read-only) and store the result
+  recategorize  apply the current extension mapping to stored files (no rescan)
 
 Run "nasa <command> -h" for the flags of a command.
 `
@@ -30,6 +31,8 @@ func main() {
 		err = runMigrate(os.Args[2:])
 	case "scan":
 		err = runScan(os.Args[2:])
+	case "recategorize":
+		err = runRecategorize(os.Args[2:])
 	case "-h", "--help", "help":
 		fmt.Print(usage)
 		return

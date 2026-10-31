@@ -11,6 +11,7 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanner"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
+	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
 )
 
 func run(t *testing.T, st *store.Store, sh *store.Share, o Options) *Result {
@@ -25,21 +26,21 @@ func run(t *testing.T, st *store.Store, sh *store.Share, o Options) *Result {
 func TestScanMatchesFilesystem(t *testing.T) {
 	// Tiny batches force the multi-batch COPY path.
 	defer store.SetBatchSizes(7, 3)()
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	buildTree(t, root)
-	sh := newShare(t, st, "media", root, testExcludes)
+	ts.BuildTree(t, root)
+	sh := newShare(t, st, "media", root, ts.TestExcludes)
 
 	res := run(t, st, sh, Options{})
 	if res.Mode != "full" {
 		t.Errorf("first scan mode = %s, want full", res.Mode)
 	}
-	want := fsExpect(t, root, testExcludes)
-	if res.Totals.Files != want.files || res.Totals.Bytes != want.bytes || res.Totals.Alloc != want.alloc || res.Totals.Dirs != want.dirs {
-		t.Errorf("totals = %+v, want dirs=%d files=%d bytes=%d alloc=%d", res.Totals, want.dirs, want.files, want.bytes, want.alloc)
+	want := ts.FSExpect(t, root, ts.TestExcludes)
+	if res.Totals.Files != want.Files || res.Totals.Bytes != want.Bytes || res.Totals.Alloc != want.Alloc || res.Totals.Dirs != want.Dirs {
+		t.Errorf("totals = %+v, want dirs=%d files=%d bytes=%d alloc=%d", res.Totals, want.Dirs, want.Files, want.Bytes, want.Alloc)
 	}
-	if got := extTotals(t, st, sh.ID); !reflect.DeepEqual(got, want.ext) {
-		t.Errorf("extension totals = %v\nwant %v", got, want.ext)
+	if got := extTotals(t, st, sh.ID); !reflect.DeepEqual(got, want.Ext) {
+		t.Errorf("extension totals = %v\nwant %v", got, want.Ext)
 	}
 	checkConsistency(t, st, sh.ID)
 
@@ -92,19 +93,19 @@ func TestScanMatchesFilesystem(t *testing.T) {
 
 func TestIncrementalEqualsFreshFullScan(t *testing.T) {
 	defer store.SetBatchSizes(5, 2)()
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	buildTree(t, root)
-	a := newShare(t, st, "incremental", root, testExcludes)
+	ts.BuildTree(t, root)
+	a := newShare(t, st, "incremental", root, ts.TestExcludes)
 	run(t, st, a, Options{})
-	settle()
+	ts.Settle()
 
 	// Structural changes: each one alters the mtime/entry count of a directory.
-	write(t, root+"/movies/new.mkv", 123456)
+	ts.Write(t, root+"/movies/new.mkv", 123456)
 	if err := os.RemoveAll(root + "/music/sub"); err != nil {
 		t.Fatal(err)
 	}
-	write(t, root+"/new/x/y.zip", 777)
+	ts.Write(t, root+"/new/x/y.zip", 777)
 	if err := os.Rename(root+"/photos", root+"/pictures"); err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +115,7 @@ func TestIncrementalEqualsFreshFullScan(t *testing.T) {
 	if err := os.Remove(root + "/empty"); err != nil {
 		t.Fatal(err)
 	}
-	settle()
+	ts.Settle()
 
 	inc := run(t, st, a, Options{})
 	if inc.Mode != "incremental" {
@@ -125,7 +126,7 @@ func TestIncrementalEqualsFreshFullScan(t *testing.T) {
 	}
 	checkConsistency(t, st, a.ID)
 
-	b := newShare(t, st, "fresh", root, testExcludes)
+	b := newShare(t, st, "fresh", root, ts.TestExcludes)
 	full := run(t, st, b, Options{})
 	if inc.Totals != full.Totals {
 		t.Errorf("incremental totals %+v != fresh full totals %+v", inc.Totals, full.Totals)
@@ -145,12 +146,12 @@ func TestIncrementalEqualsFreshFullScan(t *testing.T) {
 }
 
 func TestInPlaceChangeNeedsFullScan(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	write(t, root+"/d/log.txt", 100)
+	ts.Write(t, root+"/d/log.txt", 100)
 	sh := newShare(t, st, "inplace", root, nil)
 	run(t, st, sh, Options{})
-	settle()
+	ts.Settle()
 	if err := os.WriteFile(root+"/d/log.txt", make([]byte, 9000), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -166,10 +167,10 @@ func TestInPlaceChangeNeedsFullScan(t *testing.T) {
 }
 
 func TestChangedExcludesForceFullScan(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	write(t, root+"/keep/a.txt", 10)
-	write(t, root+"/skipme/b.txt", 20)
+	ts.Write(t, root+"/keep/a.txt", 10)
+	ts.Write(t, root+"/skipme/b.txt", 20)
 	sh := newShare(t, st, "excl", root, nil)
 	if res := run(t, st, sh, Options{}); res.Totals.Bytes != 30 {
 		t.Fatalf("bytes = %d", res.Totals.Bytes)
@@ -185,10 +186,10 @@ func TestChangedExcludesForceFullScan(t *testing.T) {
 }
 
 func TestUnreadableDirectoryKeepsPreviousData(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	buildTree(t, root)
-	sh := newShare(t, st, "denied", root, testExcludes)
+	ts.BuildTree(t, root)
+	sh := newShare(t, st, "denied", root, ts.TestExcludes)
 	first := run(t, st, sh, Options{})
 	before := dirTotalsByPath(t, st, sh.ID)
 
@@ -198,7 +199,7 @@ func TestUnreadableDirectoryKeepsPreviousData(t *testing.T) {
 	}
 	defer real.Close()
 	gfs := &guardFS{FS: real, deny: map[string]error{"music": syscall.EACCES}}
-	settle()
+	ts.Settle()
 	res := run(t, st, sh, Options{FS: gfs, ForceFull: true})
 
 	if res.Totals != first.Totals {
@@ -220,14 +221,14 @@ func TestUnreadableDirectoryKeepsPreviousData(t *testing.T) {
 }
 
 func TestCancelledScanLeavesStoredDataIntact(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	buildTree(t, root)
-	sh := newShare(t, st, "cancel", root, testExcludes)
+	ts.BuildTree(t, root)
+	sh := newShare(t, st, "cancel", root, ts.TestExcludes)
 	first := run(t, st, sh, Options{})
 	before := dirTotalsByPath(t, st, sh.ID)
-	write(t, root+"/movies/extra.mkv", 5000) // would change totals if the scan were published
-	settle()
+	ts.Write(t, root+"/movies/extra.mkv", 5000) // would change totals if the scan were published
+	ts.Settle()
 
 	real, _ := scanner.NewOSFS(root)
 	defer real.Close()
@@ -266,9 +267,9 @@ func TestCancelledScanLeavesStoredDataIntact(t *testing.T) {
 }
 
 func TestOnlyOneRunningScanPerShare(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
-	write(t, root+"/a", 1)
+	ts.Write(t, root+"/a", 1)
 	sh := newShare(t, st, "single", root, nil)
 	ctx := context.Background()
 	id, err := st.BeginScan(ctx, sh.ID, "full", "manual", "")
@@ -288,10 +289,10 @@ func TestOnlyOneRunningScanPerShare(t *testing.T) {
 }
 
 func TestSharesAreIsolated(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	r1, r2 := t.TempDir(), t.TempDir()
-	write(t, r1+"/a.mkv", 100)
-	write(t, r2+"/b.mp3", 50)
+	ts.Write(t, r1+"/a.mkv", 100)
+	ts.Write(t, r2+"/b.mp3", 50)
 	s1, s2 := newShare(t, st, "one", r1, nil), newShare(t, st, "two", r2, nil)
 	run(t, st, s1, Options{})
 	run(t, st, s2, Options{})
@@ -304,7 +305,7 @@ func TestSharesAreIsolated(t *testing.T) {
 }
 
 func TestMigrateIsIdempotentAndKeepsEditedMapping(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	ctx := context.Background()
 	// A user moves "iso" from Disk images to Archives through the UI.
 	if _, err := st.Pool.Exec(ctx, `UPDATE extension_map SET category_id = 5 WHERE ext = 'iso'`); err != nil {
@@ -329,15 +330,15 @@ func TestMigrateIsIdempotentAndKeepsEditedMapping(t *testing.T) {
 
 func TestDryRunMatchesFilesystem(t *testing.T) {
 	root := t.TempDir()
-	buildTree(t, root)
-	res, err := DryRun(context.Background(), root, testExcludes, 4, 0, 0, nil)
+	ts.BuildTree(t, root)
+	res, err := DryRun(context.Background(), root, ts.TestExcludes, 4, 0, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fsExpect(t, root, testExcludes)
-	if res.Dirs != want.dirs || res.Files != want.files || res.Bytes != want.bytes || res.Alloc != want.alloc {
+	want := ts.FSExpect(t, root, ts.TestExcludes)
+	if res.Dirs != want.Dirs || res.Files != want.Files || res.Bytes != want.Bytes || res.Alloc != want.Alloc {
 		t.Errorf("dry run = dirs %d files %d bytes %d alloc %d, want %d/%d/%d/%d",
-			res.Dirs, res.Files, res.Bytes, res.Alloc, want.dirs, want.files, want.bytes, want.alloc)
+			res.Dirs, res.Files, res.Bytes, res.Alloc, want.Dirs, want.Files, want.Bytes, want.Alloc)
 	}
 	if res.Symlinks != 3 {
 		t.Errorf("symlinks = %d, want 3", res.Symlinks)
@@ -348,19 +349,19 @@ func TestDryRunMatchesFilesystem(t *testing.T) {
 }
 
 func TestSmallIncrementalSampleKeepsPreviousAtimeVerdict(t *testing.T) {
-	st := newStore(t)
+	st := ts.NewStore(t)
 	root := t.TempDir()
 	for i := 0; i < 150; i++ {
-		write(t, root+"/bulk/f"+itoa(i)+".txt", 10) // fresh files: atime == mtime
+		ts.Write(t, root+"/bulk/f"+itoa(i)+".txt", 10) // fresh files: atime == mtime
 	}
-	write(t, root+"/other/x.txt", 1)
+	ts.Write(t, root+"/other/x.txt", 1)
 	sh := newShare(t, st, "atime", root, nil)
 	first := run(t, st, sh, Options{})
 	if first.Atime.Verdict != scanner.Unreliable || first.Atime.CarriedOver {
 		t.Fatalf("first verdict = %+v, want unreliable and not carried over", first.Atime)
 	}
-	settle()
-	write(t, root+"/other/y.txt", 1) // only /other changes; /bulk is reused
+	ts.Settle()
+	ts.Write(t, root+"/other/y.txt", 1) // only /other changes; /bulk is reused
 	second := run(t, st, sh, Options{})
 	if second.Mode != "incremental" || second.Progress.ReusedDirs == 0 {
 		t.Fatalf("mode=%s reused=%d", second.Mode, second.Progress.ReusedDirs)
@@ -376,3 +377,101 @@ func TestSmallIncrementalSampleKeepsPreviousAtimeVerdict(t *testing.T) {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+func TestRecategorizeAppliesNewMappingWithoutRescan(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	ts.BuildTree(t, root)
+	sh := newShare(t, st, "recat", root, ts.TestExcludes)
+	run(t, st, sh, Options{})
+	ctx := context.Background()
+
+	catSize := func(cat int) int64 {
+		var n int64
+		st.Pool.QueryRow(ctx, `SELECT coalesce(sum(size_total), 0) FROM dir_category_agg
+			WHERE share_id = $1 AND category_id = $2 AND dir_id = (SELECT id FROM dirs WHERE share_id = $1 AND parent_id IS NULL)`,
+			sh.ID, cat).Scan(&n)
+		return n
+	}
+	videoBefore, docsBefore := catSize(1), catSize(4)
+	if videoBefore == 0 {
+		t.Fatal("expected video data in the tree")
+	}
+	// The user decides that "mkv" and "mp4" are documents, and a new extension "noext"-less file stays Other.
+	if _, err := st.Pool.Exec(ctx, `UPDATE extension_map SET category_id = 4 WHERE ext IN ('mkv', 'mp4')`); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := st.Recategorize(ctx, sh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a.mkv + its hardlink, b.mp4, c.MKV
+	if changed != 4 {
+		t.Errorf("changed = %d, want 4 rows (a.mkv, a-link.mkv, b.mp4, c.MKV)", changed)
+	}
+	if got := catSize(1); got != 0 {
+		t.Errorf("video size after recategorize = %d, want 0 (was %d)", got, videoBefore)
+	}
+	if got := catSize(4); got != docsBefore+videoBefore {
+		t.Errorf("document size = %d, want %d", got, docsBefore+videoBefore)
+	}
+	checkConsistency(t, st, sh.ID)
+
+	// Idempotent.
+	if changed, err = st.Recategorize(ctx, sh.ID); err != nil || changed != 0 {
+		t.Errorf("second recategorize changed=%d err=%v", changed, err)
+	}
+	// Totals did not move.
+	want := ts.FSExpect(t, root, ts.TestExcludes)
+	if tot := dirTotalsByPath(t, st, sh.ID)[""]; tot.Size != want.Bytes || tot.Files != want.Files {
+		t.Errorf("root totals changed by recategorize: %+v", tot)
+	}
+}
+
+func TestRecomputeAllReproducesScanAggregates(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	ts.BuildTree(t, root)
+	sh := newShare(t, st, "recompute", root, ts.TestExcludes)
+	run(t, st, sh, Options{})
+	before := dirTotalsByPath(t, st, sh.ID)
+	beforeExt := extTotals(t, st, sh.ID)
+	ctx := context.Background()
+
+	// Corrupt derived data on purpose; RecomputeAll must repair it from files.
+	if _, err := st.Pool.Exec(ctx, `UPDATE dirs SET size_total = 1, files_direct = 99, size_direct = 7 WHERE share_id = $1`, sh.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Pool.Exec(ctx, `DELETE FROM dir_category_agg WHERE share_id = $1`, sh.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecomputeAll(ctx, sh.ID); err != nil {
+		t.Fatal(err)
+	}
+	if after := dirTotalsByPath(t, st, sh.ID); !reflect.DeepEqual(before, after) {
+		t.Errorf("recompute differs from scan result:\nbefore %v\nafter  %v", before, after)
+	}
+	if got := extTotals(t, st, sh.ID); !reflect.DeepEqual(beforeExt, got) {
+		t.Errorf("extension totals differ: %v vs %v", got, beforeExt)
+	}
+	checkConsistency(t, st, sh.ID)
+	if err := st.RecomputeAll(ctx, sh.ID); err != nil { // idempotent
+		t.Fatal(err)
+	}
+	if after := dirTotalsByPath(t, st, sh.ID); !reflect.DeepEqual(before, after) {
+		t.Error("second recompute changed totals")
+	}
+}
+
+func TestScanStoresFilesystemCapacity(t *testing.T) {
+	st := ts.NewStore(t)
+	root := t.TempDir()
+	ts.Write(t, root+"/a", 1)
+	sh := newShare(t, st, "capacity", root, nil)
+	res := run(t, st, sh, Options{})
+	var total, free *int64
+	st.Pool.QueryRow(context.Background(), `SELECT fs_total_bytes, fs_free_bytes FROM scans WHERE id = $1`, res.ScanID).Scan(&total, &free)
+	if total == nil || free == nil || *total <= 0 || *free < 0 || *free > *total {
+		t.Errorf("capacity total=%v free=%v", total, free)
+	}
+}

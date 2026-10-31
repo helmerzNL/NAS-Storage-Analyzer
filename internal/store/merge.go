@@ -63,7 +63,10 @@ func containsParam2(sql string) bool {
 // aggregate recomputes everything derived from files: hardlink dedup, direct
 // per-directory sums (only where files changed), recursive totals (always,
 // bottom-up level by level) and the per-extension table.
-func aggregate(ctx context.Context, tx pgx.Tx, share int64) error {
+//
+// With all set every directory counts as affected, which makes the result
+// independent of any earlier incremental state (recategorize, repair, seeding).
+func aggregate(ctx context.Context, tx pgx.Tx, share int64, all bool) error {
 	exec := func(name, sql string, args ...any) error {
 		if _, err := tx.Exec(ctx, sql, append([]any{share}, args...)...); err != nil {
 			return fmt.Errorf("aggregate: %s: %w", name, err)
@@ -83,10 +86,14 @@ func aggregate(ctx context.Context, tx pgx.Tx, share int64) error {
 
 	// Directories whose direct numbers may have changed: every directory that
 	// was read this scan plus every directory holding a hardlinked file.
-	if err := exec("affected dirs", `
+	affectedSQL := `
 		CREATE TEMP TABLE affected ON COMMIT DROP AS
 			SELECT id FROM stage_dirs WHERE NOT reused AND NOT failed
-			UNION SELECT dir_id FROM files WHERE share_id = $1 AND nlink > 1`); err != nil {
+			UNION SELECT dir_id FROM files WHERE share_id = $1 AND nlink > 1`
+	if all {
+		affectedSQL = `CREATE TEMP TABLE affected ON COMMIT DROP AS SELECT id FROM dirs WHERE share_id = $1`
+	}
+	if err := exec("affected dirs", affectedSQL); err != nil {
 		return err
 	}
 	if err := exec("direct sums", `

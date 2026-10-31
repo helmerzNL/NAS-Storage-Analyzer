@@ -208,6 +208,9 @@ type Summary struct {
 	ReusedDirs   int64
 	ErrorCount   int64
 	AtimeQuality any // JSON-serialisable
+	// FsTotal and FsFree are the capacity and free space of the file system
+	// holding the share (statfs); nil when unknown.
+	FsTotal, FsFree *int64
 }
 
 // drain flushes buffers and waits for the COPY goroutine.
@@ -250,7 +253,7 @@ func (w *ScanWriter) Commit(ctx context.Context, sum Summary) (ScanTotals, error
 	if err := mergeScan(ctx, tx, w.shareID, w.scanID); err != nil {
 		return tot, err
 	}
-	if err := aggregate(ctx, tx, w.shareID); err != nil {
+	if err := aggregate(ctx, tx, w.shareID, false); err != nil {
 		return tot, err
 	}
 	err = tx.QueryRow(ctx, `
@@ -261,8 +264,10 @@ func (w *ScanWriter) Commit(ctx context.Context, sum Summary) (ScanTotals, error
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE scans SET status = 'succeeded', finished_at = now(), dirs = $2, reused_dirs = $3, files = $4,
-			bytes = $5, alloc_bytes = $6, error_count = $7, atime_quality = $8
-		WHERE id = $1`, w.scanID, tot.Dirs, sum.ReusedDirs, tot.Files, tot.Bytes, tot.Alloc, sum.ErrorCount, aq); err != nil {
+			bytes = $5, alloc_bytes = $6, error_count = $7, atime_quality = $8,
+			fs_total_bytes = $9, fs_free_bytes = $10
+		WHERE id = $1`, w.scanID, tot.Dirs, sum.ReusedDirs, tot.Files, tot.Bytes, tot.Alloc, sum.ErrorCount, aq,
+		sum.FsTotal, sum.FsFree); err != nil {
 		return tot, err
 	}
 	if _, err := tx.Exec(ctx, `UPDATE shares SET last_scan_id = $2 WHERE id = $1`, w.shareID, w.scanID); err != nil {
