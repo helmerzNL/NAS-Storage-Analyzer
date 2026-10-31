@@ -8,6 +8,7 @@
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import FolderPicker from '../components/FolderPicker.svelte';
 
   interface Form {
     id?: number; name: string; kind: 'bind' | 'nfs' | 'smb'; path: string; server: string; export: string; share: string; username: string;
@@ -17,7 +18,7 @@
   }
   let sharesRoot = $state('/mnt/shares');
   let open = $state(false), f = $state<Form>(blank()), busy = $state(false), error = $state(''), fieldErr = $state<Record<string, string>>({});
-  let confirmDelete = $state<ShareInfo | null>(null), delOpen = $state(false);
+  let confirmDelete = $state<ShareInfo | null>(null), delOpen = $state(false), pickOpen = $state(false);
 
   function blank(): Form {
     return { name: '', kind: 'bind', path: '/mnt/shares/', server: '', export: '', share: '', username: '', domain: '', version: '', mount_options: '', password: '',
@@ -116,7 +117,14 @@
     </div>
 
     {#if f.kind === 'bind'}
-      <label class="field">{t('shares.path')}<input bind:value={f.path} required class="mono" data-testid="f-path" /><span class="hint">{t('shares.path.hint', { root: sharesRoot })}</span>{@render err('path')}</label>
+      <div class="field">
+        <label for="f-path">{t('shares.path')}</label>
+        <div class="input-row">
+          <input id="f-path" bind:value={f.path} required class="mono" data-testid="f-path" />
+          <button type="button" onclick={() => (pickOpen = true)} data-testid="f-browse">{t('shares.browse')}</button>
+        </div>
+        <span class="hint">{t('shares.path.hint', { root: sharesRoot })}</span>{@render err('path')}
+      </div>
     {:else}
       <div class="alert info small">{t('shares.mount.note')}</div>
       <div class="form-grid">
@@ -172,6 +180,8 @@
     <button class="primary" type="submit" form="share-form" disabled={busy} data-testid="f-save">{t('common.save')}</button>
   {/snippet}
 </Dialog>
+
+<FolderPicker bind:open={pickOpen} start={f.path} onpick={(p) => (f.path = p)} />
 
 <Dialog bind:open={delOpen} title={t('shares.delete.title')}>
   <p>{t('shares.delete.body', { name: confirmDelete?.name ?? '' })}</p>

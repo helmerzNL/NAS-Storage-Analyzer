@@ -54,11 +54,12 @@ flowchart LR
   Worker -- "stat / readdir, read-only" --> NAS[("NAS<br/>NFS / SMB")]
 ```
 
-* **`app`** serveert de interface (in de binary ingebakken), de REST API en de scheduler. Hij heeft geen toegang
-  tot de NAS nodig en draait zonder rechten.
+* **`app`** serveert de interface (in de binary ingebakken), de REST API en de scheduler. Hij scant niet en draait
+  zonder rechten. Alleen voor de mapkiezer in het share-formulier leest hij (read-only, alleen voor beheerders) de
+  namen van mappen onder de share-map; bestanden worden niet getoond of geopend.
 * **`worker`** haalt scanjobs uit de wachtrij in de database (`FOR UPDATE SKIP LOCKED`), scant, en publiceert het
   resultaat in één transactie; een geannuleerde of mislukte scan laat de eerdere gegevens ongemoeid. Alleen de
-  worker raakt de NAS aan, en alleen in de aanbevolen opzet via een read-only bind-mount.
+  worker scant de NAS, en alleen in de aanbevolen opzet via een read-only bind-mount.
 * **PostgreSQL** bewaart de bestandsindex (per share een eigen partitie, mappen als `ltree`) en de voorberekende
   totalen per map, per map en categorie, en per extensie. Daardoor lezen de meeste weergaven een paar duizend
   rijen in plaats van alle bestanden. Metingen op 10 miljoen bestanden: [`docs/bench-phase2.md`](docs/bench-phase2.md).
@@ -78,8 +79,8 @@ nas.lan:/volume1/media  /srv/nas/media  nfs  ro,vers=4.1,_netdev,x-systemd.autom
 NASA_SHARES_DIR=/srv/nas
 ```
 
-Voeg de share in de interface toe als type *Gemount pad* met het pad `/mnt/shares/media`. De containers kunnen dan
-niets op de NAS wijzigen en hebben geen speciale rechten nodig.
+Voeg de share in de interface toe als type *Gemount pad*: klik op **Bladeren…** en kies de map, of typ het pad
+(`/mnt/shares/media`). De containers kunnen dan niets op de NAS wijzigen en hebben geen speciale rechten nodig.
 
 Gebruik voor `NASA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
 `./shares` is een lege map in de stackmap. Zie
@@ -95,7 +96,7 @@ NASA_SHARES_DIR=/mnt/user
 NASA_SHARES_MOUNT=/mnt/user
 ```
 
-Voeg elke share apart toe, bijvoorbeeld `/mnt/user/media`. Alleen wat je toevoegt wordt gescand. Losse Unraid-schijven
+Voeg elke share apart toe (**Bladeren…**, of typ bijvoorbeeld `/mnt/user/media`). Alleen wat je toevoegt wordt gescand. Losse Unraid-schijven
 in plaats van de (tragere) FUSE-laag `/mnt/user`, Exclusive shares en andere NAS-systemen:
 [`docs/deploy.md`](docs/deploy.md#route-c-de-stack-draait-op-de-nas-zelf).
 
@@ -244,7 +245,8 @@ docker compose up -d --build
 Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the administrator and enrol a second factor
 (authenticator app or passkey; mandatory). There are no default passwords. Then add a share and click *Scan nu*.
 
-**Mounting the NAS.** Recommended: mount the share read-only on the Docker host and point `NASA_SHARES_DIR` at the
+**Mounting the NAS.** In the share form, *Browse…* lets you click through the folders below the shares folder instead of
+typing a path. Recommended: mount the share read-only on the Docker host and point `NASA_SHARES_DIR` at the
 parent folder; it appears read-only as `/mnt/shares` in the containers, which need no special privileges. Set
 `NASA_SHARES_MOUNT` to change that path; if it equals `NASA_SHARES_DIR`, the paths you type in the interface are the
 host paths. When the stack runs on the NAS itself (for example Unraid) there is nothing to mount: set both variables to

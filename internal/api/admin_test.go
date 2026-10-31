@@ -4,10 +4,14 @@ import (
 	"bufio"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
 )
 
@@ -54,6 +58,89 @@ func TestShareManagementRequiresAdmin(t *testing.T) {
 	expect(t, admin.do("POST", "/api/v1/shares", shareBody("media", root)), 201, "")
 	expect(t, v.do("GET", "/api/v1/shares/1/history", nil), 200, "")
 	expect(t, v.do("GET", "/api/v1/shares/1/jobs", nil), 200, "")
+}
+
+func TestFolderPickerIsAdminOnlyAndStaysInsideTheRoot(t *testing.T) {
+	base := t.TempDir()
+	root, outside := filepath.Join(base, "shares"), filepath.Join(base, "outside")
+	for _, d := range []string{"media/Movies", "media/music", "backups"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+
+	e := newAuthEnv(t, func(o *api.Options) { o.SharesRoot = root })
+	browse := func(c *client, p string) reply {
+		q := ""
+		if p != "" {
+			q = "?path=" + url.QueryEscape(p)
+		}
+		return c.do("GET", "/api/v1/fs/dirs"+q, nil)
+	}
+
+	// Nobody signed in, and a viewer, are refused.
+	expect(t, browse(e.client(), ""), 401, "unauthenticated")
+	admin, _, _ := e.setupAdmin()
+	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 201, "")
+	v := e.client()
+	v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
+	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
+	v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)})
+	expect(t, browse(v, ""), 403, "forbidden")
+
+	// The root: folders only, sorted, no parent, and the link that leaves the root is not offered.
+	r := browse(admin, "")
+	expect(t, r, 200, "")
+	dirs, _ := r.Body["dirs"].([]any)
+	var got []string
+	for _, d := range dirs {
+		got = append(got, d.(map[string]any)["name"].(string))
+	}
+	if strings.Join(got, ",") != "backups,media" || r.Body["root"] != root || r.Body["path"] != root || r.Body["truncated"] != false {
+		t.Errorf("root listing: %s", r.Raw)
+	}
+	if _, has := r.Body["parent"]; has {
+		t.Errorf("the root has no parent: %s", r.Raw)
+	}
+
+	// A sub-folder names its parent, and the entries carry paths a share can use as they are.
+	r = browse(admin, root+"/media")
+	expect(t, r, 200, "")
+	if r.Body["parent"] != root {
+		t.Errorf("parent: %s", r.Raw)
+	}
+	dirs, _ = r.Body["dirs"].([]any)
+	if len(dirs) != 2 || dirs[0].(map[string]any)["path"] != root+"/media/Movies" {
+		t.Errorf("sub-folder listing: %s", r.Raw)
+	}
+
+	// Outside the root, through a link, and malformed paths are 400 with the field; a missing folder is 404.
+	for _, p := range []string{"/etc", outside, root + "/../outside", root + "/escape", "media", root + "/notes.txt"} {
+		r := browse(admin, p)
+		if r.Status != 400 || r.Body["field"] != "path" {
+			t.Errorf("%q: got %d %s", p, r.Status, r.Raw)
+		}
+	}
+	expect(t, browse(admin, root+"/missing"), 404, "")
+	// "/escape/.." is tidied to the root before anything is opened, so it lists the root.
+	if r := browse(admin, root+"/escape/.."); r.Status != 200 || r.Body["path"] != root {
+		t.Errorf("a path that tidies to the root: %d %s", r.Status, r.Raw)
+	}
+}
+
+func TestFolderPickerWithoutAConfiguredRoot(t *testing.T) {
+	e := newAuthEnv(t, nil) // no shares root
+	admin, _, _ := e.setupAdmin()
+	expect(t, admin.do("GET", "/api/v1/fs/dirs", nil), 409, "not_configured")
 }
 
 func TestCreateEditAndDeleteAShare(t *testing.T) {
