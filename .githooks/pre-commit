@@ -8,6 +8,8 @@ commands = (
     # clients see: work done in one client that adds a skill or an MCP server leaves the others
     # behind, and nothing about that is visible from inside it. See AGENTS.md section 7.
     [sys.executable, "scripts/check_agent_instructions.py"],
+    # Cheap and deterministic: parses one markdown table. Catches a topic left unanswered before the commit exists.
+    [sys.executable, "scripts/check_app_engineering.py"],
 )
 
 for cmd in commands:
