@@ -110,7 +110,9 @@ NASA_SHARES_DIR=/mnt/user
 NASA_SHARES_MOUNT=/mnt/user
 ```
 
-Voeg elke share apart toe (**Bladeren…**, of typ bijvoorbeeld `/mnt/user/media`). Alleen wat je toevoegt wordt gescand. Losse Unraid-schijven
+Voeg elke share apart toe (**Bladeren…**, of typ bijvoorbeeld `/mnt/user/media`). Alleen wat je toevoegt wordt gescand.
+Meldt de kiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan
+`NASA_SHARES_GID=100`, zie [Leesrechten](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers). Losse Unraid-schijven
 in plaats van de (tragere) FUSE-laag `/mnt/user`, Exclusive shares en andere NAS-systemen:
 [`docs/deploy.md`](docs/deploy.md#route-c-de-stack-draait-op-de-nas-zelf).
 
@@ -136,6 +138,7 @@ Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangr
 | `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
 | `NASA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
 | `NASA_SHARES_DIR` | Vereist. Absolute map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
+| `NASA_SHARES_GID` | Groep waar de containers lid van worden om je shares te kunnen lezen. Nodig als een share alleen voor de eigenaar en één groep leesbaar is (Unraid: `drwxrwx---` voor `nobody:users`): zet `100`. Standaard de eigen groep van de image, dus niets verandert. |
 | `NASA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Standaard `/mnt/shares`; zet het gelijk aan `NASA_SHARES_DIR` en de paden zijn overal hetzelfde. |
 | `NASA_HTTP_BIND`, `NASA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
 | `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |

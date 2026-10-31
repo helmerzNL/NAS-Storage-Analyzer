@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -326,7 +327,8 @@ func scanOutcome(t store.ScanTotals, readErrors int64) (action, hint string) {
 			"folder (NASA_SHARES_DIR, NASA_SHARES_MOUNT)? Use Browse in the share form to see what the container sees."
 	case readErrors > 0:
 		return "scan.errors", fmt.Sprintf("%d folders or files could not be read (permission denied, or a network share that stopped "+
-			"answering). The scan is published without them; the dashboard lists them per scan.", readErrors)
+			"answering). The scan is published without them; the dashboard lists them per scan. For permission denied: %s",
+			readErrors, shares.PermissionHint())
 	}
 	return "scan.finished", ""
 }
@@ -355,7 +357,19 @@ func (w *Worker) auditFailure(log *slog.Logger, job *jobs.Job, msg string) {
 	}
 	detail := jobDetail(job)
 	detail["error"] = msg
+	if hint := failureHint(msg); hint != "" {
+		detail["hint"] = hint
+	}
 	w.audit(log, action, target, detail)
+}
+
+// failureHint says what to do about the failures that have one fix people keep needing: the share cannot be read
+// by the user the app runs as.
+func failureHint(msg string) string {
+	if strings.Contains(strings.ToLower(msg), "permission denied") {
+		return shares.PermissionHint()
+	}
+	return ""
 }
 
 // audit appends a job outcome to the audit log, as "worker" (nobody signed in did this). Writing it must

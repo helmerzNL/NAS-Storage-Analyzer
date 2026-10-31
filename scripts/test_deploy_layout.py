@@ -72,6 +72,15 @@ class ComposeLayout(unittest.TestCase):
         for name in sorted(used):
             self.assertRegex(ENV_EXAMPLE, rf"(?m)^#?{name}=", f"{name} is read by docker-compose.yml but not documented in .env.example")
 
+    def test_the_containers_can_join_the_group_that_owns_the_shares(self):
+        """A share that only its owner and one group may read (Unraid: nobody:users, mode 770) is closed to the
+        containers' own uid. NASA_SHARES_GID adds that group; the default is the image's own group, so nothing changes."""
+        gid = re.search(r"addgroup -S -g (\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8")).group(1)
+        self.assertRegex(COMPOSE, r"(?m)^  group_add:\n    - \"\$\{NASA_SHARES_GID:-" + gid + r"\}\"\n")  # in x-nasa: both services inherit it
+        self.assertEqual(env_value(ENV_EXAMPLE, "NASA_SHARES_GID"), gid)
+        for name in ("app", "worker"):  # a list is replaced, not merged: a service that sets its own would drop the group
+            self.assertNotIn("group_add", service_block(name))
+
     def test_the_build_override_builds_both_images_with_version_and_commit(self):
         build = (ROOT / "docker-compose.build.yml").read_text(encoding="utf-8")
         self.assertRegex(build, r"(?m)^  app:\n    build: \*build")

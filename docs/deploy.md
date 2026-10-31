@@ -131,9 +131,15 @@ Kies een absoluut pad dat de container zelf niet gebruikt: niet `/`, `/usr`, `/e
   `NASA_SHARES_MOUNT=/mnt/user`, dan typ je `/mnt/user/media`, het pad dat je op Unraid zelf kent; zie
   [route (c)](#route-c-de-stack-draait-op-de-nas-zelf). Wil je maar een deel scannen, wijs dan naar die map
   (`/mnt/user/media`) of sluit mappen uit in de share-instellingen.
-* **Leesrechten:** de containers draaien als uid 10001. Op Unraid zijn shares standaard voor iedereen leesbaar. Zijn
-  ze dat bij jou niet, geef `others` dan leesrechten of zet in een override `user: "99:100"` (nobody:users) op `app`
-  en `worker`.
+* **Leesrechten:** de containers draaien als uid 10001. Dat is niet de eigenaar van je shares (op Unraid `nobody`, uid 99)
+  en zit niet in hun groep (`users`, gid 100). Een map met `drwxrwx---` (770) laat die gebruiker daarom niet binnen: de
+  mapkiezer en de scan melden *permission denied*. Of een share leesbaar is voor iedereen hangt af van hoe hij is
+  aangemaakt; kijk met `ls -l`. De oplossing is de containers lid te maken van de groep die de share bezit: zet
+  `NASA_SHARES_GID=100` in de `.env` van de stack (op Unraid de groep `users`; bij een andere NAS het getal dat
+  `ls -ln` bij de share toont) en maak de containers opnieuw aan (`docker compose up -d`). De containers blijven uid
+  10001 en de mount blijft read-only; ze mogen alleen lezen wat die groep mag lezen. Mappen die aan `root:root` horen
+  met 770 lost dat niet op: geef ze op Unraid de eigenaar `nobody:users` (*Tools → New Permissions*) of laat ze weg.
+  `chmod o+rx` werkt ook, maar opent de map voor iedereen.
 * **Read-only tot in de submounts:** volgens de Docker-documentatie wordt een read-only bind-mount alleen recursief
   read-only bij Docker 25 of nieuwer met kernel 5.12 of nieuwer. De scanner schrijft nooit, maar mount NFS/SMB op de
   host daarom ook zelf met `ro`, zoals in het fstab-voorbeeld hierboven.
@@ -199,8 +205,8 @@ Je kunt dan `/mnt/disk1/media`, `/mnt/cache/appdata` en `/mnt/user/documenten` d
   toevoegt wordt gescand.
 * Heeft een share "Exclusive access" aan (Unraid 6.12 of nieuwer), dan is `/mnt/user/<share>` mogelijk een verwijzing
   (symlink) naar de pool. De scanner volgt geen symlinks. Scan zo'n share via `/mnt/<pool>/<share>`.
-* Leesrechten: zie *Leesrechten* in de sectie over Unraid hierboven; op Unraid kan *Tools → New Permissions* ze
-  herstellen.
+* Leesrechten: zie *Leesrechten* in de sectie over Unraid hierboven. Staan je shares op `drwxrwx---` voor
+  `nobody:users`, zet dan `NASA_SHARES_GID=100`.
 
 Op andere NAS-systemen geef je het pad van het volume of de pool door (Synology bijvoorbeeld `/volume1`); controleer het
 via SSH met `ls`. Controleer na het starten of de share zichtbaar is met `docker compose exec worker ls /mnt/user`
@@ -480,7 +486,7 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASA_RP_ID` in. |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
 | Bij het toevoegen van een share: "must be inside …" | Het pad moet onder `NASA_SHARES_MOUNT` liggen (standaard `/mnt/shares`). Zet `NASA_SHARES_MOUNT` op het pad dat je wilt typen, of gebruik het pad dat de melding noemt; herstart daarna `docker compose up -d`. |
-| Scan mislukt met "permission denied" op het share-pad | De container draait als uid 10001; geef die leesrechten (`o+rx`), of mount met `uid=`/`gid=` voor SMB. Mappen die niet leesbaar zijn tellen als fout, de scan loopt door. |
+| Scan mislukt met "permission denied" op het share-pad, of de mapkiezer meldt het | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASA_SHARES_GID` op de groep die de share bezit (Unraid: `100`), zie *Leesrechten*; de melding noemt de uid en gid waarmee de app draait. Of geef die gebruiker leesrechten (`o+rx`), of mount met `uid=`/`gid=` voor SMB. Mappen die niet leesbaar zijn tellen als fout, de scan loopt door. |
 | `/metrics` geeft 401 of 403 | Zet `NASA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
 
@@ -513,6 +519,10 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
 * **Audit log:** besides sign-ins and changes it records the outcome of every scan, scheduled ones too, as `worker`:
   `scan.finished`, `scan.empty` (finished but found no files: an unmounted share or a wrong `NASA_SHARES_DIR`),
   `scan.errors` (finished, some folders unreadable) and `scan.failed` (with the reason).
+* **Read permissions:** the containers run as uid 10001. A share that only its owner and one group may read (Unraid:
+  `nobody:users`, mode 770) answers *permission denied* in the folder picker and the scan. Set `NASA_SHARES_GID` to the
+  numeric group that owns the share (Unraid: `100`) and recreate the containers; they join that group and stay uid 10001,
+  and the mount stays read-only. The default is the image's own group, which changes nothing.
 * **Folder picker:** in the share form, *Browse…* (administrators only) lists the folders below `NASA_SHARES_MOUNT` so you
   can click to a folder instead of typing its path. Folders only, never above that folder; links are shown only when they
   point to a folder inside it; a folder with more than 1,000 sub-folders is cut off.
