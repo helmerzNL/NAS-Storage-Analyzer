@@ -64,7 +64,15 @@ than the file.
 - **The audit log gets `script.generate`**: the kind of script, the counts, the scan id, the base path and a SHA-256 of the
   script. Never a file name; the log is read by people who may not see the share.
 
-This ADR covers the generator and the endpoint. The interface follows in a later pull request and extends the Enforcement section.
+- **The interface ticks files, and only files, and only for an administrator.** A box in the file lists (Folders → Files, and the
+  largest and cold files in Lists) adds a file to a selection of at most 2,000 that lives in the browser for the session: it survives
+  "load more" and a move between those pages, and holds one share at a time (ticking in another share drops the first and says so).
+  Folders cannot be ticked: a folder would stand for files that are not in front of the person. The bar that follows the screen offers the
+  script; the dialog asks for the kind of script (PowerShell, Command Prompt, sh), starts from the base path of the share, shows what is
+  about to be written, saves the file, and shows the command that runs it with the bypass PowerShell needs. The interface never renders a file
+  name as markup, and it never builds the script itself (alternative 2 below).
+
+This ADR covers the generator, the endpoint and the interface.
 
 ## Consequences
 
@@ -113,3 +121,9 @@ for a script removes nothing; the audit entry holds the hash and no name), `Test
 `TestFilesForScript…` (order, other shares' ids, case twins of files and of folders); `internal/shares`
 `TestValidateClientRoots` and `TestClientRootsSurviveOtherChanges` (a partial update and the scan command's `EnsureShare` keep the
 base paths).
+
+The interface: `web/src/lib/selection.test.ts` (the limit, one share at a time, "load more", the header box), `script.test.ts` (the
+base path a script starts from, the run command, the file name a server suggests cannot leave the downloads folder), `lib.test.ts`
+(every text exists in Dutch and English), and the browser test (`web/e2e/e2e.cjs`, "delete scripts…"): tick, make a `.sh`, `.ps1` and
+`.cmd` script, check what is inside, check that nothing was deleted, the base paths of the share, a viewer without boxes and refused by
+the API, and an audit log without a file name.

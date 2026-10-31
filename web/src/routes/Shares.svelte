@@ -13,6 +13,7 @@
   interface Form {
     id?: number; name: string; kind: 'bind' | 'nfs' | 'smb'; path: string; server: string; export: string; share: string; username: string;
     domain: string; version: string; mount_options: string; password: string; clearPassword: boolean; hasPassword: boolean;
+    client_windows: string; client_posix: string;
     excludes: string; workers: number; max_ops_per_sec: number; max_ops_day: number; day_start_hour: number; day_end_hour: number;
     cron: string; last_used_basis: string; full_scan_every: number; retention_scans: number; retention_days: number; snapshot_depth: number;
   }
@@ -22,7 +23,7 @@
 
   function blank(): Form {
     return { name: '', kind: 'bind', path: '/mnt/shares/', server: '', export: '', share: '', username: '', domain: '', version: '', mount_options: '', password: '',
-      clearPassword: false, hasPassword: false, excludes: '.snapshot\n@eaDir\n#recycle\n.Trash-*', workers: 16, max_ops_per_sec: 0, max_ops_day: 0,
+      clearPassword: false, hasPassword: false, client_windows: '', client_posix: '', excludes: '.snapshot\n@eaDir\n#recycle\n.Trash-*', workers: 16, max_ops_per_sec: 0, max_ops_day: 0,
       day_start_hour: 8, day_end_hour: 22, cron: '0 3 * * *', last_used_basis: 'atime', full_scan_every: 7, retention_scans: 104, retention_days: 0, snapshot_depth: 4 };
   }
   onMount(async () => {
@@ -36,6 +37,7 @@
     const c = s.config;
     f = { id: s.id, name: s.name, kind: s.kind, path: c.path ?? '', server: c.server ?? '', export: c.export ?? '', share: c.share ?? '', username: c.username ?? '',
       domain: c.domain ?? '', version: c.version ?? '', mount_options: c.mount_options ?? '', password: '', clearPassword: false, hasPassword: s.has_password,
+      client_windows: c.client_windows ?? '', client_posix: c.client_posix ?? '',
       excludes: s.excludes.join('\n'), workers: s.workers, max_ops_per_sec: s.max_ops_per_sec, max_ops_day: s.max_ops_day, day_start_hour: s.day_start_hour,
       day_end_hour: s.day_end_hour, cron: s.cron, last_used_basis: s.last_used_basis, full_scan_every: s.full_scan_every, retention_scans: s.retention_scans,
       retention_days: s.retention_days, snapshot_depth: s.snapshot_depth };
@@ -50,6 +52,7 @@
       cron: f.cron.trim(), last_used_basis: f.last_used_basis, full_scan_every: Number(f.full_scan_every), retention_scans: Number(f.retention_scans),
       retention_days: Number(f.retention_days), snapshot_depth: Number(f.snapshot_depth),
       path: '', server: '', export: '', share: '', username: '', domain: '', version: '', mount_options: '',
+      client_windows: f.client_windows.trim(), client_posix: f.client_posix.trim(),
     };
     if (f.kind === 'bind') body.path = f.path.trim();
     else {
@@ -144,6 +147,15 @@
         <label class="field">{t('shares.mountopts')}<input bind:value={f.mount_options} class="mono" placeholder="soft,timeo=30" /><span class="hint">{t('shares.mountopts.hint')}</span>{@render err('mount_options')}</label>
       </div>
     {/if}
+
+    <h3>{t('shares.scripts')}</h3>
+    <p class="hint" style="margin-top:-6px">{t('shares.scripts.hint')}</p>
+    <div class="form-grid">
+      <label class="field">{t('shares.client.windows')}<input bind:value={f.client_windows} class="mono" autocomplete="off" spellcheck="false" placeholder="\\nas\media" data-testid="f-client-windows" />
+        <span class="hint">{t('shares.client.windows.hint')}</span>{@render err('client_windows')}</label>
+      <label class="field">{t('shares.client.posix')}<input bind:value={f.client_posix} class="mono" autocomplete="off" spellcheck="false" placeholder="/mnt/user/media" data-testid="f-client-posix" />
+        <span class="hint">{t('shares.client.posix.hint')}</span>{@render err('client_posix')}</label>
+    </div>
 
     <h3>{t('shares.scanning')}</h3>
     <label class="field">{t('shares.excludes')}<textarea bind:value={f.excludes} rows="4" class="mono"></textarea><span class="hint">{t('shares.excludes.hint')}</span>{@render err('excludes')}</label>

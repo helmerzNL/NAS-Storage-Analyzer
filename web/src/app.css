@@ -189,3 +189,11 @@ td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }  
 .stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 8rem; }
 .nav a, .settings-nav a { position: relative; }   /* a screen-reader-only text inside a link stays inside it: otherwise it sits where the page ends and widens it */
 .table-title { text-align: left; font-weight: 700; padding: 14px 16px 6px; font-size: 1.05rem; caption-side: top; }
+
+/* Delete scripts: the tick box column of the file lists, the bar that follows the screen while files are ticked, and the command to run */
+.selcell { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; margin: -8px -4px; cursor: pointer; }   /* a 44 px target around a small box */
+th.sel, td.sel { width: 1%; padding-left: 4px; padding-right: 0; }
+.selbar { position: sticky; bottom: 12px; z-index: 18; display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 12px; padding: 8px 8px 8px 16px; background: var(--surface-solid); border: 1px solid var(--accent); border-radius: var(--radius); box-shadow: var(--shadow); }
+.codeblock { display: block; padding: 10px 12px; background: var(--lijn); border-radius: var(--radius-sm); overflow-x: auto; white-space: pre; user-select: all; font-weight: 400; color: var(--text); font-size: .9rem; }
+.input-row.wrap { flex-wrap: wrap; } .input-row.wrap input { flex: 1 1 16rem; }   /* the button drops under the field on a phone instead of squeezing it */
