@@ -20,6 +20,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
+	"github.com/helmerznl/nas-storage-analyzer/internal/webui"
 )
 
 // env returns the first non-empty variable; a VAR_FILE variant (Docker
@@ -121,6 +122,7 @@ func runServe(args []string) error {
 		Shares:         shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc),
 		Queue:          queue,
 		SharesRoot:     sharesRoot,
+		Static:         webui.Handler(),
 		TrustedProxies: proxies,
 		SetupToken:     env("NASA_SETUP_TOKEN", ""),
 		MetricsToken:   env("NASA_METRICS_TOKEN", ""),
