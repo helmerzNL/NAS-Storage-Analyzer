@@ -12,6 +12,7 @@ const usage = `nasabench - seed and measure
 
   nasabench seed    -db DSN [-share bench] [-files 10000000] [-dirs 200000]
   nasabench queries -db DSN [-share bench] [-runs 30] [-out report.md]
+  nasabench script  -db DSN [-share bench] [-n 2000] [-runs 20]
 `
 
 func main() {
@@ -25,6 +26,8 @@ func main() {
 		err = runSeed(os.Args[2:])
 	case "queries":
 		err = runQueries(os.Args[2:])
+	case "script":
+		err = runScript(os.Args[2:])
 	default:
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)

@@ -165,6 +165,54 @@ paths:
       responses:
         "202": {description: "Queued.", content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/delete-script:
+    post:
+      tags: [admin]
+      operationId: createDeleteScript
+      summary: Write a script that deletes the selected files (admin)
+      description: |
+        Returns the text of a script for `cmd`, PowerShell or `sh`, to download and run by the person on their own machine.
+        **The application deletes nothing**: it only writes text, and the share stays mounted read-only. The script shows a
+        summary, needs `DELETE <count>` to be typed, and then deletes exactly the listed files, keeping any whose size (and,
+        outside `cmd`, modification time) differs from the last scan. Files that cannot be addressed safely are left out and
+        named in the script (names with control or replacement characters, what Windows cannot address, a name that differs
+        only in upper or lower case from another, an id that is no longer in the index).
+
+        `client_root` is where the machine that runs the script sees the share (`\\nas\media`, `Z:\`, `/mnt/user/media`);
+        empty uses the share's `client_windows` or `client_posix` setting. Ids of another share are treated as files that are
+        gone. The audit log records the script type, the counts and a SHA-256 of the script, never a file name.
+      parameters: [{$ref: "#/components/parameters/Share"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids, script]
+              properties:
+                ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 2000
+                  items: {type: integer, format: int64, minimum: 1}
+                  description: "File ids from the file lists, at most 2000."
+                script: {type: string, enum: [cmd, powershell, sh], description: "`cmd` and `powershell` address Windows paths; `sh` addresses Linux and macOS paths."}
+                client_root: {type: string, description: "Base path on the machine that runs the script. Empty uses the share's own."}
+                lang: {type: string, enum: [en, nl], default: en, description: "Language of what the script prints."}
+      responses:
+        "200":
+          description: The script, with CRLF line ends for `cmd` and PowerShell (UTF-8, with a byte-order mark for PowerShell) and LF for `sh`.
+          headers:
+            Content-Disposition: {schema: {type: string}, description: "`attachment` with a file name that ends in `.cmd`, `.ps1` or `.sh`."}
+            X-Files: {schema: {type: integer}, description: "Files in the script."}
+            X-Skipped: {schema: {type: integer}, description: "Files left out; the script lists them."}
+            X-Bytes: {schema: {type: integer, format: int64}, description: "Total size of the files in the script, an upper bound when files have several hard links."}
+          content:
+            text/plain: {schema: {type: string}}
+        "400": {description: "Invalid request: `field` is `ids` (none, too many, or none that can be put in a script), `script`, `lang` or `client_root`.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "404": {description: "No such share.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "409": {description: "The share has not been scanned yet (`no_data`).", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/scans:
     get:
       tags: [shares]
@@ -1146,7 +1194,7 @@ components:
       type: object
       required: [id, name, kind, last_used_basis, excludes, workers, max_ops_per_sec, created_at, root_dir_id, config, has_password, cron, next_run_at, last_run_at, full_scan_every, max_ops_day, day_start_hour, day_end_hour, retention_scans, retention_days, snapshot_depth, last_scan, latest_scan, active_job]
       properties:
-        config: {type: object, additionalProperties: {type: string}, description: "Kind-specific settings without secrets (path, server, export, share, username, domain, version, mount_options)."}
+        config: {type: object, additionalProperties: {type: string}, description: "Kind-specific settings without secrets (path, server, export, share, username, domain, version, mount_options) and the base paths of the delete scripts (client_windows, client_posix)."}
         has_password: {type: boolean}
         cron: {type: string}
         next_run_at: {type: string, format: date-time, nullable: true}
@@ -1518,6 +1566,8 @@ components:
         password: {type: string, description: "smb; write-only, stored encrypted."}
         version: {type: string, description: "nfs: 3, 4, 4.1, 4.2. smb: 2.0, 2.1, 3.0, 3.02, 3.1.1."}
         mount_options: {type: string, description: "Extra mount options from an allow-list; the mount is always read-only."}
+        client_windows: {type: string, description: "Where a Windows PC sees this share, for the delete scripts: `\\\\nas\\media` or `Z:\\`. Empty means not set. The application never opens this path."}
+        client_posix: {type: string, description: "Where Linux or macOS sees this share, for the delete scripts: an absolute path such as `/mnt/user/media`. Empty means not set."}
         excludes: {type: array, items: {type: string}, description: "Name patterns such as .snapshot or @eaDir, matched at any depth; a pattern with a slash matches the path from the share root."}
         workers: {type: integer, minimum: 1, maximum: 256}
         max_ops_per_sec: {type: integer, minimum: 0, description: "Metadata operations per second; 0 is unlimited."}
