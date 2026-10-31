@@ -476,7 +476,7 @@ op het vorige nummer en pull opnieuw; migraties worden niet teruggedraaid, dus e
 release-notes (`docs/releases/`) zeggen dat het schema compatibel is. Herstel anders de back-up van vóór de update.
 
 **Je hoeft niet zelf te kijken of er een nieuwe versie is.** Zodra een beheerder de interface opent, vraagt de app (hoogstens eens per zes uur, anders komt het antwoord uit het geheugen) aan `github.com` wat de nieuwste gepubliceerde release is
-en meldt een nieuwere aan de beheerder: een banner bovenaan (met *Later*, per versie onthouden in de browser) en **Instellingen → Systeem**, met de geïnstalleerde en
+en meldt een nieuwere aan de beheerder: een banner bovenaan (met *Later*, per versie onthouden in de browser) en het scherm **Over** (de naam rechtsboven → *Over*), met de geïnstalleerde en
 nieuwste versie, *Nu controleren* en de link naar de release-notes. Zo weet je wanneer je bovenstaande twee commando's moet draaien; de app doet zelf niets.
 De aanvraag is een `GET https://github.com/helmerzNL/NAS-Storage-Analyzer/releases/latest` met alleen een vaste `User-Agent`: geen versie, geen installatie-id, geen
 gebruikersgegevens (GitHub ziet wel het adres van je server, zoals bij elk verzoek). Daarom ook geen last van het limiet van de GitHub-API (60 per uur per adres): de
@@ -630,7 +630,7 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
 * **Users:** nobody chooses anyone else's password. An administrator (Settings → Users) makes an **invitation link**; the guest opens it and chooses their own password or a passkey. The link is shown once
   (revoke and make a new one if lost), works once and expires after 7 days; the token travels in the URL fragment, never in a path or query string, and never in the audit log. *New login link* brings back a user who cannot sign in:
   the old credentials are replaced only when the guest has finished, and every session of that user ends. Set `NASA_PUBLIC_URL` when the address you use differs from the one guests must use. Limits: 50 users (pending invitations count) and 50 open invitations.
-* **Update check:** the administrator is told about a newer stable release (banner, Settings → System); it sends only a fixed `User-Agent` to `github.com`, never
+* **Update check:** the administrator is told about a newer stable release (banner, and the About screen); it sends only a fixed `User-Agent` to `github.com`, never
   updates anything and can be switched off with `NASA_UPDATE_CHECK=false`.
 * **Update / rollback:** `docker compose pull && docker compose up -d`. A rollback is `NASA_TAG` set to the previous version number; migrations
   are not undone, so back up first and check the release notes.

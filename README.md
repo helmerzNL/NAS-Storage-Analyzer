@@ -23,7 +23,7 @@ snel blijft.
   wachtwoordloos met alleen een passkey), herstelcodes, lockout, CSRF-bescherming, rollen Admin en Viewer, auditlog,
   setup-wizard zonder standaardwachtwoorden.
 * **Beheer**: scheduler met cron per share (persistente jobstatus), OpenAPI-REST-API, Prometheus-`/metrics`, JSON-logs,
-  health checks. Interface in Nederlands en Engels, binaire of decimale eenheden, licht, donker of volgens het systeem, en een accentkleur die elke gebruiker zelf kiest (Instellingen → Weergave en taal).
+  health checks. Interface in Nederlands en Engels, binaire of decimale eenheden, licht, donker of volgens het systeem, en een accentkleur die elke gebruiker zelf kiest (naam rechtsboven → Weergave en taal).
 
 ## Snel starten
 
@@ -149,7 +149,7 @@ Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangr
 | `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
 | `NASA_RP_ID`, `NASA_RP_ORIGINS` | Passkeys zijn aan een hostnaam gebonden; zet deze in productie. |
 | `NASA_METRICS_TOKEN` | Bearer-token voor `/metrics`; zonder token alleen vanaf loopback. |
-| `NASA_UPDATE_CHECK` | Standaard `true`: de app vraagt github.com of er een nieuwere release is en meldt dat aan de beheerder (banner, en Instellingen → Systeem). Hij werkt niets bij en stuurt niets over jouw installatie mee (vaste `User-Agent`, geen versie, geen id). `false` zet hem uit. |
+| `NASA_UPDATE_CHECK` | Standaard `true`: de app vraagt github.com of er een nieuwere release is en meldt dat aan de beheerder (banner, en het scherm Over). Hij werkt niets bij en stuurt niets over jouw installatie mee (vaste `User-Agent`, geen versie, geen id). `false` zet hem uit. |
 | `NASA_TZ` | Tijdzone voor cron-schema's en het dag/nacht-venster. |
 | `PG_*` | PostgreSQL afstellen op het beschikbare geheugen. |
 
@@ -316,7 +316,7 @@ that differ only in case) are left out and listed in the script. See [ADR 0006](
 setup wizard starts again. A session is not enough: you type `RESET` and prove who you are again, with a passkey or with your password and a code. It is refused while a scan runs, needs no restart, and leaves the environment
 (including `NASA_ENCRYPTION_KEY`) and the files on your NAS alone. Make a backup first if you are unsure. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
 
-**Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and Settings → System with *Check now*).
+**Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and the About screen with *Check now*).
 It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,
 no user data) and never updates anything; switch it off with `NASA_UPDATE_CHECK=false`. A beta build is only told about stable releases.
 

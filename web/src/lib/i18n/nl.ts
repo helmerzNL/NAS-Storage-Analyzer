@@ -131,7 +131,7 @@ export const nl: Record<string, string> = {
   'settings.appearance': 'Weergave en taal', 'settings.security': 'Beveiliging', 'settings.units.note': 'De eenhedenkeuze staat ook in de balk bovenaan.',
   'fold.open': 'Tonen', 'fold.closed': 'Verbergen',
   // De update-check (update-check.md)
-  'nav.system': 'Systeem', 'system.intro': 'De versie die je draait, en of er een nieuwere release is.', 'update.title': 'Updates',
+  'nav.system': 'Systeem', 'system.intro': 'Wat de hele installatie raakt, niet één share of één persoon.', 'update.title': 'Updates',
   'update.banner': 'Er is een nieuwe versie beschikbaar: v{latest} (je hebt v{current})', 'update.view': 'Bekijken', 'update.later': 'Later', 'update.checknow': 'Nu controleren',
   'update.installed': 'Geïnstalleerde versie', 'update.latest': 'Nieuwste release', 'update.checked': 'Laatst gecontroleerd', 'update.dot': 'Update beschikbaar',
   'update.state.available': 'Update beschikbaar', 'update.state.current': 'Up-to-date', 'update.state.none': 'Geen release gepubliceerd', 'update.state.disabled': 'Uitgeschakeld',
@@ -230,4 +230,12 @@ export const nl: Record<string, string> = {
   'shares.scripts.hint': 'Waar je eigen machines deze share zien. Ze vullen de padbasis in als je een script maakt van geselecteerde bestanden. De applicatie opent deze paden nooit.',
   'shares.client.windows': 'Pad op Windows', 'shares.client.windows.hint': 'Bijvoorbeeld \\\\nas\\media of Z:\\',
   'shares.client.posix': 'Pad op Linux of macOS', 'shares.client.posix.hint': 'Bijvoorbeeld /mnt/user/media',
+  'menu.signedin': 'Ingelogd als', 'menu.appearance': 'Weergave en taal', 'menu.security': 'Beveiliging', 'menu.about': 'Over',
+  'account.menu': 'Accountmenu', 'system.about.link': 'De versie en de updates staan bij Over.',
+  'about.title': 'Over', 'about.intro': 'Welke versie je draait, en of er een nieuwere release is.', 'about.tagline': 'Opslaganalyse voor je NAS, alleen-lezen.',
+  'about.version': 'Versie', 'about.channel': 'Releasekanaal', 'about.channel.stable': 'Stabiel', 'about.channel.beta': 'Beta', 'about.commit': 'Build',
+  'about.beta.note': 'Een beta-build krijgt wijzigingen eerder dan de stabiele release. Gebruik er een aparte gegevensmap voor (DATA_PATH).',
+  'about.source': 'Broncode en meldingen op GitHub',
+  'about.updates.admin': 'Of er een nieuwere release is, zien beheerders.',
+  'about.credits': 'Met dank aan', 'about.credits.body': 'Pictogrammen: Material Design Icons van Pictogrammers (Apache-2.0), meegeleverd met de applicatie; er wordt niets bij een derde partij opgehaald.',
 };

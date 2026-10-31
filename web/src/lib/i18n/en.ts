@@ -131,7 +131,7 @@ export const en: Record<string, string> = {
   'settings.appearance': 'Appearance and language', 'settings.security': 'Security', 'settings.units.note': 'The units choice is also in the top bar.',
   'fold.open': 'Show', 'fold.closed': 'Hide',
   // The update check (update-check.md)
-  'nav.system': 'System', 'system.intro': 'The version you run, and whether a newer release is out.', 'update.title': 'Updates',
+  'nav.system': 'System', 'system.intro': 'What concerns the whole installation, not one share or one person.', 'update.title': 'Updates',
   'update.banner': 'A new version is available: v{latest} (you have v{current})', 'update.view': 'View', 'update.later': 'Later', 'update.checknow': 'Check now',
   'update.installed': 'Installed version', 'update.latest': 'Latest release', 'update.checked': 'Last checked', 'update.dot': 'Update available',
   'update.state.available': 'Update available', 'update.state.current': 'Up to date', 'update.state.none': 'No release published', 'update.state.disabled': 'Switched off',
@@ -230,4 +230,12 @@ export const en: Record<string, string> = {
   'shares.scripts.hint': 'Where your own machines see this share. They fill in the base path when you create a script from selected files. The application never opens these paths.',
   'shares.client.windows': 'Path on Windows', 'shares.client.windows.hint': 'For example \\\\nas\\media or Z:\\',
   'shares.client.posix': 'Path on Linux or macOS', 'shares.client.posix.hint': 'For example /mnt/user/media',
+  'menu.signedin': 'Signed in as', 'menu.appearance': 'Appearance and language', 'menu.security': 'Security', 'menu.about': 'About',
+  'account.menu': 'Account menu', 'system.about.link': 'The version and the updates are under About.',
+  'about.title': 'About', 'about.intro': 'Which build you are running, and whether a newer release exists.', 'about.tagline': 'Storage analysis for your NAS, read-only.',
+  'about.version': 'Version', 'about.channel': 'Release channel', 'about.channel.stable': 'Stable', 'about.channel.beta': 'Beta', 'about.commit': 'Build',
+  'about.beta.note': 'A beta build gets changes before they reach the stable release. Use a separate data folder for it (DATA_PATH).',
+  'about.source': 'Source code and issues on GitHub',
+  'about.updates.admin': 'Whether a newer release exists is shown to administrators.',
+  'about.credits': 'Credits', 'about.credits.body': 'Icons: Material Design Icons by Pictogrammers (Apache-2.0), included with the application; nothing is loaded from a third party.',
 };

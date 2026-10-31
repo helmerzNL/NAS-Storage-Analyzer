@@ -11,7 +11,7 @@
   <div class="notice info update-banner" role="status" data-testid="update-banner">
     <span><strong>{t('update.banner', { latest: s.latest, current: s.current })}</strong></span>
     <span class="row">
-      <a class="btn small primary" href="/admin/system" use:link data-testid="update-view">{t('update.view')}</a>
+      <a class="btn small primary" href="/about" use:link data-testid="update-view">{t('update.view')}</a>
       <button class="btn small ghost" type="button" onclick={() => dismissUpdate(s.latest)} data-testid="update-later">{t('update.later')}</button>
     </span>
   </div>
