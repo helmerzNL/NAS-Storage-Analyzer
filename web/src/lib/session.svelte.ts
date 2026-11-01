@@ -2,6 +2,7 @@ import { get, post, put, setCsrf, setAuthProblemHandler, type AuthStatus, type S
 import { setLang, detectLang, type Lang } from './i18n.svelte';
 import { applyAccent, isAccent } from './appearance';
 import type { Units } from './format';
+import { isDeleteScripts, type DeleteScripts } from './script';
 
 export const session = $state({
   loaded: false,
@@ -13,7 +14,7 @@ export const session = $state({
   minPassword: 12,
 });
 
-export const prefs = $state({ units: 'binary' as Units, theme: 'system' as 'system' | 'light' | 'dark', accent: '' });
+export const prefs = $state({ units: 'binary' as Units, theme: 'system' as 'system' | 'light' | 'dark', accent: '', deleteScripts: 'advanced' as DeleteScripts });
 
 export const isAdmin = () => session.stage === 'active' && session.user?.role === 'admin';
 export const isActive = () => session.stage === 'active';
@@ -33,6 +34,8 @@ function applyPrefs(p: Record<string, string> | undefined) {
   const lang = p?.language ?? load('lang');
   if (lang === 'nl' || lang === 'en') setLang(lang as Lang);
   applyTheme(p?.theme ?? load('theme') ?? 'system');
+  const ds = p?.delete_scripts ?? load('delete_scripts');
+  prefs.deleteScripts = isDeleteScripts(ds) ? ds : 'advanced';
   applyAccentPref(p ? (p.accent ?? '') : (load('accent') ?? ''));   // saved preferences win; the browser's copy only stands in until they load
 }
 
@@ -46,11 +49,12 @@ export function applyAccentPref(accent: string) {
 export function initPrefs() { setLang(detectLang()); applyPrefs(undefined); }
 
 /** Changes a preference now and saves it on the server for signed-in users. */
-export async function setPref(key: 'units' | 'language' | 'theme' | 'accent', value: string) {
+export async function setPref(key: 'units' | 'language' | 'theme' | 'accent' | 'delete_scripts', value: string) {
   store(key === 'language' ? 'lang' : key, value);
   if (key === 'units') prefs.units = value as Units;
   else if (key === 'language') setLang(value as Lang);
   else if (key === 'accent') applyAccentPref(value);
+  else if (key === 'delete_scripts') prefs.deleteScripts = isDeleteScripts(value) ? value : 'advanced';
   else applyTheme(value);
   if (session.stage === 'active') {
     try { await put('/auth/prefs', { [key]: value }); } catch { /* the choice still applies in this browser */ }
