@@ -287,14 +287,15 @@ func TestSummaryTellsTheTruth(t *testing.T) {
 // Every message exists in both languages, every reason has a text, and the strings that end up in code contain none
 // of the characters that mean something to cmd, PowerShell or sh inside a quoted string.
 func TestMessagesAreCompleteAndSafe(t *testing.T) {
-	reasons := []Reason{ReasonGone, ReasonAmbiguous, ReasonEncoding, ReasonControl, ReasonWindowsName, ReasonReserved, ReasonTooLong, ReasonEmptyCmd}
+	reasons := []Reason{ReasonGone, ReasonAmbiguous, ReasonEncoding, ReasonControl, ReasonWindowsName, ReasonReserved, ReasonTooLong, ReasonEmptyCmd,
+		ReasonRoot, ReasonFolderCmd, ReasonCmdChars}
 	for _, m := range []*messages{&textEN, &textNL} {
 		for _, r := range reasons {
 			if m.reason[r] == "" {
 				t.Errorf("no text for reason %q", r)
 			}
 		}
-		code := []string{m.cancelled, m.notOpen, m.noStat, m.wrongRoot, m.deleted, m.gone, m.changed, m.notRegular, m.failed}
+		code := []string{m.cancelled, m.notOpen, m.noStat, m.wrongRoot, m.deleted, m.gone, m.changed, m.notRegular, m.failed, m.notFolder, m.hasLinks, m.grown}
 		code = append(code, m.confirm[:]...)
 		code = append(code, m.incomplete[:]...)
 		code = append(code, m.done[:]...)
@@ -309,6 +310,27 @@ func TestMessagesAreCompleteAndSafe(t *testing.T) {
 			for _, r := range s {
 				if r >= utf8.RuneSelf {
 					t.Errorf("code message %q is not ASCII", s)
+				}
+			}
+		}
+	}
+	// What the simple script says in its comment lines is read by a person and pasted by a person into a shell, where a # line is only a comment when
+	// the shell says so (zsh does not by default): nothing in it may be able to end the line or start a command, whatever shell it lands in.
+	for _, m := range []*messages{&textEN, &textNL} {
+		var comment []string
+		comment = append(comment, m.simpleTitle, m.simpleCount, m.covered, m.skippedHead, m.skippedLine)
+		comment = append(comment, m.simpleNote[:]...)
+		for _, r := range reasons {
+			comment = append(comment, m.reason[r])
+		}
+		for _, s := range comment {
+			s = strings.NewReplacer("%d", "1", "%s", "x").Replace(s)
+			if s == "" || strings.ContainsAny(s, ";&|<>$`'\"\\!%^\n\r") {
+				t.Errorf("comment text %q is empty or holds a character that could end a line or start a command", s)
+			}
+			for _, r := range s {
+				if r >= utf8.RuneSelf {
+					t.Errorf("comment text %q is not ASCII", s)
 				}
 			}
 		}
