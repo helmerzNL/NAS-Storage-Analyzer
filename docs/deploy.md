@@ -449,6 +449,10 @@ Zet de datadirectory van de database op SSD's. Dat is, meer dan elke parameter, 
   `scan.errors` (gelukt, maar sommige mappen waren onleesbaar) en `scan.failed` (mislukt, met de reden). `scan.empty` en
   `scan.errors` staan oranje, `scan.failed` rood. Een lege map is voor de scanner geen fout (een nieuwe share is ook
   leeg), dus zonder deze regel merk je een niet-gemounte share of een verkeerde `NASA_SHARES_DIR` niet.
+  Bij `scan.errors` staat een uitklapbaar overzicht **welke mappen** de scan niet kon lezen: de eerste 50 (op pad), met het totaal, en per map of
+  hij zelf niet te openen was (meestal een ontbrekende leesrechten, zie *Leesrechten* hieronder) of dat een aantal bestanden erin niet bekeken
+  kon worden. Een map onder een map die niet te openen was staat er niet bij: het gaat om de map die je moet nakijken. Het zijn mapnamen, geen
+  bestandsnamen; het dashboard toont nog steeds elke fout van een scan.
 * **Prometheus:** `/metrics`. Zonder `NASA_METRICS_TOKEN` antwoordt het alleen op loopback; zet een token en scrape met
   `Authorization: Bearer <token>`:
 
@@ -615,7 +619,9 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   Verified up to the configuration and the path validation, not on a real NAS.
 * **Audit log:** besides sign-ins and changes it records the outcome of every scan, scheduled ones too, as `worker`:
   `scan.finished`, `scan.empty` (finished but found no files: an unmounted share or a wrong `NASA_SHARES_DIR`),
-  `scan.errors` (finished, some folders unreadable) and `scan.failed` (with the reason).
+  `scan.errors` (finished, some folders unreadable) and `scan.failed` (with the reason). A `scan.errors` entry carries a folded
+  overview of the folders the scan could not read: the first 50 by path with the total, and for each whether the folder itself could
+  not be opened (usually a missing read permission) or some of its files could not be examined. Folder names, not file names.
 * **Read permissions:** the containers run as uid 10001. A share that only its owner and one group may read (Unraid:
   `nobody:users`, mode 770) answers *permission denied* in the folder picker and the scan. Set `NASA_SHARES_GID` to the
   numeric group that owns the share (Unraid: `100`) and recreate the containers; they join that group and stay uid 10001,

@@ -304,6 +304,7 @@ func (w *Worker) runScan(ctx context.Context, job *jobs.Job, log *slog.Logger) (
 			detail["hint"] = hint
 			log.Warn("scan needs attention", "action", action, "hint", hint)
 		}
+		addUnreadable(detail, res.Unreadable)
 		w.audit(log, action, f.Input.Name, detail)
 		return jobs.StateDone, ""
 	case wasCancelled:
@@ -331,6 +332,40 @@ func scanOutcome(t store.ScanTotals, readErrors int64) (action, hint string) {
 			readErrors, shares.PermissionHint())
 	}
 	return "scan.finished", ""
+}
+
+// addUnreadable puts the folders a scan could not read into the audit entry of that scan, as an overview to act on:
+// "unreadable" lists the first of them (path, why, and either "self" when the folder itself could not be opened or "items"
+// for the number of files in it that could not be examined) and "unreadable_folders" says how many there are in all. The
+// dashboard lists every error of a scan; here it is folders, because a permission is fixed per folder.
+//
+// The paths are names from the share, so they are cleaned up for the audit log: a jsonb column refuses U+0000, and a
+// failed insert would take the entry of the whole scan with it.
+func addUnreadable(detail map[string]any, u scanner.UnreadableReport) {
+	if u.Total == 0 {
+		return
+	}
+	list := make([]map[string]any, 0, len(u.Folders))
+	for _, f := range u.Folders {
+		e := map[string]any{"path": auditText(f.Path), "kind": string(f.Kind)}
+		if f.Self {
+			e["self"] = true
+		} else {
+			e["items"] = f.Items
+		}
+		list = append(list, e)
+	}
+	detail["unreadable"] = list
+	detail["unreadable_folders"] = u.Total
+	if u.Truncated {
+		detail["unreadable_truncated"] = true
+	}
+}
+
+// auditText makes text from the share safe to store in the audit log: valid UTF-8 without U+0000.
+func auditText(s string) string {
+	const replacement = "\uFFFD" // U+FFFD, the character that stands for "something that was not text"
+	return strings.ReplaceAll(strings.ToValidUTF8(s, replacement), "\x00", replacement)
 }
 
 func jobDetail(job *jobs.Job) map[string]any {
