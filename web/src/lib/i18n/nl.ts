@@ -132,6 +132,7 @@ export const nl: Record<string, string> = {
   'fold.open': 'Tonen', 'fold.closed': 'Verbergen',
   // De update-check (update-check.md)
   'nav.system': 'Systeem', 'system.intro': 'Wat de hele installatie raakt, niet één share of één persoon.', 'update.title': 'Updates',
+  'build.banner': 'De applicatie is bijgewerkt. Laad de pagina opnieuw om de nieuwe versie te gebruiken.', 'build.reload': 'Nu herladen',
   'update.banner': 'Er is een nieuwe versie beschikbaar: v{latest} (je hebt v{current})', 'update.view': 'Bekijken', 'update.later': 'Later', 'update.checknow': 'Nu controleren',
   'update.installed': 'Geïnstalleerde versie', 'update.latest': 'Nieuwste release', 'update.checked': 'Laatst gecontroleerd', 'update.dot': 'Update beschikbaar',
   'update.state.available': 'Update beschikbaar', 'update.state.current': 'Up-to-date', 'update.state.none': 'Geen release gepubliceerd', 'update.state.disabled': 'Uitgeschakeld',

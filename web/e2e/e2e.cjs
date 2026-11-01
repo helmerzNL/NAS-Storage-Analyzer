@@ -930,6 +930,66 @@ const expectText = async (page, sel, re, msg) => {
       }
     });
 
+    await step('an update while a page is open: the page says so, and a reload or the next move loads the new version', async () => {
+      // The browser's cache rules cannot help a page that is not loaded again (a tab left open, a phone restoring the app). The page asks the server which
+      // build it hands out (GET /?_=<time>) when it comes back into view; here the answer is made to name another build, as after an update.
+      const real = await (await fetch(BASE + '/')).text();
+      const entry = /\/assets\/index-[\w-]+\.js/.exec(real);
+      if (!entry) throw new Error('the page does not name its entry script: ' + real.slice(0, 200));
+      const newer = real.replace(entry[0], '/assets/index-NEWBUILD1.js');
+      const question = /\/\?_=\d+$/;
+      const asked = [];
+      page.on('request', (r) => { if (question.test(r.url())) asked.push(r); });
+      const fakeUpdate = () => page.route(question, (route) => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: newer }));
+      const fromCache = () => page.evaluate(() => window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })));   // the back/forward cache restores a page
+      const banner = '[data-testid=build-banner]';
+
+      // The server hands out the build the page runs: nothing is said, however often the page comes back into view (and one question is asked, not many).
+      await page.goto(BASE + '/');
+      await page.waitForSelector('[data-testid=share-Media]');
+      for (let i = 0; i < 3; i++) await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+      await page.waitForTimeout(500);
+      if (asked.length !== 1) throw new Error('the page asked ' + asked.length + ' times after three returns to the tab (once is allowed in a minute)');
+      if (await page.$(banner)) throw new Error('the page says it is out of date, but the server hands out the same build');
+      // The question carries nothing of the person: no cookie, no token.
+      const sent = await asked[0].allHeaders();
+      if (sent.cookie || sent['x-csrf-token'] || sent.authorization) throw new Error('the question carries credentials: ' + Object.keys(sent).join(','));
+
+      // After an update: the bar appears, for anybody, and "Reload now" loads the new page (the mark of the old page is gone afterwards).
+      await fakeUpdate();
+      await fromCache();
+      await page.waitForSelector(banner, { timeout: 5000 });
+      if ((await page.textContent(banner)).trim().length < 20) throw new Error('the bar says nothing');
+      await shot('31-build-banner');
+      await page.setViewportSize({ width: 390, height: 844 });
+      const bar = await page.locator(banner).boundingBox(), btn = await page.locator('[data-testid=build-reload]').boundingBox();
+      if (!bar || bar.x < 0 || bar.x + bar.width > 390 || !btn || btn.x < 0 || btn.x + btn.width > 390 || btn.height < 32) throw new Error('the bar does not fit a phone: ' + JSON.stringify({ bar, btn }));
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('the bar makes the page wider than a phone screen');
+      await shot('31-phone-build-banner');
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.unroute(question);
+      await page.evaluate(() => { window.__oldPage = true; });
+      await page.click('[data-testid=build-reload]');
+      await page.waitForFunction(() => !window.__oldPage && document.querySelector('[data-testid=share-Media]'));
+      if (await page.$(banner)) throw new Error('the bar is still there after reloading');
+
+      // Without pressing the button, the next move to another screen loads the new page; a change within the same screen (the search query) does not.
+      await page.click('.nav a[href="/search"]');
+      await page.waitForSelector('[data-testid=search-input]');
+      await fakeUpdate();
+      await fromCache();
+      await page.waitForSelector(banner, { timeout: 5000 });
+      await page.evaluate(() => { window.__oldPage = true; });
+      await page.unroute(question);
+      await page.fill('[data-testid=search-input]', 'x');
+      await page.click('[data-testid=search-submit]');
+      await page.waitForFunction(() => location.pathname === '/search' && location.search === '?q=x');
+      if (!(await page.evaluate(() => window.__oldPage))) throw new Error('the page was reloaded by a change on the same screen');
+      await page.click('.nav a[href="/lists"]');
+      await page.waitForFunction(() => !window.__oldPage && location.pathname === '/lists');
+      if (await page.$(banner)) throw new Error('the bar is still there on the page that was loaded for the move');
+    });
+
     await step('screenshots: light and dark in two accents', async () => {
       for (const [theme, accent] of [['light', ''], ['dark', ''], ['light', '#e5484d'], ['dark', '#0c9aa6']]) {
         await page.evaluate(([th, ac]) => { document.documentElement.dataset.theme = th; if (ac) { document.documentElement.style.setProperty('--accent', ac); } else document.documentElement.style.removeProperty('--accent'); }, [theme, accent]);

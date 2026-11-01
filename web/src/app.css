@@ -186,6 +186,10 @@ td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }  
 /* The update check: a banner at the top of the page for administrators, and a dot on the entries that lead to Settings > System. The dot is not
    the message (the banner and the page say it in words); it is accompanied by a text for screen readers and a tooltip. */
 .update-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+/* The page was loaded before the server was updated: a bar above everything (the sign-in screen too), in the flow so that it covers neither the
+   navigation nor the toasts. It is about the page in front of the person, so it is not tied to a role. */
+.build-bar { display: flex; justify-content: center; align-items: center; gap: 8px 16px; flex-wrap: wrap; padding: 8px 16px; color: var(--text);
+  background: var(--accent-subtle); border-bottom: 1px solid var(--accent); font-size: .9375rem; text-align: center; }
 .update-dot { display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--surface-solid); flex: none; }
 .stats > div { display: flex; flex-direction: column; gap: 2px; min-width: 8rem; }
 .nav a, .settings-nav a { position: relative; }   /* a screen-reader-only text inside a link stays inside it: otherwise it sits where the page ends and widens it */
