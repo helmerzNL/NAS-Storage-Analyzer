@@ -70,3 +70,11 @@ func makeUndeletable(t *testing.T, path string) func() {
 	}
 	return func() { os.Chmod(dir, 0o755) }
 }
+
+// makeDirLink makes link a link to the folder target: a symbolic link here, a junction on Windows.
+func makeDirLink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatalf("cannot make a symbolic link: %v", err) // not a skip: CI fails on a skipped test, and a link is what this proves
+	}
+}

@@ -13,6 +13,8 @@
   let { open = $bindable(false), share }: { open: boolean; share: ShareInfo } = $props();
 
   const rows = $derived(selection.of(share.id));
+  const dirRows = $derived(selection.dirsOf(share.id));
+  const total = $derived(rows.length + dirRows.length);
   const types: [ScriptType, string][] = [['powershell', 'script.type.powershell'], ['cmd', 'script.type.cmd'], ['sh', 'script.type.sh']];
   const remembered = (() => { try { return localStorage.getItem('nasa.script.type'); } catch { return null; } })();
 
@@ -49,7 +51,8 @@
     busy = true; error = ''; rootError = ''; clearResult();
     try {
       const d = await postForFile(`/shares/${share.id}/delete-script`, {
-        ids: rows.map((r) => r.id), script: type, client_root: root.trim() || undefined, lang: i18n.lang,
+        ids: rows.length ? rows.map((r) => r.id) : undefined, dir_ids: dirRows.length ? dirRows.map((r) => r.id) : undefined,
+        script: type, client_root: root.trim() || undefined, lang: i18n.lang,
       });
       const url = URL.createObjectURL(d.blob);
       made = { d, url, type };
@@ -65,8 +68,19 @@
   <form id="script-form" class="stack" onsubmit={make}>
     <p class="muted" style="margin:0">{t('script.intro')}</p>
     <div class="notice info small" style="margin:0" data-testid="script-summary">
-      {t('script.summary', { n: formatNumber(rows.length, i18n.lang), size: formatBytes(selection.bytes, prefs.units, i18n.lang), when: formatDateTime(scanAt, i18n.lang) })}
+      {#if dirRows.length}
+        {t('script.summary.dirs', { files: formatNumber(rows.length, i18n.lang), dirs: formatNumber(dirRows.length, i18n.lang), size: formatBytes(selection.bytes + selection.dirBytes, prefs.units, i18n.lang), when: formatDateTime(scanAt, i18n.lang) })}
+      {:else}
+        {t('script.summary', { n: formatNumber(rows.length, i18n.lang), size: formatBytes(selection.bytes, prefs.units, i18n.lang), when: formatDateTime(scanAt, i18n.lang) })}
+      {/if}
     </div>
+    {#if dirRows.length}
+      <div class="notice warn small" style="margin:0" data-testid="script-folders">
+        <b>{t('script.dirs.title', { n: formatNumber(dirRows.length, i18n.lang) })}</b>
+        {t('script.dirs', { files: formatNumber(selection.dirFiles, i18n.lang), dirs: formatNumber(selection.dirSubfolders, i18n.lang) })}
+      </div>
+      {#if type === 'cmd'}<div class="notice warn small" style="margin:0" data-testid="script-cmd-folders">{t('script.cmd.folders')}</div>{/if}
+    {/if}
     {#if selection.hardlinks > 0}<div class="notice warn small" style="margin:0">{t('script.hardlinks', { n: formatNumber(selection.hardlinks, i18n.lang) })}</div>{/if}
     {#if stale}<div class="notice warn small" style="margin:0" data-testid="script-stale">{t('script.old', { ago: ago(scanAt, i18n.lang) })}</div>{/if}
     {#if error}<div class="notice error" style="margin:0" role="alert" data-testid="script-error">{error}</div>{/if}
@@ -94,19 +108,19 @@
 
     {#if made}
       <div class="notice ok" style="margin:0" role="status" data-testid="script-done">
-        <b>{t('script.done', { name: made.d.filename, n: formatNumber(made.d.files, i18n.lang) })}</b>
+        <b>{made.d.folders ? t('script.done.dirs', { name: made.d.filename, files: formatNumber(made.d.files, i18n.lang), dirs: formatNumber(made.d.folders, i18n.lang) }) : t('script.done', { name: made.d.filename, n: formatNumber(made.d.files, i18n.lang) })}</b>
         {#if made.d.skipped}<div data-testid="script-skipped">{t('script.skipped', { n: formatNumber(made.d.skipped, i18n.lang) })}</div>{/if}
       </div>
       <div class="field">
         <span>{t('script.run')}</span>
         <code class="codeblock mono" data-testid="script-command">{runCommand(made.type, made.d.filename)}</code>
-        <span class="hint">{t('script.run.hint', { n: formatNumber(made.d.files, i18n.lang) })}</span>
+        <span class="hint" data-testid="script-run-hint">{t('script.run.hint', { n: formatNumber(made.d.items || made.d.files, i18n.lang) })}</span>
       </div>
       <div class="row"><a class="btn" href={made.url} download={made.d.filename} data-testid="script-again">{t('script.again')}</a></div>
     {/if}
   </form>
   {#snippet footer()}
     <button class="btn" type="button" onclick={() => (open = false)}>{t('common.close')}</button>
-    <button class="btn primary" type="submit" form="script-form" disabled={busy || rows.length === 0} data-testid="script-make">{t('script.make')}</button>
+    <button class="btn primary" type="submit" form="script-form" disabled={busy || total === 0} data-testid="script-make">{t('script.make')}</button>
   {/snippet}
 </Dialog>

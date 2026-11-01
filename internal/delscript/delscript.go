@@ -62,7 +62,16 @@ type File struct {
 	Nlink int    // link count; above 1 the file has other hard links
 }
 
-// Skip is a file that is not in the script, and why.
+// Dir is one selected folder as the index knows it. A script deletes the folder and everything in it, so what the index
+// says is in it (at the scan) is what the person is shown and what the script checks against when it runs.
+type Dir struct {
+	Path  string // below the share root, "/" separators, leading "/"; never "/" itself, which is the share
+	Files int64  // files below it at any depth, at the scan
+	Dirs  int64  // folders below it at any depth, at the scan; not the folder itself
+	Bytes int64  // the size of those files at the scan
+}
+
+// Skip is a file or folder that is not in the script, and why.
 type Skip struct {
 	Path   string
 	Reason Reason
@@ -77,25 +86,34 @@ type Params struct {
 	ScanID    int64
 	ScanTime  time.Time // when the scan that produced the index finished
 	Generated time.Time
-	// Skipped are files the caller already left out: ids no longer in the index, and names that differ only in case.
+	// Skipped are files and folders the caller already left out: ids no longer in the index, and names that differ only in case.
 	Skipped []Skip
+	// Dirs are the folders to delete with everything in them (never for cmd, see ReasonFolderCmd).
+	Dirs []Dir
 }
 
 // Result is a generated script and what it contains.
 type Result struct {
-	Script    []byte
-	Root      string // the normalised base path
-	Files     int
-	Bytes     int64
+	Script []byte
+	Root   string // the normalised base path
+	// Files are the files selected one by one that are in the script; Folders the folders, each with everything in it.
+	Files, Folders int
+	// FolderFiles and FolderDirs are what the index says is inside those folders, at the scan.
+	FolderFiles, FolderDirs int64
+	// Items is the number to type to confirm: the files, the folders and everything the index says is in them.
+	Items int
+	// Covered counts selected files and folders that lie inside a selected folder: they are deleted with it, not twice.
+	Covered   int
+	Bytes     int64 // the size of the files, and of what is in the folders, at the scan
 	Hardlinks int
 	Skipped   []Skip // the caller's and the ones found here
 }
 
 var (
 	// ErrNoFiles is returned when nothing is left to put in a script.
-	ErrNoFiles = errors.New("none of the selected files can be put in a script")
+	ErrNoFiles = errors.New("none of the selected files or folders can be put in a script")
 	// ErrTooMany is returned for more than MaxFiles files.
-	ErrTooMany = errors.New("too many files for one script")
+	ErrTooMany = errors.New("too many files and folders for one script")
 )
 
 type entry struct {
@@ -106,13 +124,13 @@ type entry struct {
 	nlink int
 }
 
-// Generate writes a script for files. It never fails on a file it cannot address: such a file is left out and
-// reported in Result.Skipped, and the script says so too.
+// Generate writes a script for files and, in p.Dirs, folders with everything in them. It never fails on something it cannot
+// address: that is left out and reported in Result.Skipped, and the script says so too.
 func Generate(files []File, p Params) (*Result, error) {
 	if _, ok := ParseTarget(string(p.Target)); !ok {
 		return nil, fmt.Errorf("unknown script type %q", p.Target)
 	}
-	if len(files) > MaxFiles {
+	if len(files)+len(p.Dirs) > MaxFiles {
 		return nil, ErrTooMany
 	}
 	root, err := NormalizeRoot(p.Target, p.Root)
@@ -123,6 +141,59 @@ func Generate(files []File, p Params) (*Result, error) {
 
 	joined := strings.TrimRight(root, `\/`) // what a path below the root is appended to
 	skipped := append([]Skip(nil), p.Skipped...)
+
+	// Folders first: they decide which of the files are already covered.
+	var folders []dirEntry
+	seenDir := map[string]bool{}
+	for _, d := range p.Dirs {
+		if seenDir[d.Path] {
+			continue
+		}
+		seenDir[d.Path] = true
+		reason := ClassifyDir(p.Target, d.Path)
+		addressed := d.Path
+		if p.Target.IsWindows() {
+			addressed = strings.ReplaceAll(d.Path, "/", `\`)
+			if reason == "" && utf16Len(joined)+utf16Len(addressed) > maxWindowsPath {
+				reason = ReasonTooLong
+			}
+		}
+		if reason != "" {
+			skipped = append(skipped, Skip{Path: d.Path, Reason: reason})
+			continue
+		}
+		folders = append(folders, dirEntry{path: addressed, rel: d.Path, files: max(d.Files, 0), dirs: max(d.Dirs, 0), bytes: max(d.Bytes, 0)})
+	}
+	// A folder inside another selected folder goes with it: it is deleted once, and the script says it once. The outer folder
+	// is found by looking at the folders above a path, so the order the paths sort in does not matter ("/a-b" sorts before "/a/b").
+	sort.Slice(folders, func(i, j int) bool {
+		if di, dj := strings.Count(folders[i].rel, "/"), strings.Count(folders[j].rel, "/"); di != dj {
+			return di < dj
+		}
+		return folders[i].rel < folders[j].rel
+	})
+	top := map[string]bool{}
+	inside := func(rel string) bool {
+		for i := strings.LastIndexByte(rel, '/'); i > 0; i = strings.LastIndexByte(rel[:i], '/') {
+			if top[rel[:i]] {
+				return true
+			}
+		}
+		return false
+	}
+	covered := 0
+	var kept []dirEntry
+	for _, f := range folders { // shallowest first, so every folder is judged after the folders above it
+		if inside(f.rel) {
+			covered++
+			continue
+		}
+		top[f.rel] = true
+		kept = append(kept, f)
+	}
+	folders = kept
+	sort.Slice(folders, func(i, j int) bool { return folders[i].rel < folders[j].rel })
+
 	var keep []entry
 	seen := map[string]bool{}
 	var bytes int64
@@ -132,6 +203,10 @@ func Generate(files []File, p Params) (*Result, error) {
 			continue
 		}
 		seen[f.Path] = true
+		if inside(f.Path) {
+			covered++
+			continue
+		}
 		reason := ClassifyPath(p.Target, f.Path)
 		addressed := f.Path
 		if p.Target.IsWindows() {
@@ -164,16 +239,34 @@ func Generate(files []File, p Params) (*Result, error) {
 			hard++
 		}
 	}
-	if len(keep) == 0 {
-		return &Result{Root: root, Skipped: skipped}, ErrNoFiles
+	if len(keep) == 0 && len(folders) == 0 {
+		return &Result{Root: root, Skipped: skipped, Covered: covered}, ErrNoFiles
 	}
 
-	data := []string{fmt.Sprintf("N|%d", len(keep)), "R|" + root}
-	for _, l := range summary(txt, p, root, keep, bytes, hard, skipped) {
+	var folderFiles, folderDirs int64
+	for _, f := range folders {
+		folderFiles += f.files
+		folderDirs += f.dirs
+		bytes += f.bytes
+	}
+	// The number to type: what the person is told is going, counted the same way in the summary and in the script's report.
+	items := len(keep) + len(folders) + int(folderFiles) + int(folderDirs)
+
+	data := []string{fmt.Sprintf("N|%d", len(keep)+len(folders))}
+	if p.Target != TargetCmd { // cmd takes no folders, so for it the number to type is the number of records
+		data = append(data, fmt.Sprintf("T|%d", items))
+	}
+	data = append(data, "R|"+root)
+	r := &Result{Root: root, Files: len(keep), Folders: len(folders), FolderFiles: folderFiles, FolderDirs: folderDirs, Items: items,
+		Covered: covered, Bytes: bytes, Hardlinks: hard, Skipped: skipped}
+	for _, l := range summary(txt, p, root, keep, folders, r) {
 		data = append(data, "I|"+l)
 	}
 	for _, e := range keep {
 		data = append(data, fmt.Sprintf("F|%d|%d|%s", e.size, e.mtime, e.path))
+	}
+	for _, d := range folders {
+		data = append(data, fmt.Sprintf("D|%d|%d|%s", d.files, d.dirs, d.path))
 	}
 
 	var script string
@@ -185,67 +278,111 @@ func Generate(files []File, p Params) (*Result, error) {
 	default:
 		script = renderCmd(txt, data)
 	}
-	return &Result{Script: []byte(script), Root: root, Files: len(keep), Bytes: bytes, Hardlinks: hard, Skipped: skipped}, nil
+	r.Script = []byte(script)
+	return r, nil
+}
+
+type dirEntry struct {
+	path  string // as the script addresses it, relative to the root
+	rel   string // below the share root, "/" separators
+	files int64
+	dirs  int64
+	bytes int64
 }
 
 // summary is what the script prints before it asks for the confirmation. Every line is data.
-func summary(txt *messages, p Params, root string, keep []entry, bytes int64, hard int, skipped []Skip) []string {
+func summary(txt *messages, p Params, root string, keep []entry, folders []dirEntry, r *Result) []string {
 	out := []string{
 		txt.title,
 		fmt.Sprintf(txt.share, displayEscape(p.Share)),
 		fmt.Sprintf(txt.root, displayEscape(root)),
 		fmt.Sprintf(txt.scan, p.ScanTime.UTC().Format("2006-01-02 15:04 UTC"), p.ScanID),
 		fmt.Sprintf(txt.generated, p.Generated.UTC().Format("2006-01-02 15:04 UTC")),
-		fmt.Sprintf(txt.files, len(keep)),
-		fmt.Sprintf(txt.size, humanSize(bytes, p.Lang)),
 	}
-	if hard > 0 {
-		out = append(out, fmt.Sprintf(txt.hardlinks, hard))
-	}
-	out = append(out, txt.folders)
-	type folder struct {
-		path  string
-		count int
-		bytes int64
-	}
-	byDir := map[string]*folder{}
-	for _, e := range keep {
-		d := e.rel[:strings.LastIndex(e.rel, "/")+1]
-		if d == "" {
-			d = "/"
+	if len(folders) == 0 {
+		out = append(out, fmt.Sprintf(txt.files, len(keep)))
+	} else {
+		// With folders the number to type is not the number of files that were ticked, so what it is made of is said.
+		out = append(out, fmt.Sprintf(txt.items, r.Items))
+		if len(keep) > 0 {
+			out = append(out, fmt.Sprintf(txt.selFiles, len(keep)))
 		}
-		f := byDir[d]
-		if f == nil {
-			f = &folder{path: d}
-			byDir[d] = f
-		}
-		f.count++
-		f.bytes += e.size
+		out = append(out, fmt.Sprintf(txt.selFolders, len(folders), r.FolderFiles, r.FolderDirs))
 	}
-	folders := make([]*folder, 0, len(byDir))
-	for _, f := range byDir {
-		folders = append(folders, f)
+	out = append(out, fmt.Sprintf(txt.size, humanSize(r.Bytes, p.Lang)))
+	if r.Hardlinks > 0 {
+		out = append(out, fmt.Sprintf(txt.hardlinks, r.Hardlinks))
 	}
-	sort.Slice(folders, func(i, j int) bool {
-		if folders[i].count != folders[j].count {
-			return folders[i].count > folders[j].count
-		}
-		return folders[i].path < folders[j].path
-	})
-	const showFolders = 12
-	for i, f := range folders {
-		if i == showFolders {
-			out = append(out, fmt.Sprintf(txt.skippedMore, len(folders)-showFolders))
-			break
-		}
-		out = append(out, fmt.Sprintf("  %5d  %10s  %s", f.count, humanSize(f.bytes, p.Lang), displayEscape(f.path)))
+	if len(folders) > 0 {
+		out = append(out, txt.folderRule)
 	}
-	if len(skipped) > 0 {
-		out = append(out, fmt.Sprintf(txt.skippedHead, len(skipped)))
+	if r.Covered > 0 {
+		out = append(out, fmt.Sprintf(txt.covered, r.Covered))
+	}
+	if len(folders) > 0 {
+		sorted := append([]dirEntry(nil), folders...)
+		sort.Slice(sorted, func(i, j int) bool {
+			if sorted[i].files != sorted[j].files {
+				return sorted[i].files > sorted[j].files
+			}
+			return sorted[i].rel < sorted[j].rel
+		})
+		out = append(out, txt.folderHead)
+		const showWhole = 25
+		for i, f := range sorted {
+			if i == showWhole {
+				out = append(out, fmt.Sprintf(txt.skippedMore, len(sorted)-showWhole))
+				break
+			}
+			out = append(out, fmt.Sprintf(txt.folderLine, f.files, f.dirs, humanSize(f.bytes, p.Lang), displayEscape(f.rel)))
+		}
+	}
+	if len(keep) > 0 {
+		out = append(out, txt.folders)
+		type folder struct {
+			path  string
+			count int
+			bytes int64
+		}
+		byDir := map[string]*folder{}
+		for _, e := range keep {
+			d := e.rel[:strings.LastIndex(e.rel, "/")+1]
+			if d == "" {
+				d = "/"
+			}
+			f := byDir[d]
+			if f == nil {
+				f = &folder{path: d}
+				byDir[d] = f
+			}
+			f.count++
+			f.bytes += e.size
+		}
+		list := make([]*folder, 0, len(byDir))
+		for _, f := range byDir {
+			list = append(list, f)
+		}
+		sort.Slice(list, func(i, j int) bool {
+			if list[i].count != list[j].count {
+				return list[i].count > list[j].count
+			}
+			return list[i].path < list[j].path
+		})
+		const showFolders = 12
+		for i, f := range list {
+			if i == showFolders {
+				out = append(out, fmt.Sprintf(txt.skippedMore, len(list)-showFolders))
+				break
+			}
+			out = append(out, fmt.Sprintf("  %5d  %10s  %s", f.count, humanSize(f.bytes, p.Lang), displayEscape(f.path)))
+		}
+	}
+	if len(r.Skipped) > 0 {
+		out = append(out, fmt.Sprintf(txt.skippedHead, len(r.Skipped)))
 		const showSkipped = 40
-		for i, s := range skipped {
+		for i, s := range r.Skipped {
 			if i == showSkipped {
-				out = append(out, fmt.Sprintf(txt.skippedMore, len(skipped)-showSkipped))
+				out = append(out, fmt.Sprintf(txt.skippedMore, len(r.Skipped)-showSkipped))
 				break
 			}
 			out = append(out, fmt.Sprintf(txt.skippedLine, displayEscape(s.Path), txt.reason[s.Reason]))

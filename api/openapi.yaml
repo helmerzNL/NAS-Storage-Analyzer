@@ -169,7 +169,7 @@ paths:
     post:
       tags: [admin]
       operationId: createDeleteScript
-      summary: Write a script that deletes the selected files (admin)
+      summary: Write a script that deletes the selected files and folders (admin)
       description: |
         Returns the text of a script for `cmd`, PowerShell or `sh`, to download and run by the person on their own machine.
         **The application deletes nothing**: it only writes text, and the share stays mounted read-only. The script shows a
@@ -177,6 +177,13 @@ paths:
         outside `cmd`, modification time) differs from the last scan. Files that cannot be addressed safely are left out and
         named in the script (names with control or replacement characters, what Windows cannot address, a name that differs
         only in upper or lower case from another, an id that is no longer in the index).
+
+        **A folder in `dir_ids` is deleted with everything in it**, subfolders and files at any depth. The number to type is then
+        the number of items: the files, the folders and everything the last scan found in the selected folders. The script
+        checks a folder when it runs and keeps it, whole, when it now holds a link or a special file or more files or folders than
+        the scan found, so what was added since is never taken. A folder inside another selected folder, and a file inside one,
+        go with it and are not listed twice. The share's own folder is never put in a script. `cmd` cannot check a folder and takes
+        none: use PowerShell or `sh`.
 
         `client_root` is where the machine that runs the script sees the share (`\\nas\media`, `Z:\`, `/mnt/user/media`);
         empty uses the share's `client_windows` or `client_posix` setting. Ids of another share are treated as files that are
@@ -188,14 +195,18 @@ paths:
           application/json:
             schema:
               type: object
-              required: [ids, script]
+              required: [script]
               properties:
                 ids:
                   type: array
-                  minItems: 1
                   maxItems: 2000
                   items: {type: integer, format: int64, minimum: 1}
-                  description: "File ids from the file lists, at most 2000."
+                  description: "File ids from the file lists. At least one id in `ids` or `dir_ids`, at most 2000 in all."
+                dir_ids:
+                  type: array
+                  maxItems: 2000
+                  items: {type: integer, format: int64, minimum: 1}
+                  description: "Folder ids from the folder lists: each folder is deleted with everything in it. Counts toward the same limit of 2000 as `ids`."
                 script: {type: string, enum: [cmd, powershell, sh], description: "`cmd` and `powershell` address Windows paths; `sh` addresses Linux and macOS paths."}
                 client_root: {type: string, description: "Base path on the machine that runs the script. Empty uses the share's own."}
                 lang: {type: string, enum: [en, nl], default: en, description: "Language of what the script prints."}
@@ -204,14 +215,16 @@ paths:
           description: The script, with CRLF line ends for `cmd` and PowerShell (UTF-8, with a byte-order mark for PowerShell) and LF for `sh`.
           headers:
             Content-Disposition: {schema: {type: string}, description: "`attachment` with a file name that ends in `.cmd`, `.ps1` or `.sh`."}
-            X-Files: {schema: {type: integer}, description: "Files in the script."}
+            X-Files: {schema: {type: integer}, description: "Files in the script that were selected one by one."}
+            X-Folders: {schema: {type: integer}, description: "Folders in the script, each deleted with everything in it."}
+            X-Items: {schema: {type: integer}, description: "The number to type to confirm: the files, the folders and what the scan found in them."}
             X-Skipped: {schema: {type: integer}, description: "Files left out; the script lists them."}
-            X-Bytes: {schema: {type: integer, format: int64}, description: "Total size of the files in the script, an upper bound when files have several hard links."}
+            X-Bytes: {schema: {type: integer, format: int64}, description: "Total size of the files in the script and of what the scan found in the folders, an upper bound when files have several hard links."}
           content:
             text/plain: {schema: {type: string}}
-        "400": {description: "Invalid request: `field` is `ids` (none, too many, or none that can be put in a script), `script`, `lang` or `client_root`.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "400": {description: "Invalid request: `field` is `ids` (none, too many, or none of the files or folders can be put in a script), `script`, `lang` or `client_root`.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "404": {description: "No such share.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
-        "409": {description: "The share has not been scanned yet (`no_data`).", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "409": {description: "The share has not been scanned yet (`no_data`), or a scan was published while the script was made (`scan_changed`): ask again.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/scans:
     get:

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { FileRow } from './api';
 import { selection, MAX_SELECTED } from './selection.svelte';
-import { tickAll, tickRow, tickState } from './tick';
+import { tickAll, tickRow, tickState, tickDir, tickAllDirs, tickDirState } from './tick';
 import { toasts } from './toast.svelte';
 
 const row = (id: number, size = 10, nlink = 1): FileRow => ({
@@ -102,5 +102,103 @@ describe('the tick boxes of the lists', () => {
     tickRow(2, row(1));
     expect(toasts.items).toHaveLength(1);
     expect(toasts.items[0].bad).toBe(false);
+  });
+});
+
+// Folders: each is deleted with everything in it, and they share the limit and the share with the files.
+const dir = (id: number, files = 10, dirs = 2, size = 1000) => ({ id, name: `d${id}`, size, files, dirs });
+const dirList = (from: number, n: number) => Array.from({ length: n }, (_, i) => dir(from + i));
+
+describe('folders in the selection for a delete script', () => {
+  it('ticks and unticks a folder, and adds up what the last scan found in the folders', () => {
+    expect(selection.toggleDir(1, dir(7, 40, 3, 4000)).changed).toBe(1);
+    selection.toggleDir(1, dir(9, 5, 0, 500));
+    expect(selection.dirRows.map((r) => r.id)).toEqual([7, 9]);
+    expect(selection.hasDir(7) && selection.hasDir(9) && !selection.hasDir(8)).toBe(true);
+    expect(selection.dirFiles).toBe(45);
+    expect(selection.dirSubfolders).toBe(3);
+    expect(selection.dirBytes).toBe(4500);
+    selection.toggleDir(1, dir(7));
+    expect(selection.dirRows.map((r) => r.id)).toEqual([9]);
+    expect(selection.dirFiles).toBe(5);
+    // A folder id is not a file id: ticking folder 7 does not tick file 7.
+    expect(selection.has(9)).toBe(false);
+  });
+
+  it('counts files and folders together toward the limit, and says so', () => {
+    selection.setMany(1, rows(1, MAX_SELECTED - 2), true);
+    selection.toggleDir(1, dir(1));
+    selection.toggleDir(1, dir(2));
+    expect(selection.total).toBe(MAX_SELECTED);
+    expect(selection.full).toBe(true);
+    // Both kinds are refused at the limit.
+    expect(selection.toggleDir(1, dir(3))).toMatchObject({ changed: 0, full: true });
+    expect(selection.toggle(1, row(99999))).toMatchObject({ changed: 0, full: true });
+    expect(selection.setManyDirs(1, dirList(100, 5), true)).toMatchObject({ changed: 0, full: true });
+    expect(selection.dirRows.length).toBe(2);
+    // Unticking makes room again.
+    selection.toggleDir(1, dir(1));
+    expect(selection.toggleDir(1, dir(3)).changed).toBe(1);
+  });
+
+  it('ticks many folders at once up to the limit, once each, and unticks them', () => {
+    expect(selection.setManyDirs(1, dirList(1, 30), true).changed).toBe(30);
+    expect(selection.setManyDirs(1, dirList(1, 40), true).changed).toBe(10); // the 30 that are ticked are not ticked twice
+    expect(selection.dirRows.length).toBe(40);
+    expect(selection.setManyDirs(1, dirList(1, 15), false).changed).toBe(15);
+    expect(selection.dirRows[0].id).toBe(16);
+    expect(selection.setManyDirs(2, dirList(1, 3), false).changed).toBe(0); // another share: nothing to untick
+  });
+
+  it('holds one share at a time: ticking a folder in another share drops the files and folders of the first', () => {
+    selection.toggle(1, row(1));
+    selection.toggleDir(1, dir(5));
+    const res = selection.toggleDir(2, dir(6));
+    expect(res.droppedShare).toBe(1);
+    expect(selection.share).toBe(2);
+    expect(selection.rows).toEqual([]);
+    expect(selection.dirRows.map((r) => r.id)).toEqual([6]);
+    expect(selection.dirsOf(1)).toEqual([]);
+    expect(selection.dirsOf(2).length).toBe(1);
+    expect(selection.totalOf(1)).toBe(0);
+    expect(selection.totalOf(2)).toBe(1);
+  });
+
+  it('a selection of only folders is a selection, and clearing clears both kinds', () => {
+    selection.toggleDir(1, dir(1));
+    expect(selection.totalOf(1)).toBe(1);
+    expect(selection.count).toBe(0);
+    selection.toggle(1, row(4));
+    selection.clear();
+    expect(selection.total).toBe(0);
+    expect(selection.dirRows).toEqual([]);
+    expect(selection.rows).toEqual([]);
+  });
+
+  it('keeps the numbers of the folder as they were when it was ticked, not a live row', () => {
+    const live = dir(3, 10, 1, 100);
+    selection.toggleDir(1, live);
+    live.files = 99999; // the list reloads with other figures
+    expect(selection.dirRows[0].files).toBe(10);
+  });
+});
+
+describe('the tick boxes of the folders', () => {
+  it('the box in the header is ticked, half ticked or empty, and ticks or unticks all loaded folders', () => {
+    const loaded = dirList(1, 4);
+    expect(tickDirState(1, loaded)).toBe('none');
+    tickDir(1, loaded[0]);
+    expect(tickDirState(1, loaded)).toBe('some');
+    tickAllDirs(1, loaded);
+    expect(tickDirState(1, loaded)).toBe('all');
+    tickAllDirs(1, loaded);
+    expect(tickDirState(1, loaded)).toBe('none');
+    expect(tickDirState(2, loaded)).toBe('none'); // another share's folders are not ticked
+  });
+
+  it('tells the person when the limit stopped a tick', () => {
+    selection.setManyDirs(1, dirList(1, MAX_SELECTED), true);
+    tickDir(1, dir(MAX_SELECTED + 5));
+    expect(toasts.items.some((x) => x.bad)).toBe(true);
   });
 });

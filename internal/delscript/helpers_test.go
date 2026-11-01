@@ -29,7 +29,7 @@ var allTargets = []Target{TargetSh, TargetPowerShell, TargetCmd}
 var allLangs = []Lang{LangEN, LangNL}
 
 // dataLine matches a record of the data block. No line of code starts like this.
-var dataLine = regexp.MustCompile(`(?m)^[NRIF]\|.*(\r?\n|$)`)
+var dataLine = regexp.MustCompile(`(?m)^[NRITFD]\|.*(\r?\n|$)`)
 
 // codeRegion is the script without its data block.
 func codeRegion(script []byte) string { return dataLine.ReplaceAllString(string(script), "") }

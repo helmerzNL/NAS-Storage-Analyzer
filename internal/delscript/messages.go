@@ -15,7 +15,9 @@ const (
 type messages struct {
 	// Lines of the summary, built by Go: these may use fmt verbs, and they are data, never code.
 	title, share, root, scan, generated, files, size, hardlinks, folders, skippedHead, skippedMore, skippedLine string
-	reason                                                                                                      map[Reason]string
+	// Only in a script with folders: what the number to type is made of, and what a folder means.
+	items, selFiles, selFolders, folderRule, folderHead, folderLine, covered string
+	reason                                                                   map[Reason]string
 
 	// Code-region strings. These must stay free of parentheses too: cmd closes a block at the first one.
 	confirm    [2]string // "Type DELETE " n " to confirm: "
@@ -28,6 +30,8 @@ type messages struct {
 	done       [5]string // "Done: " d " deleted, " k " kept, " g " already gone, " f " failed."
 
 	deleted, gone, changed, notRegular, failed string
+	// A folder that is kept: it is not a plain folder (a link, or a file now), it holds a link or a special file, or it holds more than at the scan.
+	notFolder, hasLinks, grown string
 }
 
 var textEN = messages{
@@ -40,6 +44,13 @@ var textEN = messages{
 	size:        "Size (upper bound): %s",
 	hardlinks:   "%d of these have other hard links: removing them may free no space.",
 	folders:     "Per folder (largest first):",
+	items:       "Items to delete: %d (files and folders, everything inside a selected folder included)",
+	selFiles:    "  Files you selected: %d",
+	selFolders:  "  Folders you selected: %d, with %d files and %d folders inside them at the scan",
+	folderRule:  "A selected folder is deleted with EVERYTHING in it. It is kept, and reported, when it now holds more than at the scan, or a link.",
+	folderHead:  "Folders to delete with everything in them (most files first):",
+	folderLine:  "  %7d files %6d folders %10s  %s",
+	covered:     "%d selected files or folders lie inside a selected folder and go with it.",
 	skippedHead: "NOT in this script (%d), see the reason per file:",
 	skippedMore: "  ... and %d more",
 	skippedLine: "  %s: %s",
@@ -52,10 +63,12 @@ var textEN = messages{
 		ReasonReserved:    "Windows reserves this name (use the sh script on the NAS)",
 		ReasonTooLong:     "the path is too long for this script",
 		ReasonEmptyCmd:    "cmd cannot tell an empty file from a folder (use the PowerShell script)",
+		ReasonRoot:        "this is the share itself, which is never deleted",
+		ReasonFolderCmd:   "cmd cannot check what is in a folder (use the PowerShell script, or sh on the NAS)",
 	},
 	confirm:    [2]string{"Type DELETE ", " to confirm: "},
 	cancelled:  "Cancelled. Nothing was changed.",
-	incomplete: [3]string{"This script is incomplete or was changed: expected ", " files, found ", ". Nothing was changed."},
+	incomplete: [3]string{"This script is incomplete or was changed: expected ", " entries, found ", ". Nothing was changed."},
 	notOpen:    "Cannot open the base path. Is it right, and is the share reachable? Nothing was changed.",
 	noStat:     "This script needs a stat command that prints the size and time of a file. Nothing was changed.",
 	wrongRoot:  "None of the files were found. Is the base path right? Nothing was changed.",
@@ -66,6 +79,9 @@ var textEN = messages{
 	changed:    "changed since the scan, kept",
 	notRegular: "not a regular file, kept",
 	failed:     "FAILED",
+	notFolder:  "not a plain folder, kept",
+	hasLinks:   "holds links or special files, kept",
+	grown:      "holds more than at the scan, kept",
 }
 
 var textNL = messages{
@@ -78,6 +94,13 @@ var textNL = messages{
 	size:        "Grootte (bovengrens): %s",
 	hardlinks:   "Van deze bestanden hebben er %d nog andere harde links: verwijderen geeft dan misschien geen ruimte.",
 	folders:     "Per map (grootste eerst):",
+	items:       "Te verwijderen onderdelen: %d (bestanden en mappen, alles in een gekozen map inbegrepen)",
+	selFiles:    "  Bestanden die je koos: %d",
+	selFolders:  "  Mappen die je koos: %d, met %d bestanden en %d mappen erin bij de scan",
+	folderRule:  "Een gekozen map wordt verwijderd met ALLES erin. Hij blijft staan, en wordt gemeld, als hij nu meer bevat dan bij de scan, of een koppeling.",
+	folderHead:  "Mappen die met alles erin worden verwijderd (meeste bestanden eerst):",
+	folderLine:  "  %7d bestanden %6d mappen %10s  %s",
+	covered:     "%d gekozen bestanden of mappen liggen in een gekozen map en gaan daarmee mee.",
 	skippedHead: "NIET in dit script (%d), de reden staat per bestand:",
 	skippedMore: "  ... en nog %d",
 	skippedLine: "  %s: %s",
@@ -90,10 +113,12 @@ var textNL = messages{
 		ReasonReserved:    "Windows reserveert deze naam (gebruik het sh-script op de NAS)",
 		ReasonTooLong:     "het pad is te lang voor dit script",
 		ReasonEmptyCmd:    "cmd kan een leeg bestand niet van een map onderscheiden (gebruik het PowerShell-script)",
+		ReasonRoot:        "dit is de share zelf, die wordt nooit verwijderd",
+		ReasonFolderCmd:   "cmd kan niet controleren wat er in een map staat (gebruik het PowerShell-script, of sh op de NAS)",
 	},
 	confirm:    [2]string{"Typ DELETE ", " om te bevestigen: "},
 	cancelled:  "Geannuleerd. Er is niets gewijzigd.",
-	incomplete: [3]string{"Dit script is onvolledig of aangepast: verwacht ", " bestanden, gevonden ", ". Er is niets gewijzigd."},
+	incomplete: [3]string{"Dit script is onvolledig of aangepast: verwacht ", " onderdelen, gevonden ", ". Er is niets gewijzigd."},
 	notOpen:    "De padbasis is niet te openen. Klopt hij, en is de share bereikbaar? Er is niets gewijzigd.",
 	noStat:     "Dit script heeft een stat-opdracht nodig die grootte en tijd van een bestand geeft. Er is niets gewijzigd.",
 	wrongRoot:  "Geen enkel bestand gevonden. Klopt de padbasis? Er is niets gewijzigd.",
@@ -104,6 +129,9 @@ var textNL = messages{
 	changed:    "gewijzigd sinds de scan, bewaard",
 	notRegular: "geen gewoon bestand, bewaard",
 	failed:     "MISLUKT",
+	notFolder:  "geen gewone map, bewaard",
+	hasLinks:   "bevat koppelingen of speciale bestanden, bewaard",
+	grown:      "bevat meer dan bij de scan, bewaard",
 }
 
 func textFor(l Lang) *messages {

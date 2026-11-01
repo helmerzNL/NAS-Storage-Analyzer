@@ -13,7 +13,7 @@
   import Treemap from '../components/Treemap.svelte';
   import SelectionBar from '../components/SelectionBar.svelte';
   import { selection } from '../lib/selection.svelte';
-  import { tickRow, tickAll, tickState } from '../lib/tick';
+  import { tickRow, tickAll, tickState, tickDir, tickAllDirs, tickDirState } from '../lib/tick';
 
   let { shareId, dirId }: { shareId?: string; dirId?: string } = $props();
 
@@ -101,6 +101,9 @@
     : `/api/v1${base}/dirs/${dirPath}/children${qs({ ...pageParams, format: 'csv' })}`);
   const filtered = $derived(activeFilterCount(filters) > 0);
   const ticks = $derived(tickState(Number(shareId), files));
+  // A folder is deleted with everything in it, so it is only offered while what is shown of it is all of it: a filter shows a part.
+  const showDirBoxes = $derived(isAdmin() && !filtered);
+  const dirTicks = $derived(tickDirState(Number(shareId), children));
 </script>
 
 <div class="page-head">
@@ -150,6 +153,9 @@
     <div class="card table-wrap flush" aria-busy={loading}>
       <table data-testid="folder-table">
         <thead><tr>
+          {#if showDirBoxes}<th class="sel"><label class="selcell" title={t('sel.dir.all')}>
+            <input type="checkbox" checked={dirTicks === 'all'} indeterminate={dirTicks === 'some'} disabled={!children.length} aria-label={t('sel.dir.all')}
+              onchange={() => tickAllDirs(Number(shareId), children)} data-testid="select-all-dirs" /></label></th>{/if}
           <th><button class="sort" onclick={() => sortBy('name')}>{t('col.name')}{arrow('name')}</button></th>
           <th class="right"><button class="sort" onclick={() => sortBy('size')}>{t('col.size')}{arrow('size')}</button></th>
           <th class="right hide-sm">{t('col.pct')}</th>
@@ -159,10 +165,13 @@
         </tr></thead>
         <tbody>
           {#if detail?.parent_id}
-            <tr><td colspan="6"><a href={dirHref(detail.parent_id)} use:link>↰ ..</a></td></tr>
+            <tr><td colspan={showDirBoxes ? 7 : 6}><a href={dirHref(detail.parent_id)} use:link>↰ ..</a></td></tr>
           {/if}
           {#each children as c (c.id)}
             <tr data-testid="folder-row">
+              {#if showDirBoxes}<td class="sel"><label class="selcell">
+                <input type="checkbox" checked={selection.share === Number(shareId) && selection.hasDir(c.id)} aria-label={t('sel.dir.row', { name: c.name })}
+                  onchange={() => tickDir(Number(shareId), c)} data-testid="select-dir" /></label></td>{/if}
               <td><a href={dirHref(c.id)} use:link class="truncate" style="display:inline-block;max-width:34ch" title={c.name}>📁 {c.name}</a>
                 {#if c.dirs}<span class="muted small"> · {t('browse.subfolders', { n: c.dirs })}</span>{/if}</td>
               <td class="right actions"><span data-testid="folder-size">{formatBytes(c.size, prefs.units, i18n.lang)}</span><div class="bar"><i style:width="{Math.min(100, c.pct)}%"></i></div></td>
@@ -172,7 +181,7 @@
               <td class="right hide-sm nowrap">{formatDate(lastUsed(c), i18n.lang)}</td>
             </tr>
           {:else}
-            <tr><td colspan="6" class="muted">{loading ? t('common.loading') : filtered ? t('browse.nomatch') : t('browse.nosub')}</td></tr>
+            <tr><td colspan={showDirBoxes ? 7 : 6} class="muted">{loading ? t('common.loading') : filtered ? t('browse.nomatch') : t('browse.nosub')}</td></tr>
           {/each}
         </tbody>
       </table>
@@ -182,6 +191,11 @@
         <button class="btn ghost small" onclick={() => setQuery({ view: 'files' })}>{t('browse.view.files')}</button></p>
     {/if}
     {#if cursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={more}>{t('common.more')}</button></div>{/if}
+    {#if isAdmin()}
+      {#if filtered}<p class="muted small" style="margin-bottom:0" data-testid="sel-dirs-filtered">{t('sel.dirs.filtered')}</p>
+      {:else}<p class="muted small" style="margin-bottom:0">{t('sel.hint.dirs')}</p>{/if}
+      <SelectionBar {share} />
+    {/if}
 
   {:else if view === 'map'}
     <div class="card">

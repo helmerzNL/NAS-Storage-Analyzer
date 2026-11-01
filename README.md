@@ -16,6 +16,10 @@ snel blijft.
   tekst, jij draait het script. Het script toont eerst een samenvatting, vraagt `DELETE <aantal>` te typen en laat een bestand staan
   dat sinds de scan is veranderd. Hoogstens 2.000 bestanden per script; de padbasis (hoe jouw machine de share ziet) stel je per share
   in. Wat het script niet veilig kan aanspreken laat het weg en noemt het (zie [ADR 0006](docs/adr/0006-delete-scripts.md)).
+  **Mappen** kunnen ook worden aangevinkt (bij *Mappen* en in de lijsten van de grootste en koudste mappen, zolang er geen filter aanstaat): een
+  map gaat dan **met alles erin**, submappen en bestanden op elk niveau. Het getal dat je typt telt ook wat de scan in die mappen vond. Het script
+  laat een map staan, en zegt dat, als hij nu meer bevat dan bij de scan of een koppeling, en de share zelf wordt nooit verwijderd. `cmd` neemt
+  geen mappen (zie [ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)).
 * **Bestandstypes** in acht categorieën (Video, Audio, Afbeeldingen, Documenten, Archieven, Code, Disk images, Overig)
   met een aanpasbare extensietabel; een wijziging werkt direct door in alle cijfers, zonder opnieuw te scannen.
 * **Historie**: per scan een momentopname, met instelbare bewaartermijn; groei per categorie in de tijd.
@@ -207,7 +211,10 @@ dan `docker compose up -d`. Het volledige stappenplan en wat je wel en niet hoef
 * **Verwijderscripts** zijn alleen zo goed als de index: ze controleren grootte en tijd vóór het verwijderen, maar een bestand dat
   sinds de scan is vervangen door een ander van gelijke grootte en tijd is niet te onderscheiden. Windows kan sommige Linux-namen
   niet aanspreken (die laat het script weg), `cmd` laat lege bestanden weg en vergelijkt alleen de grootte, en bestanden die alleen in
-  hoofdletters verschillen worden weggelaten. Zie [ADR 0006](docs/adr/0006-delete-scripts.md).
+  hoofdletters verschillen worden weggelaten. Zie [ADR 0006](docs/adr/0006-delete-scripts.md). Bij een **map** controleert het script geen
+  tijd en grootte per bestand maar aantallen: het laat de map staan als er nu méér bestanden of mappen in zitten dan bij de scan, of een koppeling.
+  Dat vangt wat er sindsdien bij is gekomen, niet een bestand dat is vervangen door een ander, of drie bestanden die zijn verwijderd terwijl er
+  drie nieuwe voor in de plaats kwamen ([ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)).
 * Geen OIDC; de auth-laag is zo opgezet dat een extra inlogmethode een sessie kan aanmaken, maar de koppeling is niet gebouwd.
 
 Alle beperkingen met toelichting: [`docs/deploy.md`](docs/deploy.md#9-bekende-beperkingen).
@@ -308,7 +315,9 @@ in one transaction, also if you leave the page. Details: [`docs/deploy.md` §5](
 **Delete scripts.** An administrator can tick files in the file lists (Folders → Files, Lists) and get one script (`.ps1`, `.cmd` or `.sh`)
 that deletes exactly those files, to run on a PC that sees the share over SMB or on the NAS itself. **The application deletes nothing**: it
 writes the text and you run it. The script prints a summary, needs `DELETE <count>` to be typed, and keeps any file whose size or time differs
-from the scan. At most 2,000 files per script. Where your machines see the share (`\\nas\media`, `Z:\`, `/mnt/user/media`) is set per share (*Delete scripts* in
+from the scan. At most 2,000 files and folders per script. **Folders** can be ticked too (Folders, and the lists of the largest and coldest folders, while
+no filter is on): a folder is deleted **with everything in it**, and the script keeps it, and says so, when it now holds more than at the scan or a link; the
+share itself is never deleted, and `cmd` takes no folders ([ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)). Where your machines see the share (`\\nas\media`, `Z:\`, `/mnt/user/media`) is set per share (*Delete scripts* in
 the share form) and can be changed when the script is made. Files that cannot be addressed safely (odd characters, names Windows cannot open, names
 that differ only in case) are left out and listed in the script. See [ADR 0006](docs/adr/0006-delete-scripts.md).
 

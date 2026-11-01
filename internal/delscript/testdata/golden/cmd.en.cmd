@@ -13,7 +13,7 @@ for /f "usebackq skip=64 tokens=1* delims=|" %%T in ("%~f0") do if "%%T"=="I" ec
 set /a COUNT=0
 for /f "usebackq skip=64 tokens=1 delims=|" %%T in ("%~f0") do if "%%T"=="F" set /a COUNT+=1
 if not "%COUNT%"=="%N%" (
-  echo(This script is incomplete or was changed: expected %N% files, found %COUNT%. Nothing was changed.
+  echo(This script is incomplete or was changed: expected %N% entries, found %COUNT%. Nothing was changed.
   exit /b 2
 )
 pushd "%ROOT%" >nul 2>&1

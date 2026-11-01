@@ -214,3 +214,129 @@ func (q *DB) dirTwins(ctx context.Context, share int64, dirIDs []int64) (twin ma
 	}
 	return twin, chains, tw.Err()
 }
+
+// ScriptDir is a selected folder with what a delete script needs to know about it. The script deletes the folder and everything in
+// it, so the figures are what the scan found inside, which the script checks against when it runs.
+type ScriptDir struct {
+	ID   int64
+	Path string // below the share root, with leading slash
+	// Files is every file below the folder at any depth, also the extra names of a hard-linked file that the totals of the index
+	// leave out (they sum a file with several names once). The script counts the names it finds, so it needs all of them.
+	Files int64
+	Dirs  int64 // folders below it at any depth, not counting itself
+	Bytes int64 // the size the index sums for it
+	// Root is the share's own folder, which a script never deletes.
+	Root bool
+	// Twin is true when the folder, or a folder above it, has a sibling whose name is the same when case is ignored (see dirTwins).
+	Twin bool
+}
+
+// ScriptDirs is the answer to DirsForScript.
+type ScriptDirs struct {
+	ScanID   int64
+	ScanTime time.Time
+	Dirs     []ScriptDir
+	Missing  []int64 // ids that are not folders of this share, without telling whose they are
+}
+
+// DirsForScript looks up the folders a person ticked. Ids that are not folders of this share come back in Missing without any name,
+// like FilesForScript, and the order of the ids is kept.
+func (q *DB) DirsForScript(ctx context.Context, shareID int64, ids []int64) (*ScriptDirs, error) {
+	for _, id := range ids {
+		if id <= 0 {
+			return nil, invalid("a folder id must be a positive number")
+		}
+	}
+	ids = uniqueIDs(ids)
+	if _, err := q.share(ctx, shareID); err != nil {
+		return nil, err
+	}
+	sel := &ScriptDirs{}
+	var finished *time.Time
+	var scan *int64
+	if err := q.pool.QueryRow(ctx, `
+		SELECT s.last_scan_id, sc.finished_at FROM shares s LEFT JOIN scans sc ON sc.id = s.last_scan_id WHERE s.id = $1`, shareID).
+		Scan(&scan, &finished); err != nil {
+		return nil, err
+	}
+	if scan == nil || finished == nil {
+		return nil, ErrNoData
+	}
+	sel.ScanID, sel.ScanTime = *scan, *finished
+	if len(ids) == 0 {
+		return sel, nil
+	}
+
+	rows, err := q.pool.Query(ctx, `
+		SELECT id, parent_id IS NULL, files_total, dirs_total, size_total FROM dirs WHERE share_id = $1 AND id = ANY($2)`, shareID, ids)
+	if err != nil {
+		return nil, err
+	}
+	found := make(map[int64]*ScriptDir, len(ids))
+	var foundIDs []int64
+	for rows.Next() {
+		d := &ScriptDir{}
+		if err := rows.Scan(&d.ID, &d.Root, &d.Files, &d.Dirs, &d.Bytes); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		found[d.ID] = d
+		foundIDs = append(foundIDs, d.ID)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(found) == 0 {
+		sel.Missing = ids
+		return sel, nil
+	}
+
+	paths, err := q.dirPaths(ctx, shareID, foundIDs)
+	if err != nil {
+		return nil, err
+	}
+	twin, chains, err := q.dirTwins(ctx, shareID, foundIDs)
+	if err != nil {
+		return nil, err
+	}
+	// The names a hard-linked file has beyond the first are in the index but not in its totals. They are files the script will find.
+	dup, err := q.pool.Query(ctx, `
+		SELECT d.id, count(*) FROM dirs d
+		JOIN dirs c ON c.share_id = d.share_id AND c.path <@ d.path
+		JOIN files f ON f.share_id = c.share_id AND f.dir_id = c.id
+		WHERE d.share_id = $1 AND d.id = ANY($2) AND f.nlink > 1 AND NOT f.counted
+		GROUP BY d.id`, shareID, foundIDs)
+	if err != nil {
+		return nil, err
+	}
+	for dup.Next() {
+		var id, n int64
+		if err := dup.Scan(&id, &n); err != nil {
+			dup.Close()
+			return nil, err
+		}
+		found[id].Files += n
+	}
+	dup.Close()
+	if err := dup.Err(); err != nil {
+		return nil, err
+	}
+
+	for _, id := range ids {
+		d, ok := found[id]
+		if !ok {
+			sel.Missing = append(sel.Missing, id)
+			continue
+		}
+		d.Path = paths[id]
+		for _, anc := range chains[id] {
+			if twin[anc] {
+				d.Twin = true
+				break
+			}
+		}
+		sel.Dirs = append(sel.Dirs, *d)
+	}
+	return sel, nil
+}

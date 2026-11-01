@@ -73,6 +73,7 @@ type tree struct {
 	t      *testing.T
 	root   string
 	files  []File   // the selection
+	dirs   []Dir    // the selected folders, each with everything in it
 	paths  []string // where each selected file is on disk
 	decoys []string // must still exist after the script ran
 }
@@ -155,6 +156,7 @@ func (tr *tree) generate(target Target, mut func(*Params)) *Result {
 	tr.t.Helper()
 	p := paramsFor(target, LangEN)
 	p.Root = tr.root
+	p.Dirs = tr.dirs
 	if mut != nil {
 		mut(&p)
 	}
