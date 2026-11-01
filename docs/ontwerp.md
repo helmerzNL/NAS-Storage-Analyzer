@@ -147,7 +147,7 @@ Ontwerpkeuzes:
 - **Audit log:** logins (ook mislukt), MFA-wijzigingen, scanstart/-annulering, share- en configuratiewijzigingen,
   gebruikersbeheer, elk verwijderscript dat is uitgegeven (`script.generate`: soort, aantallen, scan, padbasis en een SHA-256 van het script,
   nooit een bestandsnaam), en de uitkomst van elke scan (door de worker, ook bij een schema: `scan.finished`, `scan.empty` voor een
-  scan zonder bestanden, `scan.errors` bij onleesbare mappen, `scan.failed` met de reden); append-only tabel, doorzoekbaar
+  scan zonder bestanden, `scan.errors` bij onleesbare mappen, met een overzicht van die mappen, `scan.failed` met de reden); append-only tabel, doorzoekbaar
   in de UI voor admins.
 - **Geheimen:** `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
   TOTP-secrets worden met AES-256-GCM versleuteld (key-id in het ciphertext-formaat voor latere rotatie).

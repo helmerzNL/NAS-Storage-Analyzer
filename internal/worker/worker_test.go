@@ -399,6 +399,64 @@ func TestAScanThatSucceedsIsInTheAuditLog(t *testing.T) {
 	}
 }
 
+// A folder the app is not allowed to read is named in the audit entry of the scan, not only counted: a permission is fixed per
+// folder, and "3 folders or files could not be read" says nothing about which.
+func TestAScanThatCannotReadAFolderNamesItInTheAuditLog(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks; internal/scanner checks the same report with a filesystem that injects the errors")
+	}
+	e := newEnv(t, nil, nil)
+	root := t.TempDir()
+	ts.Write(t, root+"/ok/a.txt", 100)
+	ts.Write(t, root+"/private/secret.txt", 10)
+	ts.Write(t, root+"/private/inner/more.txt", 10)
+	ts.Write(t, root+"/shared/listed/b.txt", 20)
+	// A folder that can be listed but not searched: its files can be seen, and none can be examined.
+	ts.Write(t, root+"/shared/noexec/c.txt", 10)
+	ts.Write(t, root+"/shared/noexec/d.txt", 10)
+	for _, p := range []string{"/private", "/shared/noexec"} {
+		mode := os.FileMode(0)
+		if p == "/shared/noexec" {
+			mode = 0o444 // r--: listable, not searchable
+		}
+		if err := os.Chmod(root+p, mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(root+p, 0o755) })
+	}
+	id := e.share(t, root, nil)
+	if j := e.scan(t, id, "auto", "manual"); j.State != jobs.StateDone {
+		t.Fatalf("a scan that cannot read everything still finishes: %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.errors")
+	if r.Detail["files"] != float64(2) {
+		t.Errorf("the scan is published without what it could not read: %+v", r.Detail)
+	}
+	list, _ := r.Detail["unreadable"].([]any)
+	got := map[string]map[string]any{}
+	for _, f := range list {
+		m := f.(map[string]any)
+		got[m["path"].(string)] = m
+	}
+	if p := got["/private"]; p == nil || p["kind"] != "permission" || p["self"] != true || p["items"] != nil {
+		t.Errorf("/private could not be opened: %+v", list)
+	}
+	if p := got["/shared/noexec"]; p == nil || p["kind"] != "permission" || p["items"] != float64(2) || p["self"] != nil {
+		t.Errorf("/shared/noexec could be listed but not examined: %+v", list)
+	}
+	if len(list) != 2 || r.Detail["unreadable_folders"] != float64(2) {
+		t.Errorf("only the folders with a problem are named, not the ones below them: %+v", r.Detail)
+	}
+	if got["/private/inner"] != nil {
+		t.Errorf("a folder below one that could not be opened was never seen: %+v", list)
+	}
+	for _, e := range []string{"secret.txt", "c.txt", "d.txt"} {
+		if strings.Contains(fmt.Sprint(r.Detail), e) {
+			t.Errorf("file names are not in the entry: %s", e)
+		}
+	}
+}
+
 func TestAFailedScanIsInTheAuditLog(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	id := e.share(t, "/nonexistent/path", nil)

@@ -53,6 +53,8 @@ type Progress struct {
 	AtimeEq    atomic.Int64
 	AtimePre   atomic.Int64
 	current    atomic.Pointer[string]
+	// unreadable is the folders that had a problem, for the audit log (see Unreadable).
+	unreadable unreadableSet
 }
 
 // Current returns a recently visited directory, relative to the root.
@@ -261,7 +263,9 @@ func (w *walker) visit(ctx context.Context, t task) ([]task, error) {
 			rec.Mtime = time.Unix(0, 0).UTC()
 		}
 		w.o.Progress.FailedDirs.Add(1)
-		if err := w.report(ctx, classify(rel, out.err)); err != nil {
+		e := classify(rel, out.err)
+		e.Dir = true // the folder itself could not be read, not one file in it
+		if err := w.report(ctx, e); err != nil {
 			return nil, err
 		}
 	} else {
@@ -327,6 +331,7 @@ func (w *walker) accountFiles(files []FileRec) {
 
 func (w *walker) report(ctx context.Context, e ErrRec) error {
 	w.o.Progress.Errors.Add(1)
+	w.o.Progress.unreadable.add(e)
 	if e.At.IsZero() {
 		e.At = time.Now()
 	}

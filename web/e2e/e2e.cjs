@@ -634,6 +634,51 @@ const expectText = async (page, sel, re, msg) => {
       await shot('14-audit-empty-scan');
     });
 
+    await step('a scan that could not read folders: the audit log lists them, folded, as text', async () => {
+      // The entry the worker writes for such a scan (internal/worker addUnreadable). A real one needs a folder the app may not read, which
+      // root always may, so the screen is shown the answer; the worker test makes the real thing as an ordinary user.
+      const entry = {
+        id: 9001, at: new Date().toISOString(), user_id: null, username: 'worker', ip: '', action: 'scan.errors', target: 'Media',
+        detail: {
+          scan_id: 7, errors: 140, trigger: 'schedule', hint: '140 folders or files could not be read.',
+          unreadable: [
+            { path: "/Foto's/2019/privé", kind: 'permission', self: true },
+            { path: '/Backups/oud', kind: 'permission', items: 12 },
+            { path: '/Downloads/<b>vet</b> & <img src=x onerror=alert(1)>', kind: 'io', self: true },
+          ],
+          unreadable_folders: 120, unreadable_truncated: true,
+        },
+      };
+      const api = /\/api\/v1\/audit(\?|$)/;
+      await page.route(api, (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [entry], next_before: null }) }));
+      try {
+        await page.goto(BASE + '/admin/audit');
+        const box = page.locator('[data-testid=audit-unreadable]');
+        await box.waitFor({ timeout: 5000 });
+        if (await box.evaluate((d) => d.open)) throw new Error('the list must be folded until it is asked for');
+        const summary = (await box.locator('summary').textContent()).trim();
+        if (!/120\+/.test(summary)) throw new Error('the summary says how many folders there are, at least: ' + summary);
+        // The one-line summary of the entry keeps its other keys and does not print the list as an object.
+        const line = (await page.textContent('[data-testid=audit-table] .audit-detail')).replace(/\s+/g, ' ');
+        if (!/scan_id=7/.test(line) || !/errors=140/.test(line) || /object|unreadable/.test(line)) throw new Error('the one-line summary: ' + line);
+        await box.locator('summary').click();
+        const items = (await box.locator('[data-testid=audit-unreadable-item]').allTextContents()).map((s) => s.replace(/\s+/g, ' ').trim());
+        if (items.length !== 3) throw new Error('three folders are listed: ' + JSON.stringify(items));
+        if (!items[0].includes("/Foto's/2019/privé") || !/geen toegang|permission denied/.test(items[0]) || !/niet worden geopend|could not be opened/.test(items[0])) throw new Error('first: ' + items[0]);
+        if (!items[1].includes('/Backups/oud') || !/12/.test(items[1])) throw new Error('second says how many files: ' + items[1]);
+        if (!items[2].includes('<b>vet</b>') || !items[2].includes('<img src=x onerror=alert(1)>')) throw new Error('a folder name is text, shown as it is: ' + items[2]);
+        if (await box.locator('b, img').count()) throw new Error('a folder name must never become markup');
+        if (!/117/.test(await box.textContent())) throw new Error('"and 117 more" is missing');
+        await shot('15-audit-unreadable');
+        await page.setViewportSize({ width: 390, height: 844 });
+        if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)) throw new Error('the list makes the audit log wider than a phone screen');
+        await shot('15-phone-audit-unreadable');
+        await page.setViewportSize({ width: 1280, height: 900 });
+      } finally {
+        await page.unroute(api);
+      }
+    });
+
     await step('update check: the administrator is told, per version, and nothing about the installation is sent', async () => {
       const gh = (p) => fetch(process.env.FAKE_GITHUB + p).then((r) => r.status === 204 ? null : r.json());
       await page.goto(BASE + '/');

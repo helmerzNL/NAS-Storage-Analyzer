@@ -145,6 +145,11 @@ dialog.sheet .dlg-foot { padding: 12px 18px; border-top: 1px solid var(--lijn); 
 .folders { list-style: none; margin: 0; padding: 0; border: 1px solid var(--lijn-strong); border-radius: var(--radius-sm); max-height: 50vh; overflow: auto; } .folders[aria-busy="true"] { opacity: .6; }
 .folders li { display: flex; align-items: center; gap: 8px; padding: 2px 6px; } .folders li + li { border-top: 1px solid var(--lijn); } .folders li.pad { padding: 12px; }
 .audit-detail { max-width: 70ch; overflow-wrap: anywhere; }
+/* The folders a scan could not read: folded, one per line, the path first and the reason after it. */
+.audit-unreadable { margin-top: 6px; max-width: 70ch; }
+.audit-unreadable summary { cursor: pointer; color: var(--text); }
+.audit-unreadable ul { margin: 6px 0 4px; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
+.audit-path { overflow-wrap: anywhere; }
 
 /* Accent colour picker: round swatches. The chosen one has a ring and a check mark, so it is not marked by colour alone. */
 .accent-picker .chips { gap: 10px; margin: 6px 0; }
