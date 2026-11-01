@@ -62,6 +62,11 @@ en een herbouw kunnen er niet bij. Regels:
 * Unraid: een map op de array of cache, bijvoorbeeld `/mnt/cache/appdata/nas-storage-analyzer` (een schijfpad slaat de FUSE-laag van
   `/mnt/user` over) of `/mnt/user/appdata/nas-storage-analyzer`; nooit `/appdata` of `/data`: dat is het RAM-schijfgeheugen.
   Andere servers: `/srv/nas-storage-analyzer`, op een lokale schijf.
+* **Niet in de map waar je stackmanager de repository uitcheckt.** Dockhand en vergelijkbare tools zetten een git-stack in een map met de hele repository erin
+  (bijvoorbeeld `…/stacks/<omgeving>/<stack>`). Staat `DATA_PATH` daar, dan ligt je database tussen de bestanden van de checkout, en een `git clean` of het
+  opnieuw aanmaken van die map neemt hem mee. `/postgres/` staat in `.gitignore`, wat een gewone `git clean -fd` tegenhoudt (`-fdx` niet), maar veiliger is een
+  `DATA_PATH` buiten de checkout, bijvoorbeeld `/mnt/user/appdata/nas-storage-analyzer`. Verhuizen: maak eerst een `pg_dump` (§5), stop de stack, **verplaats** de
+  map `postgres` (niet kopiëren terwijl de database draait; `mv` houdt eigenaar en rechten), pas `DATA_PATH` aan en start opnieuw.
 * `NASA_SHARES_DIR` (de map met je gemounte shares) is om dezelfde reden verplicht en absoluut.
 * Back-up: bewaar `pg_dump` (§5), of de hele `DATA_PATH` met de stack gestopt, en `NASA_ENCRYPTION_KEY` apart.
 
@@ -479,10 +484,21 @@ docker compose pull
 docker compose up -d
 ```
 
-Een stackmanager (Dockhand, Komodo, Portainer) doet dat zelf bij "bijwerken". Welke versie je krijgt hangt af van `NASA_TAG`:
+Een stackmanager (Dockhand, Komodo, Portainer) heeft daarvoor meestal een eigen *pull*- of *update*-actie. **Opnieuw uitrollen of herstarten haalt een
+bewegende tag niet vanzelf op:** `beta` en `latest` wijzen na elke publicatie naar een ander image, en wat al lokaal staat wordt hergebruikt. Zo bleef op
+Unraid met Dockhand het eerste beta-image draaien terwijl er al een nieuwer bestond (en later ook lokaal stond, zonder dat de containers opnieuw werden
+aangemaakt). Pull dus eerst en rol daarna uit. Maakt de manager de containers dan nog steeds niet opnieuw aan, dan kan dat met precies dezelfde
+ingrediënten als de manager (de projectnaam, het compose-bestand en het env-bestand staan als label op de container:
+`docker inspect <container> --format '{{json .Config.Labels}}'`); laat Compose eerst met `docker compose --dry-run … up -d` zien wat het zou doen.
+Welke versie je krijgt hangt af van `NASA_TAG`:
 `latest` volgt de stabiele lijn, een versienummer blijft staan tot je het wijzigt. Terug naar een vorige versie: zet `NASA_TAG`
 op het vorige nummer en pull opnieuw; migraties worden niet teruggedraaid, dus een oudere versie werkt alleen als de
 release-notes (`docs/releases/`) zeggen dat het schema compatibel is. Herstel anders de back-up van vóór de update.
+
+**Controleer wat er draait.** `curl -s http://<host>:<poort>/api/v1/version` geeft `version`, `commit` en `channel`; het scherm **Over** toont hetzelfde. Bij
+`beta` hoort `commit` bij de laatste samenvoeging in de branch `beta` (te zien op GitHub), bij een release bij die release. Komt het niet overeen, dan draait er nog
+een ouder image, en ligt het niet aan je browser. Bij `beta` meldt de app zelf niets: de updatemelding hieronder kijkt naar gepubliceerde *releases*, en een
+beta-build is er geen.
 
 **De browser laadt de nieuwe versie vanzelf; je hoeft geen cache te legen.** De pagina wordt bij elke lading opnieuw bij de server gevraagd en de bestanden
 eronder hebben een naam die met hun inhoud verandert, dus een gewone herlaad na een update geeft altijd de nieuwe versie. Een pagina die **open blijft staan**

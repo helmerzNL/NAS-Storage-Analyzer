@@ -11,6 +11,9 @@ node_modules/
 # Local deployment state: never commit
 /secrets/
 /shares/
+# The database folder (DATA_PATH/postgres) when a stack manager puts DATA_PATH inside its checkout of this repository (docs/deploy.md): a plain
+# `git clean -fd` must not take it along, and nobody should commit it.
+/postgres/
 
 __pycache__/
 .worktrees/
