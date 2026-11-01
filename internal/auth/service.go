@@ -487,6 +487,29 @@ func (s *Service) AuditPage(ctx context.Context, before int64, limit int, action
 	return out, rows.Err()
 }
 
+// scanOutcomes are the audit actions that say how a scan ended: the ones a person looks for when a scan shows an error.
+var scanOutcomes = []string{"scan.finished", "scan.errors", "scan.empty", "scan.failed"}
+
+// AuditForScan returns the audit entry that says how scan scanID ended, if there is one. The worker writes the scan's id into the entry
+// ("scan_id"); an entry of a failed scan from before it did so is found through its job, which still knows the scan (jobs are kept for 30
+// days). The entry that only says a scan was asked for (scan.start) is not an outcome and is never returned.
+func (s *Service) AuditForScan(ctx context.Context, scanID int64) (*AuditEntry, error) {
+	var e AuditEntry
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, at, user_id, username, ip, action, target, detail FROM audit_log
+		WHERE action = ANY($2)
+		  AND (detail ->> 'scan_id' = ($1::bigint)::text
+		       OR (detail ->> 'scan_id' IS NULL AND detail ->> 'job' IN (SELECT id::text FROM jobs WHERE scan_id = $1::bigint)))
+		ORDER BY id DESC LIMIT 1`, scanID, scanOutcomes).Scan(&e.ID, &e.At, &e.UserID, &e.Username, &e.IP, &e.Action, &e.Target, &e.Detail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
 func randEncode(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 func randDecode(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) }

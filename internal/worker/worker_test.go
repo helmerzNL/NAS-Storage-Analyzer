@@ -468,6 +468,10 @@ func TestAFailedScanIsInTheAuditLog(t *testing.T) {
 	if msg, _ := r.Detail["error"].(string); r.Target != "media" || !strings.Contains(msg, "mounted into the container") {
 		t.Errorf("entry = %+v", r)
 	}
+	// The folder could not be opened, so no scan was begun: there is nothing for the entry to name.
+	if _, has := r.Detail["scan_id"]; has {
+		t.Errorf("an entry of a failure before the scan began names a scan: %+v", r.Detail)
+	}
 }
 
 // A share that held files and is suddenly empty (an unmounted NAS) is refused, and that must show.
@@ -489,5 +493,13 @@ func TestARefusedEmptyScanIsInTheAuditLog(t *testing.T) {
 	r := only(t, e.audit(t), "scan.failed")
 	if msg, _ := r.Detail["error"].(string); !strings.Contains(msg, "still mounted") || r.Detail["trigger"] != "schedule" {
 		t.Errorf("entry = %+v", r)
+	}
+	// The scan that failed is named in the entry, which is how the error on the dashboard leads to it.
+	var failed int64
+	if err := e.st.Pool.QueryRow(ctx, `SELECT id FROM scans WHERE status = 'failed'`).Scan(&failed); err != nil {
+		t.Fatal(err)
+	}
+	if r.Detail["scan_id"] != float64(failed) {
+		t.Errorf("the entry names scan %v, the scan that failed is %d", r.Detail["scan_id"], failed)
 	}
 }

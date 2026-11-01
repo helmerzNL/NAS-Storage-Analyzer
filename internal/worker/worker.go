@@ -392,6 +392,12 @@ func (w *Worker) auditFailure(log *slog.Logger, job *jobs.Job, msg string) {
 	}
 	detail := jobDetail(job)
 	detail["error"] = msg
+	// The scan the job had started, so the error on the dashboard can lead to this entry. A failure before the scan began (the share's folder
+	// cannot be opened) has none.
+	var scanID *int64
+	if err := w.st.Pool.QueryRow(ctx, `SELECT scan_id FROM jobs WHERE id = $1`, job.ID).Scan(&scanID); err == nil && scanID != nil {
+		detail["scan_id"] = *scanID
+	}
 	if hint := failureHint(msg); hint != "" {
 		detail["hint"] = hint
 	}
