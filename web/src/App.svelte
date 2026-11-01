@@ -24,6 +24,7 @@
   import Invite from './routes/Invite.svelte';
   import { invite } from './lib/invite.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
+  import BuildBanner from './components/BuildBanner.svelte';
   import { loadUpdate, resetUpdate } from './lib/updates.svelte';
   import SettingsLayout from './components/SettingsLayout.svelte';
 
@@ -51,6 +52,7 @@
   const toggleTheme = () => setPref('theme', prefs.theme === 'dark' ? 'light' : prefs.theme === 'light' ? 'system' : 'dark');
 </script>
 
+<BuildBanner />
 {#if invite.token}
   <!-- An invitation is open: neither the sign-in nor the setup wizard has anything for the guest. -->
   <Invite onfinished={() => navigate('/', true)} />

@@ -1,3 +1,5 @@
+import { build } from './build.svelte';
+
 export const route = $state({ path: location.pathname, query: new URLSearchParams(location.search) });
 
 function sync() {
@@ -8,6 +10,9 @@ window.addEventListener('popstate', sync);
 
 export function navigate(to: string, replace = false) {
   if (to === location.pathname + location.search) return;
+  // The server has been updated since this page was loaded (lib/build): going to another screen is the moment to load the new version instead of
+  // carrying on with the old one. A change that stays on the same screen (a filter, the sort order, a replace) is left alone, so nothing typed is lost.
+  if (build.stale && !replace && new URL(to, location.href).pathname !== location.pathname) { location.assign(to); return; }
   (replace ? history.replaceState : history.pushState).call(history, null, '', to);
   sync();
   window.scrollTo(0, 0);

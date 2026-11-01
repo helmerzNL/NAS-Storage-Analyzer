@@ -257,6 +257,11 @@ NASA_RP_ORIGINS=https://nas.example.com
 De proxy moet `Host`, `X-Forwarded-For`, `X-Forwarded-Proto` en `X-Forwarded-Host` doorgeven en **response-buffering
 uitzetten voor `/api/v1/events`** (live scanvoortgang via server-sent events).
 
+**Laat de proxy de interface niet bewaren.** De app zegt zelf wat bewaard mag worden: de pagina (`/` en elk ander scherm) en de bestanden zonder
+inhoud in de naam (`/appearance-boot.js`, `/favicon.svg`) gaan met `Cache-Control: no-cache` de deur uit (de browser vraagt ze bij elke lading opnieuw),
+alleen `/assets/…` heeft een naam met een hash en mag een jaar blijven. Een proxy die de pagina toch bewaart ("cache everything", een `proxy_cache` op `/`)
+laat na een update nog de oude versie zien, en een herlaad in de browser verandert daar niets aan. Laat de proxy de `Cache-Control` van de app volgen.
+
 **Caddy** (regelt certificaten zelf):
 
 ```caddyfile
@@ -474,6 +479,16 @@ Een stackmanager (Dockhand, Komodo, Portainer) doet dat zelf bij "bijwerken". We
 `latest` volgt de stabiele lijn, een versienummer blijft staan tot je het wijzigt. Terug naar een vorige versie: zet `NASA_TAG`
 op het vorige nummer en pull opnieuw; migraties worden niet teruggedraaid, dus een oudere versie werkt alleen als de
 release-notes (`docs/releases/`) zeggen dat het schema compatibel is. Herstel anders de back-up van vóór de update.
+
+**De browser laadt de nieuwe versie vanzelf; je hoeft geen cache te legen.** De pagina wordt bij elke lading opnieuw bij de server gevraagd en de bestanden
+eronder hebben een naam die met hun inhoud verandert, dus een gewone herlaad na een update geeft altijd de nieuwe versie. Een pagina die **open blijft staan**
+over een update heen (een tabblad dat je laat staan, een telefoon die de app uit het geheugen terugzet) laadt zichzelf niet opnieuw, en lijkt dan "gecached". Zo'n
+pagina vraagt daarom aan de server welke versie die nu uitdeelt, zodra hij weer in beeld komt en verder elk kwartier (`GET /?_=<tijd>`: de pagina zelf, zonder
+cookie of gegevens van jou, hoogstens eens per minuut). Is het een andere dan die hij draait, dan staat er bovenaan elk scherm, ook het inlogscherm, een balk
+*De applicatie is bijgewerkt. Laad de pagina opnieuw om de nieuwe versie te gebruiken* met de knop **Nu herladen**. Je kiest zelf wanneer (een half ingevuld
+formulier gaat niet verloren), maar de eerstvolgende stap naar een ander scherm laadt de nieuwe versie ook zonder de knop; een wijziging binnen hetzelfde scherm
+(een filter, een zoekopdracht) laat de pagina met rust. Dit is iets anders dan de updatemelding hierboven: die meldt een nieuwe *release* op GitHub aan de beheerder,
+de balk meldt aan iedereen dat de *pagina* die hij open heeft verouderd is.
 
 **Je hoeft niet zelf te kijken of er een nieuwe versie is.** Zodra een beheerder de interface opent, vraagt de app (hoogstens eens per zes uur, anders komt het antwoord uit het geheugen) aan `github.com` wat de nieuwste gepubliceerde release is
 en meldt een nieuwere aan de beheerder: een banner bovenaan (met *Later*, per versie onthouden in de browser) en het scherm **Over** (de naam rechtsboven → *Over*), met de geïnstalleerde en

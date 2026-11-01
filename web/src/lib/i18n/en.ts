@@ -132,6 +132,7 @@ export const en: Record<string, string> = {
   'fold.open': 'Show', 'fold.closed': 'Hide',
   // The update check (update-check.md)
   'nav.system': 'System', 'system.intro': 'What concerns the whole installation, not one share or one person.', 'update.title': 'Updates',
+  'build.banner': 'The application has been updated. Reload the page to use the new version.', 'build.reload': 'Reload now',
   'update.banner': 'A new version is available: v{latest} (you have v{current})', 'update.view': 'View', 'update.later': 'Later', 'update.checknow': 'Check now',
   'update.installed': 'Installed version', 'update.latest': 'Latest release', 'update.checked': 'Last checked', 'update.dot': 'Update available',
   'update.state.available': 'Update available', 'update.state.current': 'Up to date', 'update.state.none': 'No release published', 'update.state.disabled': 'Switched off',
