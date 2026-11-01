@@ -170,7 +170,7 @@ describe('translations', () => {
       'cat.': ['video', 'audio', 'images', 'documents', 'archives', 'code', 'disk_images', 'other'],
       'kind.': ['bind', 'nfs', 'smb'], 'mode.': ['full', 'incremental'], 'role.': ['admin', 'viewer'],
       'sort.': ['size', 'name', 'mtime', 'used', 'ext'], 'mfa.use.': ['totp', 'passkey', 'recovery'],
-      'backup.section.': ['shares', 'file_types', 'preferences'],
+      'backup.section.': ['shares', 'file_types', 'preferences'], 'script.simple.paste.': ['sh', 'powershell', 'cmd'],
       'atime.reason.': ['mount_noatime', 'network_fs', 'small_sample', 'atime_equals_mtime_majority', 'atime_equals_mtime_many', 'atime_before_mtime_majority'],
     };
     for (const p of prefixes) if (p in need) for (const s of need[p]) expect(p + s in nl, p + s).toBe(true);

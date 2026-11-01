@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { filenameFromDisposition } from './api';
-import { defaultRoot, extensionOf, isScriptType, isWindows, runCommand, scannedPath } from './script';
+import { MAX_SIMPLE, defaultRoot, extensionOf, isDeleteScripts, isScriptType, isWindows, runCommand, scannedPath } from './script';
 
 const share = (kind: 'bind' | 'nfs' | 'smb', config: Record<string, string> = {}) => ({ kind, config });
 
@@ -35,6 +37,22 @@ describe('kinds of script', () => {
     expect(runCommand('powershell', 'delete-Media-20261031-2040.ps1')).toBe('powershell -NoProfile -ExecutionPolicy Bypass -File ".\\delete-Media-20261031-2040.ps1"');
     expect(runCommand('cmd', 'delete-Media-20261031-2040.cmd')).toBe('"delete-Media-20261031-2040.cmd"');
     expect(runCommand('sh', 'delete-Media-20261031-2040.sh')).toBe('sh "./delete-Media-20261031-2040.sh"');
+  });
+});
+
+describe('the simple script', () => {
+  it('is a .txt whatever it is for, and the advanced script keeps its own extension', () => {
+    expect((['powershell', 'cmd', 'sh'] as const).map((t) => extensionOf(t, 'simple'))).toEqual(['.txt', '.txt', '.txt']);
+    expect((['powershell', 'cmd', 'sh'] as const).map((t) => extensionOf(t, 'advanced'))).toEqual(['.ps1', '.cmd', '.sh']);
+  });
+  it('is chosen with one of two words, and anything else is not a choice', () => {
+    expect(['advanced', 'simple'].map(isDeleteScripts)).toEqual([true, true]);
+    for (const bad of ['', 'Simple', 'easy', 'txt', null, undefined, 1]) expect(isDeleteScripts(bad), String(bad)).toBe(false);
+  });
+  it('is for as many files and folders as the server takes', () => {
+    // The dialog refuses before it asks; the number must be the one the server refuses at, or one of the two is wrong.
+    const go = readFileSync(join(__dirname, '../../../internal/delscript/delscript.go'), 'utf8');
+    expect(Number(/const MaxSimple = (\d+)/.exec(go)?.[1])).toBe(MAX_SIMPLE);
   });
 });
 

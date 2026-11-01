@@ -18,6 +18,31 @@ import (
 	"time"
 )
 
+// Style says how much a script does. The advanced script is the one this package was written for: a summary, a typed confirmation, and a check of
+// every file and folder as it runs. The simple script is a text file with one command per file or folder, to read, to cut down and to paste into
+// a terminal (over SSH, on the NAS) for a small number of them, and it asks and checks nothing. See ADR-0011.
+type Style string
+
+const (
+	StyleAdvanced Style = "advanced"
+	StyleSimple   Style = "simple"
+)
+
+// ParseStyle turns the name used in the API into a Style; empty is the advanced one.
+func ParseStyle(s string) (Style, bool) {
+	switch Style(s) {
+	case "", StyleAdvanced:
+		return StyleAdvanced, true
+	case StyleSimple:
+		return StyleSimple, true
+	}
+	return "", false
+}
+
+// MaxSimple is the most files and folders a simple script holds. It is for a small number: a person pastes it, and a paste of hundreds of lines
+// into a terminal runs every one of them before anyone can look.
+const MaxSimple = 200
+
 // MaxFiles is the most files one script holds. A script of that size cannot be read through by eye, which is why
 // every script starts with a summary and asks for a confirmation.
 const MaxFiles = 2000
@@ -42,6 +67,15 @@ func ParseTarget(s string) (Target, bool) {
 
 // IsWindows is true for the targets that run on Windows and address files with backslashes.
 func (t Target) IsWindows() bool { return t == TargetCmd || t == TargetPowerShell }
+
+// FileExtension is the extension of the file for a style: the simple script is plain text whatever it is written in, so that it is opened and
+// read instead of run, and never started by a double click.
+func (t Target) FileExtension(s Style) string {
+	if s == StyleSimple {
+		return ".txt"
+	}
+	return t.Extension()
+}
 
 // Extension is the file extension a script of this kind should have.
 func (t Target) Extension() string {
@@ -88,8 +122,10 @@ type Params struct {
 	Generated time.Time
 	// Skipped are files and folders the caller already left out: ids no longer in the index, and names that differ only in case.
 	Skipped []Skip
-	// Dirs are the folders to delete with everything in them (never for cmd, see ReasonFolderCmd).
+	// Dirs are the folders to delete with everything in them (never for an advanced cmd script, see ReasonFolderCmd).
 	Dirs []Dir
+	// Style is the kind of script; empty is the advanced one.
+	Style Style
 }
 
 // Result is a generated script and what it contains.
@@ -114,6 +150,8 @@ var (
 	ErrNoFiles = errors.New("none of the selected files or folders can be put in a script")
 	// ErrTooMany is returned for more than MaxFiles files.
 	ErrTooMany = errors.New("too many files and folders for one script")
+	// ErrTooManySimple is returned for more than MaxSimple files and folders in a simple script.
+	ErrTooManySimple = errors.New("too many files and folders for a simple script: it is for a small number, use the advanced script for more")
 )
 
 type entry struct {
@@ -130,12 +168,19 @@ func Generate(files []File, p Params) (*Result, error) {
 	if _, ok := ParseTarget(string(p.Target)); !ok {
 		return nil, fmt.Errorf("unknown script type %q", p.Target)
 	}
+	simple := p.Style == StyleSimple
+	if simple && len(files)+len(p.Dirs) > MaxSimple {
+		return nil, ErrTooManySimple
+	}
 	if len(files)+len(p.Dirs) > MaxFiles {
 		return nil, ErrTooMany
 	}
 	root, err := NormalizeRoot(p.Target, p.Root)
 	if err != nil {
 		return nil, err
+	}
+	if simple && p.Target == TargetCmd && strings.ContainsRune(root, '!') {
+		return nil, rootErr("a base path with an exclamation mark cannot be used in a simple cmd script; use the PowerShell script")
 	}
 	txt := textFor(p.Lang)
 
@@ -151,6 +196,9 @@ func Generate(files []File, p Params) (*Result, error) {
 		}
 		seenDir[d.Path] = true
 		reason := ClassifyDir(p.Target, d.Path)
+		if simple {
+			reason = classifyDirSimple(p.Target, d.Path)
+		}
 		addressed := d.Path
 		if p.Target.IsWindows() {
 			addressed = strings.ReplaceAll(d.Path, "/", `\`)
@@ -208,6 +256,9 @@ func Generate(files []File, p Params) (*Result, error) {
 			continue
 		}
 		reason := ClassifyPath(p.Target, f.Path)
+		if simple && reason == "" {
+			reason = classifySimple(p.Target, f.Path)
+		}
 		addressed := f.Path
 		if p.Target.IsWindows() {
 			addressed = strings.ReplaceAll(f.Path, "/", `\`)
@@ -215,15 +266,16 @@ func Generate(files []File, p Params) (*Result, error) {
 				reason = ReasonTooLong
 			}
 		}
-		if reason == "" && p.Target == TargetCmd && f.Size <= 0 {
+		// The empty file is cmd's problem only in the advanced script, which compares sizes to tell a file from a folder; del takes an empty file.
+		if reason == "" && !simple && p.Target == TargetCmd && f.Size <= 0 {
 			reason = ReasonEmptyCmd
 		}
 		if reason != "" {
 			skipped = append(skipped, Skip{Path: f.Path, Reason: reason})
 			continue
 		}
-		if p.Target == TargetCmd {
-			addressed = strings.TrimPrefix(addressed, `\`) // cmd works relative to the base path
+		if p.Target == TargetCmd && !simple {
+			addressed = strings.TrimPrefix(addressed, `\`) // the advanced cmd script works relative to the base path
 		}
 		size := f.Size
 		if size < 0 {
@@ -251,6 +303,14 @@ func Generate(files []File, p Params) (*Result, error) {
 	}
 	// The number to type: what the person is told is going, counted the same way in the summary and in the script's report.
 	items := len(keep) + len(folders) + int(folderFiles) + int(folderDirs)
+
+	if simple {
+		sort.Slice(keep, func(i, j int) bool { return keep[i].rel < keep[j].rel })
+		r := &Result{Root: root, Files: len(keep), Folders: len(folders), FolderFiles: folderFiles, FolderDirs: folderDirs, Items: len(keep) + len(folders),
+			Covered: covered, Bytes: bytes, Hardlinks: hard, Skipped: skipped}
+		r.Script = []byte(renderSimple(txt, p, joined, keep, folders, r))
+		return r, nil
+	}
 
 	data := []string{fmt.Sprintf("N|%d", len(keep)+len(folders))}
 	if p.Target != TargetCmd { // cmd takes no folders, so for it the number to type is the number of records

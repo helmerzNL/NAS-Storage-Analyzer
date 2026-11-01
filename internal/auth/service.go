@@ -511,6 +511,9 @@ var prefValues = map[string]map[string]bool{
 	"units":    {"binary": true, "decimal": true},
 	"language": {"nl": true, "en": true},
 	"theme":    {"system": true, "light": true, "dark": true},
+	// Which delete scripts the interface asks for: the advanced script (a summary, a typed confirmation, a check of every file) or the
+	// simple one (a .txt with one command per file or folder, to paste into a terminal). See ADR-0011.
+	"delete_scripts": {"advanced": true, "simple": true},
 }
 
 // accentRE is the accent colour a person may pick: #rrggbb. Anything else would end up in a CSS custom property.

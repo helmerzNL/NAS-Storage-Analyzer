@@ -30,6 +30,10 @@ type messages struct {
 	done       [5]string // "Done: " d " deleted, " k " kept, " g " already gone, " f " failed."
 
 	deleted, gone, changed, notRegular, failed string
+	// The simple script: comment lines at its top, which are text for a person and are never run (see renderSimple).
+	simpleTitle, simpleCount string
+	simpleNote               [4]string
+
 	// A folder that is kept: it is not a plain folder (a link, or a file now), it holds a link or a special file, or it holds more than at the scan.
 	notFolder, hasLinks, grown string
 }
@@ -65,6 +69,15 @@ var textEN = messages{
 		ReasonEmptyCmd:    "cmd cannot tell an empty file from a folder (use the PowerShell script)",
 		ReasonRoot:        "this is the share itself, which is never deleted",
 		ReasonFolderCmd:   "cmd cannot check what is in a folder (use the PowerShell script, or sh on the NAS)",
+		ReasonCmdChars:    "cmd could read a character of this name as a variable (use PowerShell, or sh on the NAS)",
+	},
+	simpleTitle: "NAS Storage Analyzer: simple delete script",
+	simpleCount: "Commands: %d (files: %d, folders: %d). Index of scan: %s (scan %d).",
+	simpleNote: [4]string{
+		"One command per file or folder. A folder is deleted with everything in it.",
+		"Nothing is asked and nothing is checked: no summary, no confirmation, and no check that anything is still as it was at the scan.",
+		"Pasting these lines into a terminal runs every one of them at once. Paste only the lines you want, or delete the others first.",
+		"A link in a folder is not looked for. The advanced script does that.",
 	},
 	confirm:    [2]string{"Type DELETE ", " to confirm: "},
 	cancelled:  "Cancelled. Nothing was changed.",
@@ -115,6 +128,15 @@ var textNL = messages{
 		ReasonEmptyCmd:    "cmd kan een leeg bestand niet van een map onderscheiden (gebruik het PowerShell-script)",
 		ReasonRoot:        "dit is de share zelf, die wordt nooit verwijderd",
 		ReasonFolderCmd:   "cmd kan niet controleren wat er in een map staat (gebruik het PowerShell-script, of sh op de NAS)",
+		ReasonCmdChars:    "cmd kan een teken van deze naam als variabele lezen (gebruik PowerShell, of sh op de NAS)",
+	},
+	simpleTitle: "NAS Storage Analyzer: eenvoudig verwijderscript",
+	simpleCount: "Opdrachten: %d (bestanden: %d, mappen: %d). Index van scan: %s (scan %d).",
+	simpleNote: [4]string{
+		"Een opdracht per bestand of map. Een map wordt verwijderd met alles erin.",
+		"Er wordt niets gevraagd en niets gecontroleerd: geen samenvatting, geen bevestiging, en geen controle of iets nog is zoals bij de scan.",
+		"Plak je deze regels in een terminal, dan worden ze allemaal meteen uitgevoerd. Plak alleen de regels die je wilt, of haal de andere eerst weg.",
+		"Een koppeling in een map wordt niet gezocht. Het geavanceerde script doet dat wel.",
 	},
 	confirm:    [2]string{"Typ DELETE ", " om te bevestigen: "},
 	cancelled:  "Geannuleerd. Er is niets gewijzigd.",

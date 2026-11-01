@@ -4,6 +4,7 @@
 - Date: 2026-11-01
 - Decision owners: helmerzNL (owner)
 - Amends: [ADR-0006](0006-delete-scripts.md), which said that folders cannot be ticked
+- Amended by: [ADR-0011](0011-simple-delete-scripts.md): the simple script, a `.txt` of commands, takes folders for `cmd` too (`rd /s /q`) and checks nothing
 
 ## Context
 

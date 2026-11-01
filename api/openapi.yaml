@@ -185,6 +185,12 @@ paths:
         go with it and are not listed twice. The share's own folder is never put in a script. `cmd` cannot check a folder and takes
         none: use PowerShell or `sh`.
 
+        **`style: simple`** asks for the other kind of script: a plain text file (`.txt`) with a few comment lines and then one
+        command per file or folder (`rm`, `Remove-Item`, `del` and `rd`), to read, cut down and paste into a terminal, for example
+        over SSH on the NAS. It asks nothing and checks nothing, keeps no data block and takes at most 200 files and folders; see
+        ADR-0011. A name that cannot be quoted for certain (in `cmd`, one with `%` or `!`) is left out and listed in the comment
+        lines, as everything else the advanced script leaves out.
+
         `client_root` is where the machine that runs the script sees the share (`\\nas\media`, `Z:\`, `/mnt/user/media`);
         empty uses the share's `client_windows` or `client_posix` setting. Ids of another share are treated as files that are
         gone. The audit log records the script type, the counts and a SHA-256 of the script, never a file name.
@@ -210,19 +216,20 @@ paths:
                 script: {type: string, enum: [cmd, powershell, sh], description: "`cmd` and `powershell` address Windows paths; `sh` addresses Linux and macOS paths."}
                 client_root: {type: string, description: "Base path on the machine that runs the script. Empty uses the share's own."}
                 lang: {type: string, enum: [en, nl], default: en, description: "Language of what the script prints."}
+                style: {type: string, enum: [advanced, simple], default: advanced, description: "`advanced` is the script with a summary, a typed confirmation and a check of every file and folder. `simple` is a `.txt` with one command per file or folder and no checks; at most 200 files and folders."}
       responses:
         "200":
           description: The script, with CRLF line ends for `cmd` and PowerShell (UTF-8, with a byte-order mark for PowerShell) and LF for `sh`.
           headers:
-            Content-Disposition: {schema: {type: string}, description: "`attachment` with a file name that ends in `.cmd`, `.ps1` or `.sh`."}
+            Content-Disposition: {schema: {type: string}, description: "`attachment` with a file name that ends in `.cmd`, `.ps1` or `.sh`, or in `.txt` for a simple script."}
             X-Files: {schema: {type: integer}, description: "Files in the script that were selected one by one."}
             X-Folders: {schema: {type: integer}, description: "Folders in the script, each deleted with everything in it."}
-            X-Items: {schema: {type: integer}, description: "The number to type to confirm: the files, the folders and what the scan found in them."}
+            X-Items: {schema: {type: integer}, description: "The number to type to confirm: the files, the folders and what the scan found in them. For a simple script, which asks nothing, the number of commands."}
             X-Skipped: {schema: {type: integer}, description: "Files left out; the script lists them."}
             X-Bytes: {schema: {type: integer, format: int64}, description: "Total size of the files in the script and of what the scan found in the folders, an upper bound when files have several hard links."}
           content:
             text/plain: {schema: {type: string}}
-        "400": {description: "Invalid request: `field` is `ids` (none, too many, or none of the files or folders can be put in a script), `script`, `lang` or `client_root`.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "400": {description: "Invalid request: `field` is `ids` (none, too many, or none of the files or folders can be put in a script), `script`, `lang`, `style` or `client_root`.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "404": {description: "No such share.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         "409": {description: "The share has not been scanned yet (`no_data`), or a scan was published while the script was made (`scan_changed`): ask again.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         default: {$ref: "#/components/responses/Problem"}
@@ -784,6 +791,7 @@ paths:
                 language: {type: string, enum: [nl, en]}
                 theme: {type: string, enum: [system, light, dark]}
                 accent: {type: string, pattern: '^(#[0-9a-fA-F]{6})?$', description: "The accent colour of the interface as #rrggbb (stored in lower case); empty means the default. Anything else is refused: the value ends up in a CSS custom property."}
+                delete_scripts: {type: string, enum: [advanced, simple], description: "Which delete script the interface asks for: the advanced one (summary, typed confirmation, checks) or the simple one (a .txt with one command per file or folder). Set under Settings, Delete."}
       responses:
         "200": {description: "The merged preferences.", content: {application/json: {schema: {type: object, required: [prefs], properties: {prefs: {type: object, additionalProperties: {type: string}}}}}}}
         default: {$ref: "#/components/responses/Problem"}

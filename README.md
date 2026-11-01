@@ -20,6 +20,9 @@ snel blijft.
   map gaat dan **met alles erin**, submappen en bestanden op elk niveau. Het getal dat je typt telt ook wat de scan in die mappen vond. Het script
   laat een map staan, en zegt dat, als hij nu meer bevat dan bij de scan of een koppeling, en de share zelf wordt nooit verwijderd. `cmd` neemt
   geen mappen (zie [ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)).
+  Onder *Instellingen → Verwijderen* kies je tussen het **geavanceerde** script (zoals hierboven) en een **eenvoudig** script: een `.txt` met
+  één opdracht per bestand of map (`rm`, `Remove-Item` of `del` en `rd`), voor een klein aantal (tot 200) om te lezen, in te korten en in een terminal
+  te plakken, bijvoorbeeld via SSH op de NAS. Het eenvoudige script vraagt en controleert niets (zie [ADR 0011](docs/adr/0011-simple-delete-scripts.md)).
 * **Bestandstypes** in acht categorieën (Video, Audio, Afbeeldingen, Documenten, Archieven, Code, Disk images, Overig)
   met een aanpasbare extensietabel; een wijziging werkt direct door in alle cijfers, zonder opnieuw te scannen.
 * **Historie**: per scan een momentopname, met instelbare bewaartermijn; groei per categorie in de tijd.
@@ -320,6 +323,14 @@ no filter is on): a folder is deleted **with everything in it**, and the script 
 share itself is never deleted, and `cmd` takes no folders ([ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)). Where your machines see the share (`\\nas\media`, `Z:\`, `/mnt/user/media`) is set per share (*Delete scripts* in
 the share form) and can be changed when the script is made. Files that cannot be addressed safely (odd characters, names Windows cannot open, names
 that differ only in case) are left out and listed in the script. See [ADR 0006](docs/adr/0006-delete-scripts.md).
+
+**Simple delete scripts.** *Settings → Delete* (administrators) chooses which script the lists make: the advanced one above, or a **simple** one. The simple
+script is a `.txt` with a few comment lines and then one command per file or folder: `rm -f -- '…'` and `rm -rf -- '…'` for `sh`, `Remove-Item -LiteralPath '…'
+-Force` (and `-Recurse -Force`) for PowerShell, `del /f /q "…"` and `rd /s /q "…"` for `cmd`. It is for a small number, at most 200 files and folders: tick
+them on a Windows PC, open the `.txt` or the lines the dialog shows, and paste the ones you want into an SSH session on the NAS. **It asks nothing and
+checks nothing** (not whether a file changed since the scan, not whether a folder holds a link), and pasting runs every line at once. Names that cannot be
+quoted for certain are left out and listed (for `cmd`: a `%` or `!`). The choice is a preference of your account. See
+[ADR 0011](docs/adr/0011-simple-delete-scripts.md).
 
 **Factory reset.** *Settings → System → Factory reset* (administrators) puts the installation back to new: every table of the database is emptied (accounts, shares with their scan data, edited file types, the audit log) and the
 setup wizard starts again. A session is not enough: you type `RESET` and prove who you are again, with a passkey or with your password and a code. It is refused while a scan runs, needs no restart, and leaves the environment

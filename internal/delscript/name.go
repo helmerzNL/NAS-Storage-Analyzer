@@ -27,6 +27,8 @@ const (
 	// Only for a folder that is to be deleted with everything in it.
 	ReasonRoot      Reason = "root"       // the share itself: its own folder is never deleted
 	ReasonFolderCmd Reason = "folder-cmd" // cmd cannot check what is in a folder, so it takes none
+	// Only for a simple cmd script, whose lines are typed or pasted into cmd.exe.
+	ReasonCmdChars Reason = "cmd-chars" // cmd may read a percent sign or an exclamation mark in the name as a variable
 )
 
 // maxWindowsPath is MAX_PATH less the terminating NUL. Windows PowerShell 5.1 and cmd cannot open longer paths

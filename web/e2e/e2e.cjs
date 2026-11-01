@@ -429,6 +429,98 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForFunction(() => !document.querySelector('[data-testid=selection-bar]'));
     });
 
+    await step('settings, delete: the kind of script is a setting of the account, and the simple script is a .txt of commands to read, copy and paste', async () => {
+      const download = async (clickSel) => {
+        const [dl] = await Promise.all([page.waitForEvent('download'), page.click(clickSel)]);
+        return { name: dl.suggestedFilename(), bytes: fs.readFileSync(await dl.path()) };
+      };
+      // The part is in the settings menu, and the advanced script is what nobody has changed.
+      await page.goto(BASE + '/admin/shares');
+      await page.click('[data-testid=settings-admin-delete]');
+      await page.waitForSelector('[data-testid=delete-advanced]');
+      if (!(await page.isChecked('[data-testid=delete-advanced]')) || (await page.isChecked('[data-testid=delete-simple]'))) throw new Error('the advanced script is not the default');
+      if ((await page.getAttribute('[data-testid=settings-admin-delete]', 'aria-current')) !== 'page') throw new Error('the open part is not marked in the menu');
+      const info = await page.textContent('[data-testid=delete-simple-info]');
+      for (const word of ["rm -rf -- '", 'Remove-Item -LiteralPath', 'del /f /q "', 'rd /s /q "']) if (!info.includes(word)) throw new Error('the examples lack ' + word);
+      await shot('08e-settings-delete');
+
+      // Choosing is saved for the account: it survives a reload that has no copy in the browser.
+      const saved = page.waitForResponse((r) => r.url().endsWith('/api/v1/auth/prefs') && r.request().method() === 'PUT');
+      await page.check('[data-testid=delete-simple]');
+      if ((await saved).status() !== 200) throw new Error('the choice was not saved');
+      await page.evaluate(() => localStorage.removeItem('nasa.delete_scripts'));
+      await page.reload();
+      await page.waitForSelector('[data-testid=delete-simple]');
+      if (!(await page.isChecked('[data-testid=delete-simple]'))) throw new Error('the choice is not kept for the account');
+
+      // Tick a file, then a folder, and ask for the script.
+      await page.goto(BASE + '/browse/1?view=files&rec=1');
+      await page.waitForSelector('[data-testid=file-row]');
+      await page.locator('[data-testid=file-row]', { hasText: 'notes.txt' }).locator('[data-testid=select-file]').check();
+      await page.click('[data-testid=view-folders]'); // inside the application, so the selection comes along
+      await page.waitForSelector('[data-testid=folder-row]');
+      await page.locator('[data-testid=folder-row]', { hasText: 'photos' }).locator('[data-testid=select-dir]').check();
+      await expectText(page, '[data-testid=sel-count]', /^Gekozen: 1 bestanden, 1 mappen$/, 'a file and a folder ticked');
+      await page.click('[data-testid=sel-make]');
+      await page.waitForSelector('dialog[open] [data-testid=script-style]');
+      if (!/Eenvoudig script/.test(await page.textContent('[data-testid=script-style]'))) throw new Error('the dialog does not say which script: ' + await page.textContent('[data-testid=script-style]'));
+      await page.check('[data-testid=script-type-sh]');
+      if ((await page.inputValue('[data-testid=script-root]')) !== '/mnt/user/media') throw new Error('sh does not start from the share: ' + await page.inputValue('[data-testid=script-root]'));
+
+      let got = await download('[data-testid=script-make]');
+      if (!/^delete-Media-\d{8}-\d{4}\.txt$/.test(got.name)) throw new Error('file name: ' + got.name);
+      let text = got.bytes.toString('utf8');
+      if (text.startsWith('#!') || text.includes('\r') || /(^|\n)[NRITFD]\|/.test(text) || text.includes('DELETE')) throw new Error('not a plain list of commands:\n' + text.slice(0, 700));
+      const lines = text.split('\n').filter((l) => l && !l.startsWith('#'));
+      if (lines.join('\n') !== "rm -f -- '/mnt/user/media/docs/notes.txt'\nrm -rf -- '/mnt/user/media/photos'") throw new Error('the commands are:\n' + lines.join('\n'));
+      await page.waitForSelector('[data-testid=script-done]');
+      if (!/2 opdrachten/.test(await page.textContent('[data-testid=script-done]'))) throw new Error('done: ' + await page.textContent('[data-testid=script-done]'));
+      // The same text is on the screen, to select lines from and to copy, and the person is told what pasting does.
+      if ((await page.inputValue('[data-testid=script-lines]')) !== text) throw new Error('the text on the screen is not the file');
+      if (!/SSH/.test(await page.textContent('[data-testid=script-paste-hint]')) || !/meteen uitgevoerd/.test(await page.textContent('[data-testid=script-paste-hint]'))) throw new Error('paste hint: ' + await page.textContent('[data-testid=script-paste-hint]'));
+      if ((await page.locator('[data-testid=script-command]').count()) !== 0) throw new Error('a simple script is not run as a file: there is no command to run it');
+      await shot('08f-simple-script-dialog');
+      await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: BASE });
+      await page.click('[data-testid=script-copy]');
+      await expectText(page, '.toast', /Gekopieerd/, 'the copy button');
+      if ((await page.evaluate(() => navigator.clipboard.readText())) !== text) throw new Error('the clipboard does not hold the script');
+
+      // PowerShell and cmd: the same text in the other languages, with the line ends and the byte-order mark of Windows.
+      await page.check('[data-testid=script-type-powershell]');
+      if ((await page.inputValue('[data-testid=script-root]')) !== '\\\\NAS\\Media') throw new Error('PowerShell does not start from the share: ' + await page.inputValue('[data-testid=script-root]'));
+      got = await download('[data-testid=script-make]');
+      text = got.bytes.toString('utf8');
+      if (!/\.txt$/.test(got.name) || got.bytes.slice(0, 3).toString('hex') !== 'efbbbf') throw new Error('PowerShell file: ' + got.name + ' ' + got.bytes.slice(0, 3).toString('hex'));
+      if (!text.includes("\r\nRemove-Item -LiteralPath '\\\\NAS\\Media\\docs\\notes.txt' -Force\r\n") || !text.includes("\r\nRemove-Item -LiteralPath '\\\\NAS\\Media\\photos' -Recurse -Force\r\n")) throw new Error('PowerShell commands:\n' + text.slice(0, 900));
+      if (/[^\r]\n/.test(text)) throw new Error('a bare line feed in a Windows script');
+      if (/BOM|﻿/.test(await page.inputValue('[data-testid=script-lines]'))) throw new Error('the byte-order mark is shown in the text');
+      await page.check('[data-testid=script-type-cmd]');
+      got = await download('[data-testid=script-make]');
+      text = got.bytes.toString('utf8');
+      if (!text.startsWith('@echo off\r\nchcp 65001 >nul\r\n') || !text.includes('\r\ndel /f /q "\\\\NAS\\Media\\docs\\notes.txt"\r\n') || !text.includes('\r\nrd /s /q "\\\\NAS\\Media\\photos"\r\n')) throw new Error('cmd commands:\n' + text.slice(0, 900));
+      if ((await page.locator('[data-testid=script-cmd-folders]').count()) !== 0) throw new Error('the simple cmd script takes folders: no warning that it does not');
+
+      // The dialog leads to the setting, and nothing was deleted by any of it.
+      await page.click('[data-testid=script-style-change]');
+      await page.waitForSelector('[data-testid=delete-advanced]');
+      if ((await page.locator('dialog[open]').count()) !== 0) throw new Error('the dialog stays open on top of the setting');
+      for (const f of ['docs/notes.txt', 'photos/img.CR2']) if (!fs.existsSync(path.join(SHARE_DIR, 'media', f))) throw new Error(f + ' is gone');
+      await page.check('[data-testid=delete-advanced]');
+      await page.waitForResponse((r) => r.url().endsWith('/api/v1/auth/prefs') && r.request().method() === 'PUT');
+      // Back to the advanced script: the dialog says so, and makes the script it always made. Going back stays inside the application, so the selection is still there.
+      await page.goBack();
+      await page.waitForSelector('[data-testid=selection-bar]');
+      await page.click('[data-testid=sel-make]');
+      await page.waitForSelector('dialog[open] [data-testid=script-style]');
+      if (!/Geavanceerd script/.test(await page.textContent('[data-testid=script-style]'))) throw new Error('the dialog does not say which script: ' + await page.textContent('[data-testid=script-style]'));
+      await page.check('[data-testid=script-type-sh]');
+      got = await download('[data-testid=script-make]');
+      if (!/\.sh$/.test(got.name) || !got.bytes.toString('utf8').startsWith('#!/bin/sh\n')) throw new Error('not the advanced script: ' + got.name);
+      await page.click('dialog[open] button:has-text("Sluiten")');
+      await page.click('[data-testid=sel-clear]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=selection-bar]'));
+    });
+
     await step('units and language switch immediately and persist', async () => {
       await page.goto(BASE + '/browse/1');
       await page.waitForSelector('[data-testid=folder-row]');
@@ -899,7 +991,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('.settings-nav');
       if (new URL(page.url()).pathname !== '/admin/shares') throw new Error('Settings opened ' + page.url());
       const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
-      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
+      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/delete', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
       if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
       for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
       const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));
@@ -1130,7 +1222,7 @@ const expectText = async (page, sel, re, msg) => {
           throw new Error(`${name} is ${wide}px wider than a phone screen: ${who.join(' ')}`);
         }
       };
-      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/account', 'appearance'], ['/about', 'about'], ['/', 'dashboard']]) {
+      for (const [where, name] of [['/admin/audit', 'audit'], ['/admin/backup', 'backup'], ['/admin/delete', 'delete'], ['/account', 'appearance'], ['/about', 'about'], ['/', 'dashboard']]) {
         await page.goto(BASE + where);
         await page.waitForSelector('main');
         await page.waitForTimeout(350);

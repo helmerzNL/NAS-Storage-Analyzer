@@ -103,7 +103,8 @@ This ADR covers the generator, the endpoint and the interface.
 2. Build the script in the browser. Rejected: the quoting rules would live in TypeScript, where they cannot be run against real
    shells next to the Go tests, and the server could not audit what it handed out.
 3. Quote every path in the code (`rm -- 'path'`). Rejected: one missed rule, in one of three languages, makes a name into code.
-   The data-block design has no per-path escaping to get wrong.
+   The data-block design has no per-path escaping to get wrong. *(Revisited by [ADR 0011](0011-simple-delete-scripts.md) for a second, simple
+   style that is meant to be pasted: there it is done on purpose, for at most 200 files and folders, with every name held to the rules above.)*
 4. A dry-run switch, a force switch, a run-time base path and a trash mode. Left out: each adds a way to do something other
    than what was ticked; none was asked for.
 
