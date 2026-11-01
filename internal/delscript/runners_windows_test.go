@@ -124,3 +124,12 @@ func TestAnOpenFileIsReportedAsFailed(t *testing.T) {
 		})
 	}
 }
+
+// makeDirLink makes link a junction to the folder target. A junction needs no privilege, which a symbolic link on Windows does,
+// and PowerShell sees it as a reparse point like any link.
+func makeDirLink(t *testing.T, target, link string) {
+	t.Helper()
+	if out, err := exec.Command("cmd.exe", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Fatalf("cannot make a junction: %v: %s", err, out)
+	}
+}

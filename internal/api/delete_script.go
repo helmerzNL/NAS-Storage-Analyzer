@@ -16,9 +16,10 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/delscript"
 )
 
-// scriptRequest is the body of POST /shares/{share}/delete-script.
+// scriptRequest is the body of POST /shares/{share}/delete-script. At most MaxFiles ids and dir_ids together.
 type scriptRequest struct {
 	IDs        []int64 `json:"ids"`
+	DirIDs     []int64 `json:"dir_ids"`     // folders, each deleted with everything in it (not for cmd)
 	Script     string  `json:"script"`      // cmd | powershell | sh
 	ClientRoot string  `json:"client_root"` // empty: the share's own base path for this kind of script
 	Lang       string  `json:"lang"`        // en (default) | nl
@@ -48,11 +49,11 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 	default:
 		return s.fieldProblem(w, r, "lang", "must be en or nl")
 	}
-	switch n := len(req.IDs); {
+	switch n := len(req.IDs) + len(req.DirIDs); {
 	case n == 0:
-		return s.fieldProblem(w, r, "ids", "select at least one file")
+		return s.fieldProblem(w, r, "ids", "select at least one file or folder")
 	case n > delscript.MaxFiles:
-		return s.fieldProblem(w, r, "ids", fmt.Sprintf("at most %d files fit in one script", delscript.MaxFiles))
+		return s.fieldProblem(w, r, "ids", fmt.Sprintf("at most %d files and folders fit in one script", delscript.MaxFiles))
 	}
 
 	info, err := s.q.ShareByID(r.Context(), id)
@@ -89,10 +90,38 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 		files = append(files, delscript.File{Path: f.Path, Size: f.Size, Mtime: scriptMtime(f.Mtime), Nlink: f.Nlink})
 	}
 
+	// Folders are deleted with everything in them, so what the index says is in them goes into the script. The share's own folder is
+	// refused here as well as in the generator: nothing asks for it by accident, and nothing asks for it on purpose either.
+	var dirs []delscript.Dir
+	if len(req.DirIDs) > 0 {
+		dsel, err := s.q.DirsForScript(r.Context(), id, req.DirIDs)
+		if err != nil {
+			return err
+		}
+		if dsel.ScanID != sel.ScanID {
+			// A scan was published between the two lookups: the files and the folders would be from different indexes.
+			s.problemCode(w, r, http.StatusConflict, "a scan finished while the script was made", "Ask for the script again.", "scan_changed")
+			return nil
+		}
+		for _, missing := range dsel.Missing {
+			skipped = append(skipped, delscript.Skip{Path: "folder id " + strconv.FormatInt(missing, 10), Reason: delscript.ReasonGone})
+		}
+		for _, d := range dsel.Dirs {
+			switch {
+			case d.Root:
+				skipped = append(skipped, delscript.Skip{Path: "/", Reason: delscript.ReasonRoot})
+			case d.Twin:
+				skipped = append(skipped, delscript.Skip{Path: d.Path, Reason: delscript.ReasonAmbiguous})
+			default:
+				dirs = append(dirs, delscript.Dir{Path: d.Path, Files: d.Files, Dirs: d.Dirs, Bytes: d.Bytes})
+			}
+		}
+	}
+
 	now := s.now()
 	res, err := delscript.Generate(files, delscript.Params{
 		Share: info.Name, Root: root, Target: target, Lang: lang,
-		ScanID: sel.ScanID, ScanTime: sel.ScanTime, Generated: now, Skipped: skipped,
+		ScanID: sel.ScanID, ScanTime: sel.ScanTime, Generated: now, Skipped: skipped, Dirs: dirs,
 	})
 	var rootErr *delscript.RootError
 	switch {
@@ -108,6 +137,7 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 	// What was handed out, never which files: the log is read by people who may not see the share.
 	s.audit(r, "script.generate", info.Name, map[string]any{
 		"script": string(target), "files": res.Files, "skipped": len(res.Skipped), "bytes": res.Bytes,
+		"folders": res.Folders, "folder_files": res.FolderFiles, "items": res.Items,
 		"scan_id": sel.ScanID, "root": res.Root, "sha256": hex.EncodeToString(sum[:]),
 	})
 
@@ -116,6 +146,8 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 	h.Set("Content-Disposition", attachment("delete-"+info.Name+"-"+now.UTC().Format("20060102-1504")+target.Extension()))
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Files", strconv.Itoa(res.Files))
+	h.Set("X-Folders", strconv.Itoa(res.Folders))
+	h.Set("X-Items", strconv.Itoa(res.Items))
 	h.Set("X-Skipped", strconv.Itoa(len(res.Skipped)))
 	h.Set("X-Bytes", strconv.FormatInt(res.Bytes, 10))
 	_, err = w.Write(res.Script)

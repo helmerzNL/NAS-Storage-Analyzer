@@ -24,6 +24,9 @@ const (
 	ReasonReserved    Reason = "reserved-name"  // CON, NUL, COM1, ...
 	ReasonTooLong     Reason = "too-long"       // beyond what cmd and Windows PowerShell 5.1 can open
 	ReasonEmptyCmd    Reason = "empty-file-cmd" // cmd cannot tell an empty file from a folder
+	// Only for a folder that is to be deleted with everything in it.
+	ReasonRoot      Reason = "root"       // the share itself: its own folder is never deleted
+	ReasonFolderCmd Reason = "folder-cmd" // cmd cannot check what is in a folder, so it takes none
 )
 
 // maxWindowsPath is MAX_PATH less the terminating NUL. Windows PowerShell 5.1 and cmd cannot open longer paths
@@ -100,6 +103,19 @@ func ClassifyPath(t Target, rel string) Reason {
 		}
 	}
 	return ""
+}
+
+// ClassifyDir judges the path of a folder that is to be deleted with everything in it: ClassifyPath, and two things only a
+// folder has. The share itself (the path "/") is never deleted, whatever is asked: it is the one folder that would take
+// everything with it. And cmd takes no folders at all, because it cannot check what is in one (see renderCmd).
+func ClassifyDir(t Target, rel string) Reason {
+	if rel == "" || rel == "/" {
+		return ReasonRoot
+	}
+	if t == TargetCmd {
+		return ReasonFolderCmd
+	}
+	return ClassifyPath(t, rel)
 }
 
 // utf16Len is how many UTF-16 units Windows counts for s.

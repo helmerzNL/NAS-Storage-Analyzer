@@ -13,7 +13,7 @@ for /f "usebackq skip=64 tokens=1* delims=|" %%T in ("%~f0") do if "%%T"=="I" ec
 set /a COUNT=0
 for /f "usebackq skip=64 tokens=1 delims=|" %%T in ("%~f0") do if "%%T"=="F" set /a COUNT+=1
 if not "%COUNT%"=="%N%" (
-  echo(Dit script is onvolledig of aangepast: verwacht %N% bestanden, gevonden %COUNT%. Er is niets gewijzigd.
+  echo(Dit script is onvolledig of aangepast: verwacht %N% onderdelen, gevonden %COUNT%. Er is niets gewijzigd.
   exit /b 2
 )
 pushd "%ROOT%" >nul 2>&1

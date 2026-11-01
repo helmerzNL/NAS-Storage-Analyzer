@@ -64,7 +64,7 @@ than the file.
 - **The audit log gets `script.generate`**: the kind of script, the counts, the scan id, the base path and a SHA-256 of the
   script. Never a file name; the log is read by people who may not see the share.
 
-- **The interface ticks files, and only files, and only for an administrator.** A box in the file lists (Folders → Files, and the
+- **The interface ticks files, and only files, and only for an administrator.** *(Amended by [ADR 0010](0010-delete-scripts-take-folders.md): folders can be ticked too, and are deleted with everything in them.)* A box in the file lists (Folders → Files, and the
   largest and cold files in Lists) adds a file to a selection of at most 2,000 that lives in the browser for the session: it survives
   "load more" and a move between those pages, and holds one share at a time (ticking in another share drops the first and says so).
   Folders cannot be ticked: a folder would stand for files that are not in front of the person. The bar that follows the screen offers the

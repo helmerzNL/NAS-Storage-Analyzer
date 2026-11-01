@@ -358,6 +358,77 @@ const expectText = async (page, sel, re, msg) => {
       await page.click('[data-testid=sel-clear]');
     });
 
+    await step('delete scripts for folders: a folder goes with everything in it, not while a filter is on, and the number to type counts what is inside', async () => {
+      const folderRow = (name) => page.locator('[data-testid=folder-row]', { hasText: name });
+      const download = async (clickSel) => {
+        const [dl] = await Promise.all([page.waitForEvent('download'), page.click(clickSel)]);
+        return { name: dl.suggestedFilename(), bytes: fs.readFileSync(await dl.path()) };
+      };
+      await page.goto(BASE + '/browse/1');
+      await page.waitForSelector('[data-testid=folder-row]');
+      const rows = await page.locator('[data-testid=folder-row]').count();
+      if (rows < 3 || (await page.locator('[data-testid=select-dir]').count()) !== rows) throw new Error('an administrator must see a tick box on every folder: ' + rows);
+      if ((await page.locator('[data-testid=selection-bar]').count()) !== 0) throw new Error('the bar shows before anything is ticked');
+
+      // While a filter is on, what is shown of a folder is not what is deleted: there are no boxes, and the page says why.
+      await page.goto(BASE + '/browse/1?cat=video');
+      await page.waitForSelector('[data-testid=folder-row]');
+      await page.waitForSelector('[data-testid=sel-dirs-filtered]');
+      if ((await page.locator('[data-testid=select-dir]').count()) !== 0 || (await page.locator('[data-testid=select-all-dirs]').count()) !== 0) throw new Error('folders must not be selectable while a filter is on');
+
+      // What the scan found in the folder, from the API: the script must be told exactly this.
+      await page.goto(BASE + '/browse/1');
+      await page.waitForSelector('[data-testid=folder-row]');
+      const href = await folderRow('photos').locator('a').first().getAttribute('href');
+      const id = Number(/\/browse\/1\/(\d+)/.exec(href)[1]);
+      const facts = await (await ctx.request.get(BASE + '/api/v1/shares/1/dirs/' + id)).json();
+      const files = facts.total.files, subs = facts.dirs, items = 1 + files + subs;
+      if (!files) throw new Error('the fixture folder holds no files: ' + JSON.stringify(facts.total));
+
+      await folderRow('photos').locator('[data-testid=select-dir]').check();
+      await expectText(page, '[data-testid=sel-count]', /^Gekozen: 0 bestanden, 1 mappen$/, 'one folder ticked');
+      const hint = (await page.textContent('[data-testid=sel-dirs-hint]')).replace(/\s+/g, ' ');
+      if (!new RegExp(`${files} bestanden en ${subs} mappen`).test(hint) || !/met alles erin/.test(hint)) throw new Error('the bar does not say what goes with the folder: ' + hint);
+      await shot('08c-folder-selected');
+
+      await page.click('[data-testid=sel-make]');
+      await page.waitForSelector('dialog[open] [data-testid=script-folders]');
+      const warn = (await page.textContent('[data-testid=script-folders]')).replace(/\s+/g, ' ');
+      if (!/1 mappen worden verwijderd met alles erin/.test(warn) || !new RegExp(`${files} bestanden en ${subs} mappen`).test(warn)) throw new Error('the dialog does not warn about the folder: ' + warn);
+      if (!new RegExp(`0 bestanden en 1 mappen`).test(await page.textContent('[data-testid=script-summary]'))) throw new Error('summary: ' + await page.textContent('[data-testid=script-summary]'));
+
+      // cmd cannot check a folder: the dialog says so before, and the server refuses a script of only folders, with a reason.
+      await page.check('[data-testid=script-type-cmd]');
+      await page.waitForSelector('[data-testid=script-cmd-folders]');
+      await page.click('[data-testid=script-make]');
+      await page.waitForSelector('[data-testid=script-error]');
+      if ((await page.locator('[data-testid=script-done]').count()) !== 0) throw new Error('a cmd script of only folders must not be made');
+      if (!/folder-cmd/.test(await page.textContent('[data-testid=script-error]'))) throw new Error('the reason is not named: ' + await page.textContent('[data-testid=script-error]'));
+
+      // sh: one folder record, and the number to type is the files, the folders and the folder itself.
+      await page.check('[data-testid=script-type-sh]');
+      if ((await page.locator('[data-testid=script-cmd-folders]').count()) !== 0) throw new Error('the cmd warning stays after choosing sh');
+      const got = await download('[data-testid=script-make]');
+      const sh = got.bytes.toString('utf8');
+      if (!sh.includes('\nN|1\n') || !sh.includes(`\nT|${items}\n`) || !sh.includes(`\nD|${files}|${subs}|/photos\n`) || /\nF\|/.test(sh)) throw new Error('the script does not hold exactly the folder:\n' + sh.split('\n').filter((l) => /^[NTRD]\|/.test(l)).join('\n'));
+      await page.waitForSelector('[data-testid=script-done]');
+      // What was chosen, not what is inside it: no loose files and one folder. What is inside is in the warning and in the number to type.
+      if (!/0 bestanden en 1 mappen in het script/.test(await page.textContent('[data-testid=script-done]'))) throw new Error('done: ' + await page.textContent('[data-testid=script-done]'));
+      if (!(await page.textContent('[data-testid=script-run-hint]')).includes(`DELETE ${items}`)) throw new Error('the person is not told to type ' + items + ': ' + await page.textContent('[data-testid=script-run-hint]'));
+      await shot('08d-folder-script-dialog');
+      await page.click('dialog[open] button:has-text("Sluiten")');
+      if (!fs.existsSync(path.join(SHARE_DIR, 'media', 'photos', 'img.CR2'))) throw new Error('asking for a script deleted something');
+
+      // The selection follows the person to the list of the largest folders, where the folder is shown as ticked.
+      await page.click('a[href="/lists"]');
+      await page.click('[data-testid=tab-top-dirs]');
+      await page.waitForSelector('[data-testid=list-row]');
+      if ((await page.locator('[data-testid=selection-bar]').count()) !== 1) throw new Error('the selection did not follow to the lists of folders');
+      if (!(await page.locator('[data-testid=list-row]', { hasText: '/photos' }).locator('[data-testid=select-dir]').isChecked())) throw new Error('the folder is not shown as ticked in the list of folders');
+      await page.click('[data-testid=sel-clear]');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=selection-bar]'));
+    });
+
     await step('units and language switch immediately and persist', async () => {
       await page.goto(BASE + '/browse/1');
       await page.waitForSelector('[data-testid=folder-row]');

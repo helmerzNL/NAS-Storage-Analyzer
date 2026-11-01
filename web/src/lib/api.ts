@@ -67,7 +67,7 @@ function failure(res: Response, data: any, path: string): ApiError {
 }
 
 /** A file the server made on request: its bytes, the name it suggests and the numbers it reports in headers. */
-export interface Download { blob: Blob; filename: string; files: number; skipped: number; bytes: number }
+export interface Download { blob: Blob; filename: string; files: number; folders: number; items: number; skipped: number; bytes: number }
 
 /**
  * The file name a Content-Disposition header suggests: filename* (RFC 6266, any letters) before filename. Anything that could change the folder
@@ -96,7 +96,7 @@ export async function postForFile(path: string, body: unknown): Promise<Download
     throw failure(res, data, path);
   }
   const num = (h: string) => Number(res.headers.get(h)) || 0;
-  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get('Content-Disposition')), files: num('X-Files'), skipped: num('X-Skipped'), bytes: num('X-Bytes') };
+  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get('Content-Disposition')), files: num('X-Files'), folders: num('X-Folders'), items: num('X-Items'), skipped: num('X-Skipped'), bytes: num('X-Bytes') };
 }
 
 export const get = <T = unknown>(path: string, signal?: AbortSignal, headers?: Record<string, string>) => api<T>('GET', path, undefined, signal, headers);

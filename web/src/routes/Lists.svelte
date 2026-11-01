@@ -11,7 +11,8 @@
   import AtimeNotice from '../components/AtimeNotice.svelte';
   import SelectionBar from '../components/SelectionBar.svelte';
   import { selection } from '../lib/selection.svelte';
-  import { tickRow, tickAll, tickState } from '../lib/tick';
+  import { tickRow, tickAll, tickState, tickDir, tickAllDirs, tickDirState } from '../lib/tick';
+  import { activeFilterCount } from '../lib/filters';
 
   type Tab = 'top-files' | 'top-dirs' | 'cold-files' | 'cold-dirs';
   const tab = $derived((route.query.get('tab') ?? 'top-files') as Tab);
@@ -54,6 +55,10 @@
   const lastUsed = (r: { newest_atime: string | null; newest_mtime: string | null }) => share?.last_used_basis === 'mtime' ? r.newest_mtime : r.newest_atime;
   const folderOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
   const ticks = $derived(tickState(Number(shareId), files));
+  // A folder is deleted with everything in it, so it is only offered while what is shown of it is all of it: a filter shows a part.
+  const filtered = $derived(activeFilterCount(filters) > 0);
+  const showDirBoxes = $derived(isAdmin() && !isFiles && !filtered);
+  const dirTicks = $derived(tickDirState(Number(shareId), dirs));
 </script>
 
 <div class="page-head">
@@ -116,19 +121,32 @@
     </table>
   {:else}
     <table data-testid="list-table">
-      <thead><tr><th>#</th><th>{t('col.folder')}</th><th class="right">{t('col.size')}</th><th class="right">{t('col.files')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.used')}</th></tr></thead>
+      <thead><tr>
+        {#if showDirBoxes}<th class="sel"><label class="selcell" title={t('sel.dir.all')}>
+          <input type="checkbox" checked={dirTicks === 'all'} indeterminate={dirTicks === 'some'} disabled={!dirs.length} aria-label={t('sel.dir.all')}
+            onchange={() => tickAllDirs(Number(shareId), dirs)} data-testid="select-all-dirs" /></label></th>{/if}
+        <th>#</th><th>{t('col.folder')}</th><th class="right">{t('col.size')}</th><th class="right">{t('col.files')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.used')}</th></tr></thead>
       <tbody>
         {#each dirs as d, i (d.id)}
-          <tr data-testid="list-row"><td class="muted">{i + 1}</td>
+          <tr data-testid="list-row">
+            {#if showDirBoxes}<td class="sel"><label class="selcell">
+              <input type="checkbox" checked={selection.share === Number(shareId) && selection.hasDir(d.id)} aria-label={t('sel.dir.row', { name: d.name || d.path })}
+                onchange={() => tickDir(Number(shareId), d)} data-testid="select-dir" /></label></td>{/if}
+            <td class="muted">{i + 1}</td>
             <td><a class="truncate" style="display:inline-block;max-width:60ch" href="/browse/{shareId}/{d.id}" use:link title={d.path}>📁 {d.path || '/'}</a></td>
             <td class="right actions">{formatBytes(by === 'direct' ? d.size_direct : d.size, prefs.units, i18n.lang)}</td>
             <td class="right actions">{formatNumber(by === 'direct' ? d.files_direct : d.files, i18n.lang)}</td>
             <td class="right hide-sm nowrap">{formatDate(d.newest_mtime, i18n.lang)}</td>
             <td class="right hide-sm nowrap" title={formatDate(lastUsed(d), i18n.lang)}>{ago(lastUsed(d), i18n.lang)}</td></tr>
-        {:else}<tr><td colspan="6" class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
+        {:else}<tr><td colspan={showDirBoxes ? 7 : 6} class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
       </tbody>
     </table>
   {/if}
 </div>
 {#if cursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={() => load(true)}>{t('common.more')}</button></div>{/if}
-{#if isFiles && isAdmin()}<p class="muted small" style="margin-bottom:0">{t('sel.hint')}</p><SelectionBar {share} />{/if}
+{#if isAdmin()}
+  {#if isFiles}<p class="muted small" style="margin-bottom:0">{t('sel.hint')}</p>
+  {:else if filtered}<p class="muted small" style="margin-bottom:0" data-testid="sel-dirs-filtered">{t('sel.dirs.filtered')}</p>
+  {:else}<p class="muted small" style="margin-bottom:0">{t('sel.hint.dirs')}</p>{/if}
+  <SelectionBar {share} />
+{/if}
