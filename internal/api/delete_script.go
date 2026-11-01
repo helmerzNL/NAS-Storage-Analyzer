@@ -23,6 +23,7 @@ type scriptRequest struct {
 	Script     string  `json:"script"`      // cmd | powershell | sh
 	ClientRoot string  `json:"client_root"` // empty: the share's own base path for this kind of script
 	Lang       string  `json:"lang"`        // en (default) | nl
+	Style      string  `json:"style"`       // advanced (default) | simple: a .txt with one command per file or folder
 }
 
 // deleteScript writes a script that deletes the files the administrator selected, for them to run. It writes text and
@@ -40,6 +41,10 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 	target, ok := delscript.ParseTarget(req.Script)
 	if !ok {
 		return s.fieldProblem(w, r, "script", "must be cmd, powershell or sh")
+	}
+	style, ok := delscript.ParseStyle(req.Style)
+	if !ok {
+		return s.fieldProblem(w, r, "style", "must be advanced or simple")
 	}
 	lang := delscript.Lang(req.Lang)
 	switch lang {
@@ -121,12 +126,14 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 	now := s.now()
 	res, err := delscript.Generate(files, delscript.Params{
 		Share: info.Name, Root: root, Target: target, Lang: lang,
-		ScanID: sel.ScanID, ScanTime: sel.ScanTime, Generated: now, Skipped: skipped, Dirs: dirs,
+		ScanID: sel.ScanID, ScanTime: sel.ScanTime, Generated: now, Skipped: skipped, Dirs: dirs, Style: style,
 	})
 	var rootErr *delscript.RootError
 	switch {
 	case errors.As(err, &rootErr):
 		return s.fieldProblem(w, r, "client_root", rootErr.Msg)
+	case errors.Is(err, delscript.ErrTooManySimple):
+		return s.fieldProblem(w, r, "ids", fmt.Sprintf("a simple script holds at most %d files and folders: it is for a small number, use the advanced script for more", delscript.MaxSimple))
 	case errors.Is(err, delscript.ErrNoFiles):
 		return s.fieldProblem(w, r, "ids", err.Error()+" ("+skipSummary(res.Skipped)+")")
 	case err != nil:
@@ -136,14 +143,14 @@ func (s *Server) deleteScript(w http.ResponseWriter, r *http.Request) error {
 	sum := sha256.Sum256(res.Script)
 	// What was handed out, never which files: the log is read by people who may not see the share.
 	s.audit(r, "script.generate", info.Name, map[string]any{
-		"script": string(target), "files": res.Files, "skipped": len(res.Skipped), "bytes": res.Bytes,
+		"script": string(target), "style": string(style), "files": res.Files, "skipped": len(res.Skipped), "bytes": res.Bytes,
 		"folders": res.Folders, "folder_files": res.FolderFiles, "items": res.Items,
 		"scan_id": sel.ScanID, "root": res.Root, "sha256": hex.EncodeToString(sum[:]),
 	})
 
 	h := w.Header()
 	h.Set("Content-Type", "text/plain; charset=utf-8")
-	h.Set("Content-Disposition", attachment("delete-"+info.Name+"-"+now.UTC().Format("20060102-1504")+target.Extension()))
+	h.Set("Content-Disposition", attachment("delete-"+info.Name+"-"+now.UTC().Format("20060102-1504")+target.FileExtension(style)))
 	h.Set("Cache-Control", "no-store")
 	h.Set("X-Files", strconv.Itoa(res.Files))
 	h.Set("X-Folders", strconv.Itoa(res.Folders))
