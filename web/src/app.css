@@ -88,6 +88,7 @@ fieldset { border: 0; margin: 0; padding: 0; min-width: 0; } legend { padding: 0
 a.badge:hover { text-decoration: none; border-color: var(--accent); }
 
 /* Notices: the starter has info, ok and error; the app also needs warn. Margin below because they sit above a form or a table. */
+.notice-link { display: block; color: inherit; } .notice-link:hover { text-decoration: none; } .notice-link:hover b { text-decoration: underline; }
 .notice { margin-bottom: 14px; } .notice.small { font-size: .875rem; padding: 8px 12px; }
 .notice.warn { color: var(--text); border-color: color-mix(in srgb, var(--tone-busy) 55%, var(--rand)); background: color-mix(in srgb, var(--tone-busy) 12%, transparent); }
 .notice.error { color: var(--text); }   /* the border and tint carry the meaning; body text stays at full contrast */
@@ -144,6 +145,7 @@ dialog.sheet .dlg-foot { padding: 12px 18px; border-top: 1px solid var(--lijn); 
 /* Folder picker */
 .folders { list-style: none; margin: 0; padding: 0; border: 1px solid var(--lijn-strong); border-radius: var(--radius-sm); max-height: 50vh; overflow: auto; } .folders[aria-busy="true"] { opacity: .6; }
 .folders li { display: flex; align-items: center; gap: 8px; padding: 2px 6px; } .folders li + li { border-top: 1px solid var(--lijn); } .folders li.pad { padding: 12px; }
+tbody tr.audit-focus { background: color-mix(in srgb, var(--accent) 12%, transparent); box-shadow: inset 4px 0 0 var(--accent); }
 .audit-detail { max-width: 70ch; overflow-wrap: anywhere; }
 /* The folders a scan could not read: folded, one per line, the path first and the reason after it. */
 .audit-unreadable { margin-top: 6px; max-width: 70ch; }

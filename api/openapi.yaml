@@ -959,6 +959,7 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {name: before, in: query, description: "Only entries with a smaller id (paging).", schema: {type: integer, format: int64}}
         - {name: action, in: query, description: "Prefix of the action, for example `login.` or `share.`.", schema: {type: string}}
+        - {name: scan_id, in: query, description: "Instead of a page: the entry that says how this scan ended (`scan.finished`, `scan.errors`, `scan.empty` or `scan.failed`), as a list of at most one entry, and `next_before` null. The other parameters are then ignored. An empty list means no entry exists for that scan (a cancelled scan has none).", schema: {type: integer, format: int64, minimum: 1}}
       responses:
         "200":
           description: Entries, newest first.

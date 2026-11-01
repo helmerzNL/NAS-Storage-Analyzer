@@ -842,6 +842,81 @@ const expectText = async (page, sel, re, msg) => {
       }
     });
 
+    await step('a scan that went wrong: its error on the dashboard leads straight to its entry in the audit log', async () => {
+      const shareOf = async (name) => (await (await ctx.request.get(BASE + '/api/v1/shares')).json()).items.find((s) => s.name === name);
+      const until = async (what, ok) => { for (let i = 0; i < 80; i++) { const s = await shareOf('Leeg'); if (ok(s)) return s; await page.waitForTimeout(250); } throw new Error('timed out waiting for ' + what); };
+      // Leeg gets 120 files and is scanned, and is then emptied: a scan that finds nothing where there were files is refused, which is a failed scan with an error.
+      for (let i = 0; i < 120; i++) w(`leeg/f${String(i).padStart(3, '0')}.txt`, 10);
+      await page.goto(BASE + '/');
+      await page.click('[data-testid=share-Leeg] [data-testid=scan-now]');
+      await until('the first scan', (s) => s.latest_scan?.status === 'succeeded' && s.latest_scan.files === 120);
+      fs.rmSync(path.join(SHARE_DIR, 'leeg'), { recursive: true });
+      fs.mkdirSync(path.join(SHARE_DIR, 'leeg'));
+      await page.reload();
+      await page.click('[data-testid=share-Leeg] button:has-text("Volledige scan")');
+      const failed = (await until('the refused scan', (s) => s.latest_scan?.status === 'failed')).latest_scan;
+      await page.reload();
+      const link = page.locator('[data-testid=share-Leeg] [data-testid=scan-error-link]');
+      await link.waitFor();
+      const said = (await link.textContent()).replace(/\s+/g, ' ');
+      if (!/still mounted/.test(said) || !/Bekijk in het auditlog/.test(said)) throw new Error('the error does not say where to look: ' + said);
+      await shot('16-scan-error-link');
+
+      // One click, and the entry of that scan is the first row of the log, marked, with the cause in it.
+      await link.click();
+      await page.waitForSelector('[data-testid=audit-focus]');
+      if (new URL(page.url()).pathname !== '/admin/audit' || new URL(page.url()).search !== `?scan=${failed.id}`) throw new Error('the address: ' + page.url());
+      const row = (await page.textContent('[data-testid=audit-focus]')).replace(/\s+/g, ' ');
+      if (!/scan\.failed/.test(row) || !/Leeg/.test(row) || !/still mounted/.test(row)) throw new Error('the entry is not the failure of that scan: ' + row);
+      const rows = page.locator('[data-testid=audit-table] tbody tr');
+      if ((await rows.first().getAttribute('data-testid')) !== 'audit-focus' || (await rows.first().getAttribute('aria-current')) !== 'true') throw new Error('the entry is not the first row, marked');
+      if ((await rows.count()) < 5) throw new Error('the log does not go on below the entry');
+      if (!/scan #\d+/.test(await page.textContent('[data-testid=audit-focus-note]'))) throw new Error('nothing says why the log starts here: ' + await page.textContent('[data-testid=audit-focus-note]'));
+      await shot('16-audit-focus');
+
+      // The whole log is one link away, and Back returns to the entry.
+      await page.click('[data-testid=audit-focus-note] a');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=audit-focus]'));
+      if (new URL(page.url()).search !== '') throw new Error('the whole log still has the scan in its address: ' + page.url());
+      await page.goBack();
+      await page.waitForSelector('[data-testid=audit-focus]');
+      // Choosing a kind of event leaves the entry: the filter is what is asked for now.
+      await page.selectOption('main select', 'login.');
+      await page.waitForFunction(() => !document.querySelector('[data-testid=audit-focus]'));
+      if (new URL(page.url()).search !== '') throw new Error('the filter leaves the scan in the address: ' + page.url());
+      const kinds = await page.locator('[data-testid=audit-table] tbody tr td:nth-child(3) .badge').allTextContents();
+      if (!kinds.length || kinds.some((k) => !k.startsWith('login.'))) throw new Error('the filter is not applied: ' + JSON.stringify(kinds));
+
+      // The badge of a scan that could read everything but a few folders leads to the entry of that scan too. Reading errors need a folder the app
+      // may not read, which root always may, so the dashboard is told that the last scan of Media had three; its entry is the real one.
+      const media = (await shareOf('Media')).last_scan;
+      const listing = /\/api\/v1\/shares$/;
+      await page.route(listing, async (route) => {
+        const res = await route.fetch();
+        const body = await res.json();
+        for (const sh of body.items) if (sh.name === 'Media' && sh.last_scan) sh.last_scan.error_count = 3;
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
+      });
+      try {
+        await page.goto(BASE + '/');
+        const badge = page.locator('[data-testid=share-Media] [data-testid=scan-errors-link]');
+        await badge.waitFor();
+        if (!/3 fouten/.test(await badge.textContent())) throw new Error('the badge: ' + await badge.textContent());
+        await badge.click();
+        await page.waitForSelector('[data-testid=audit-focus]');
+        const entry = (await page.textContent('[data-testid=audit-focus]')).replace(/\s+/g, ' ');
+        if (new URL(page.url()).search !== `?scan=${media.id}` || !/scan\.finished/.test(entry) || !/Media/.test(entry)) throw new Error('not the entry of that scan: ' + page.url() + ' ' + entry);
+      } finally {
+        await page.unroute(listing);
+      }
+
+      // A scan nobody wrote an entry for says so, and shows the log as it is.
+      await page.goto(BASE + '/admin/audit?scan=987654');
+      await page.waitForSelector('[data-testid=audit-focus-missing]');
+      if (!/987654/.test(await page.textContent('[data-testid=audit-focus-missing]')) || (await page.locator('[data-testid=audit-table] tbody tr').count()) < 5) throw new Error('an unknown scan does not show the log');
+      if ((await page.locator('[data-testid=audit-focus]').count()) !== 0) throw new Error('something is marked for a scan without an entry');
+    });
+
     await step('update check: the administrator is told, per version, and nothing about the installation is sent', async () => {
       const gh = (p) => fetch(process.env.FAKE_GITHUB + p).then((r) => r.status === 204 ? null : r.json());
       await page.goto(BASE + '/');
@@ -877,7 +952,13 @@ const expectText = async (page, sel, re, msg) => {
       if ((await page.textContent('[data-testid=about-version]')).trim() !== '0.1.0') throw new Error('the version on About');
       if (!(await page.$('[data-testid=user-menu].in-menu'))) throw new Error('the user menu does not show that About is open');
       await shot('31-about');
-      // Check now inside the floor of 30 seconds does not call GitHub again (nor does a page view): the answer is remembered.
+      // Check now inside the floor of 30 seconds does not call GitHub again (nor does a page view): the answer is remembered. The floor runs from the
+      // last ask, which may have been long ago or just now, depending on how long the steps before this one took. So make sure that enough of it is
+      // left for what follows: if the last ask is old, wait until a click asks again, which starts the floor afresh.
+      const age = Date.now() - (await gh('/__last')).at;
+      if (age > 20_000) await page.waitForTimeout(Math.max(0, 31_000 - age));
+      await page.click('[data-testid=update-check-now]');
+      await page.waitForTimeout(600);
       const before = (await gh('/__hits')).hits;
       await page.click('[data-testid=update-check-now]');
       await page.waitForTimeout(400);

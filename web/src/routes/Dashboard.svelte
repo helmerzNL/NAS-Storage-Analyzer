@@ -87,7 +87,11 @@
       <div class="row">
         <h2 style="margin:0">{s.name}</h2><span class="badge">{t('kind.' + s.kind)}</span>
         <span class="badge {badge.cls}" data-testid="scan-badge">{badge.text}</span>
-        {#if l?.error_count}<span class="badge warn" title={t('scan.errors.hint')}>{l.error_count} {t('scan.errors')}</span>{/if}
+        <!-- The errors of the last scan: for an administrator a way to the entry of the audit log that says which folders and why. -->
+        {#if l?.error_count}
+          {#if isAdmin()}<a class="badge warn" href="/admin/audit?scan={l.id}" use:link title="{t('scan.errors.hint')} {t('scan.see.audit')}" data-testid="scan-errors-link">{l.error_count} {t('scan.errors')}</a>
+          {:else}<span class="badge warn" title={t('scan.errors.hint')}>{l.error_count} {t('scan.errors')}</span>{/if}
+        {/if}
       </div>
       <div class="row">
         {#if l}<a class="btn small primary" href="/browse/{s.id}" use:link>{t('dash.browse')}</a>{/if}
@@ -104,7 +108,11 @@
     {#if job}<ScanStatus share={s} {job} />{/if}
     <AtimeNotice share={s} />
     {#if s.latest_scan && s.latest_scan.status !== 'running' && s.latest_scan.status !== 'succeeded' && s.latest_scan.error}
-      <div class="notice error">{s.latest_scan.error}</div>
+      <div class="notice error" data-testid="scan-error">
+        {#if isAdmin() && s.latest_scan.status === 'failed'}
+          <a class="notice-link" href="/admin/audit?scan={s.latest_scan.id}" use:link data-testid="scan-error-link"><span>{s.latest_scan.error}</span> <b>{t('scan.see.audit')} →</b></a>
+        {:else}{s.latest_scan.error}{/if}
+      </div>
     {/if}
 
     {#if l}

@@ -11,7 +11,7 @@ http.createServer((req, res) => {
   if (u.pathname === '/__hits') { res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ hits })); return; }
   if (u.pathname === '/__last') { res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(last)); return; }
   if (u.pathname === REPO + '/releases/latest') {
-    hits++; last = { url: req.url, headers: req.headers };
+    hits++; last = { url: req.url, headers: req.headers, at: Date.now() };
     res.writeHead(302, { Location: REPO + '/releases/tag/' + tag }).end();
     return;
   }

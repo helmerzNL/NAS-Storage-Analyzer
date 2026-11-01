@@ -616,6 +616,25 @@ func (s *Server) auditList(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// The entry that says how one scan ended, for a link from the scan's error to it. The same shape as a page, with at most one entry.
+	if r.URL.Query().Has("scan_id") {
+		scan, err := parseIntParam(r, "scan_id", 0)
+		if err != nil {
+			return err
+		}
+		if scan < 1 {
+			return s.fieldProblem(w, r, "scan_id", "must be the id of a scan")
+		}
+		e, err := s.auth.AuditForScan(r.Context(), int64(scan))
+		if err != nil {
+			return err
+		}
+		items := []auth.AuditEntry{}
+		if e != nil {
+			items = append(items, *e)
+		}
+		return writeJSON(w, map[string]any{"items": items, "next_before": nil})
+	}
 	before, err := parseIntParam(r, "before", 0)
 	if err != nil {
 		return err

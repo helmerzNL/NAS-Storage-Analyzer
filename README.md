@@ -139,6 +139,11 @@ eventueel SMB-inloggegevens in (versleuteld opgeslagen). Details, SMB-voorbeelde
 Een share die niet (meer) gemount is, laat een lege map achter. Een scan die dan niets vindt terwijl de vorige
 meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan.
 
+**Een fout bij een scan** staat op het dashboard: de rode melding bij een mislukte scan, of de badge *N fouten* bij een scan die niet alles kon lezen.
+Als beheerder klik je erop en kom je direct bij het bijbehorende item in het auditlog (`/admin/audit?scan=<id>`): het item staat bovenaan en gemarkeerd, met de
+oorzaak, de tip en de lijst met mappen die niet gelezen konden worden. Een scan die al mislukt voordat hij begint (de map van de share is niet te openen)
+heeft geen scan en dus geen melding op het dashboard; die staat alleen in het auditlog.
+
 ## Configuratie
 
 Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangrijkste:
