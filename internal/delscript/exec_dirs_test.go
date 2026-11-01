@@ -273,7 +273,8 @@ func TestScriptsDeleteFoldersWithEverythingInThem(t *testing.T) {
 			if res.Folders != 1 || res.Covered != 2 {
 				t.Fatalf("folders %d, covered %d: the inner folder and the file are covered by the outer one", res.Folders, res.Covered)
 			}
-			if n := strings.Count(string(res.Script), "\nD|") + strings.Count(string(res.Script), "\r\nD|"); n != 1 {
+			// Counted by line: a CRLF script holds "\r\nD|" and "\nD|" is a part of it, so counting both would count each record twice.
+			if n := len(record(res.Script, "D")); n != 1 {
 				t.Errorf("the script holds %d folder records, want 1", n)
 			}
 			out, code := run(t, res, confirm(res.Items))
