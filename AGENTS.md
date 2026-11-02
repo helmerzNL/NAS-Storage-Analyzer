@@ -121,7 +121,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   already merged — rebase and open a new one.
 - **Promoting `beta` to `main`** follows App-Guidance's
   [`promotion-runbook.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/promotion-runbook.md).
-  Here: the release notes are `docs/releases/<tag>.md`; the **owner merges the promotion**; the full test command is the one
+  Here: the release notes are `docs/releases/<tag>.md`, written in Dutch and in English in the same file (the shared lists once); the **owner merges the promotion**; the full test command is the one
   in §1.
 - Releases are cut with the release workflow (`.github/workflows/release.yml`), never with a hand-made tag: reviewed notes in
   `docs/releases/<tag>.md` first, then the workflow creates the tag and the GitHub Release together.
