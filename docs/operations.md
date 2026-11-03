@@ -19,7 +19,7 @@ docker compose down                  # remove the containers, keeping the data (
 ```
 
 Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the administrator and set up a second factor. For
-development without Docker, see "Development and testing" in the [README](../README.en.md#development-and-testing) (Dutch: [README](../README.md#ontwikkelen-en-testen)).
+development without Docker, see "Contributing" in the [README](../README.en.md#contributing) (Dutch: [README](../README.md#meewerken)).
 
 ## 2. Health-check endpoints
 
