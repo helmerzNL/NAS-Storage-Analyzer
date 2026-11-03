@@ -69,21 +69,29 @@ class ComposeLayout(unittest.TestCase):
 
     def test_every_variable_the_compose_file_reads_is_in_the_env_example(self):
         used = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", COMPOSE)) - {"POSTGRES_USER", "POSTGRES_DB"}  # the last two are the db container's own, escaped as $${..}
-        used -= {name for name in used if name.startswith("NASA_")} | {"NASSA_RENAME_THE_VARIABLES"}  # the guard against an .env with the old names, below
         for name in sorted(used):
             self.assertRegex(ENV_EXAMPLE, rf"(?m)^#?{name}=", f"{name} is read by docker-compose.yml but not documented in .env.example")
 
-    def test_an_env_that_still_has_the_old_names_is_refused(self):
-        """The variables were called NASA_* before NASSA_* (ADR 0012). Compose passes on only what it lists, so an old .env would read as "nothing set"
-        and NASSA_TAG would fall back to latest. The guard names the variables every old .env has; each has to be a variable that exists now."""
-        guard = re.search(r'(?m)^x-nassa-renamed: (".*")$', COMPOSE)
-        self.assertIsNotNone(guard, "the guard against old variable names is gone from docker-compose.yml")
-        olds = re.findall(r"\$\{(NASA_[A-Z0-9_]+):\+\$\{NASSA_RENAME_THE_VARIABLES:\?", guard.group(1))
-        self.assertEqual(sorted(olds), ["NASA_DB_PASSWORD", "NASA_ENCRYPTION_KEY", "NASA_SHARES_DIR", "NASA_TAG"])
-        for old in olds:
-            self.assertRegex(ENV_EXAMPLE, rf"(?m)^#?NASSA_{old[len('NASA_'):]}=", f"{old} is guarded but has no new name in .env.example")
-        self.assertIn("sed -i 's/^NASA_/NASSA_/' .env", guard.group(1))  # the message says what to do
+    def test_an_env_that_still_has_the_old_names_is_refused_and_told_what_to_do(self):
+        """The variables were called NASA_* before NASSA_* (ADR 0012). Compose passes on only what it lists, so an old .env would read as "nothing set".
+        Every working old .env has NASA_SHARES_DIR and NASSA_SHARES_DIR is required, so it is refused there, and the message says what to do. A
+        nested conditional substitution (an old name set: error) was tried and refused a valid .env on the Compose that CI has: do not bring it back."""
+        self.assertIn("${NASSA_SHARES_DIR:?", COMPOSE)
+        message = re.search(r"\$\{NASSA_SHARES_DIR:\?([^}]*)\}", COMPOSE).group(1)
+        self.assertIn("sed -i 's/^NASA_/NASSA_/' .env", message)
+        self.assertNotRegex(COMPOSE, r"x-nassa-renamed|:\+\$\{", "a nested substitution is not evaluated lazily by every Compose version")
+        self.assertNotRegex(COMPOSE, r"\$\{NASA_", "the compose file reads only the new names")
         self.assertNotRegex(ENV_EXAMPLE, r"(?m)^#?NASA_")  # the example file only has the new names
+
+    def test_the_compose_files_are_valid_yaml(self):
+        """A message in a required variable is a plain scalar: a colon followed by a space in it ends the key and breaks the file."""
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed; the docker-build job runs docker compose config on every file")
+        for path in sorted(ROOT.glob("docker-compose*.yml")):
+            with self.subTest(path.name):
+                yaml.safe_load(path.read_text(encoding="utf-8"))
 
     def test_the_containers_can_join_the_group_that_owns_the_shares(self):
         """A share that only its owner and one group may read (Unraid: nobody:users, mode 770) is closed to the

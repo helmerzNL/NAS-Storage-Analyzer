@@ -22,9 +22,10 @@ encryption key is a missing value, not an error, wherever a default exists. A pr
   and it keeps an old `.env` half working. There is no stable release yet, so nothing is lost by changing once and saying so loudly.
 - **An old name is refused, with its new name.** `nasa serve|worker|migrate|scan|recategorize|healthcheck` exits with status 2 and
   `NASA_X is now NASSA_X` for every variable it finds with the old prefix, before it reads any setting (`cmd/nasa/oldenv.go`). Compose has the same
-  refusal for the four variables that every old `.env` has (the database password, the encryption key, the shares folder and the channel): an
-  extension field `x-nassa-renamed` in `docker-compose.yml`, whose substitution is an error when one of them is set. Compose, not the app, is what an
-  old `.env` meets first, because Compose does not forward the old names to the container. `sed -i 's/^NASA_/NASSA_/' .env` is the fix, in the message.
+  refusal where an old `.env` meets it first: `NASSA_SHARES_DIR` is required, every working old `.env` has `NASA_SHARES_DIR` and not the new name, and the
+  message of that requirement says that the variables were renamed and how (`sed -i 's/^NASA_/NASSA_/' .env`). Compose, not the app, is what an old
+  `.env` meets, because Compose does not forward the old names to the container. A refusal for any old name (a conditional substitution nested in a
+  required one) was tried first and left out: not every Compose version evaluates it lazily, and the one in CI refused a valid `.env`.
 - **What keeps its name, because renaming it would break something that exists:** the command and binary `nasa` (and `cmd/nasa`), the default database
   name and user `nasa` (the databases that already exist have them), the session cookie `nasa_session` (a rename signs everybody out), the Prometheus
   metrics `nasa_*` (a rename breaks dashboards and alerts), the Docker secret names, `/run/nasa-managed`, the browser storage keys `nasa.*`, and the image
@@ -41,8 +42,8 @@ encryption key is a missing value, not an error, wherever a default exists. A pr
 
 - **An existing installation does not start** until its `.env` (and, in a stack manager, the variables kept there) is renamed once. That is the point, and
   it is the first line of the upgrade notes of v0.2.0. It does not touch the data.
-- The guard in Compose names four variables, not all 41: an `.env` that has none of the four is not a working `.env` of the old version anyway. The
-  application's own check covers every name, for a process started without Compose.
+- Compose refuses at one variable, the shares folder, not at every old name: an `.env` without the new `NASSA_SHARES_DIR` does not start anyway, so there
+  is no old `.env` that gets past it. The application's own check covers every name, for a process started without Compose.
 - The commands, the cookie and the metrics still say `nasa`: two spellings of the name remain, deliberately, for the reasons above.
 
 ## Alternatives considered
@@ -56,5 +57,5 @@ encryption key is a missing value, not an error, wherever a default exists. A pr
 ## Enforcement
 
 `cmd/nasa/oldenv_test.go` (every variable in `.env.example` has its old name refused; the new names and look-alikes are not),
-`scripts/test_deploy_layout.py` (the compose guard exists, names real variables and the message says what to do; `.env.example` has no old name) and the
-`docker-build` job (real Compose refuses an `.env` with each of the four old names).
+`scripts/test_deploy_layout.py` (the required variable's message says what to do; the compose file and `.env.example` have no old name) and the
+`docker-build` job (real Compose refuses a complete old `.env` with that message, and the image itself is run with an old variable).

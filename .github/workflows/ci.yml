@@ -167,14 +167,11 @@ jobs:
           rm -f .env compose.err
       - name: Compose refuses an .env that still has the old NASA_ names
         run: |
-          # The variables were called NASA_* before NASSA_* (docs/adr/0012). Compose passes on only what it lists, so without this refusal an
-          # old .env reads as "nothing set" and the channel falls back to latest.
-          for old in NASA_DB_PASSWORD NASA_ENCRYPTION_KEY NASA_SHARES_DIR NASA_TAG; do
-            cp .env.example .env
-            echo "$old=x" >> .env
-            if docker compose config -q 2>compose.err; then echo "::error::compose started with $old in .env"; exit 1; fi
-            grep -q "now NASSA_" compose.err || { echo "::error::compose failed with $old in .env, but without saying to rename it:"; cat compose.err; exit 1; }
-          done
+          # The variables were called NASA_* before NASSA_* (docs/adr/0012). Compose passes on only what it lists, so an old .env reads as "nothing
+          # set"; the required NASSA_SHARES_DIR refuses it, and the message says what to do.
+          sed 's/^NASSA_/NASA_/' .env.example > .env
+          if docker compose config -q 2>compose.err; then echo "::error::compose started with an .env that has the old names"; exit 1; fi
+          grep -q "sed -i 's/^NASA_/NASSA_/' .env" compose.err || { echo "::error::compose refused the old names, but without saying to rename them:"; cat compose.err; exit 1; }
           rm -f .env compose.err
       - name: Compose files are valid for the example env
         run: |

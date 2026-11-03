@@ -17,12 +17,6 @@
 
 name: nas-storage-analyzer
 
-# The variables were called NASA_* before they were called NASSA_* (docs/adr/0012-nassa-environment-variables.md). Compose passes on only what is
-# listed below, so a .env that still has the old names would read as "nothing set": NASSA_TAG would fall back to latest, whatever beta was chosen.
-# This refuses instead and says what to do. The pattern is empty while the old variable is not set, and an error (the inner variable is
-# never set) as soon as it is. The four are in every old .env: the two secrets, the shares folder and the channel.
-x-nassa-renamed: "${NASA_DB_PASSWORD:+${NASSA_RENAME_THE_VARIABLES:?NASA_ variables are now NASSA_: rename them in .env, for example with sed -i 's/^NASA_/NASSA_/' .env}}${NASA_ENCRYPTION_KEY:+${NASSA_RENAME_THE_VARIABLES:?NASA_ variables are now NASSA_: rename them in .env}}${NASA_SHARES_DIR:+${NASSA_RENAME_THE_VARIABLES:?NASA_ variables are now NASSA_: rename them in .env}}${NASA_TAG:+${NASSA_RENAME_THE_VARIABLES:?NASA_ variables are now NASSA_: rename them in .env}}"
-
 x-nasa: &nasa
   # NASSA_TAG is chosen in .env next to this file: latest (stable, the default), beta, or a version number to pin.
   # The same value goes into the container (below), so a beta build shows a beta label in the interface.
@@ -56,13 +50,17 @@ x-nasa: &nasa
     # also shows mounts the host makes later (autofs), but Docker refuses it unless the host mount is
     # shared or slave ("not a shared or slave mount"), which is not the case on Unraid and many NAS systems.
     - type: bind
-      source: ${NASSA_SHARES_DIR:?Set NASSA_SHARES_DIR in .env to the absolute folder of the host that holds the shares, e.g. /mnt/user}
+      source: ${NASSA_SHARES_DIR:?Set NASSA_SHARES_DIR in .env to the absolute folder of the host that holds the shares, e.g. /mnt/user. The variables were called NASA_ before v0.2.0, and sed -i 's/^NASA_/NASSA_/' .env renames them all}
       target: ${NASSA_SHARES_MOUNT:-/mnt/shares}
       read_only: true
       bind:
         propagation: ${NASSA_SHARES_PROPAGATION:-rprivate}
   environment: &nasa-env
     NASSA_TAG: ${NASSA_TAG:-latest}
+    # The variables were called NASA_* before they were called NASSA_* (docs/adr/0012-nassa-environment-variables.md). Compose passes on only what is
+    # listed here, so an .env with the old names reads as "nothing set". Every working old .env has NASA_SHARES_DIR, and NASSA_SHARES_DIR is required
+    # (above), so it is refused there, with the rename in the message. A conditional substitution nested in a required one would do it for any
+    # variable, but not every Compose version evaluates that lazily: it refused a valid .env in CI.
     # The app does not use it; it is passed in so the container can warn when the value is relative.
     DATA_PATH: ${DATA_PATH:?Set DATA_PATH in .env to an absolute folder of the host, e.g. /srv/nas-storage-analyzer}
     NASSA_DB_HOST: db
