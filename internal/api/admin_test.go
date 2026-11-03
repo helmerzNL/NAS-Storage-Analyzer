@@ -223,9 +223,11 @@ func TestScanFromTheAPIThroughTheWorkerWithHistory(t *testing.T) {
 	ts.Settle()
 	ts.Write(t, root+"/video/c.mkv", 7000)
 	expect(t, admin.do("POST", s+"/scan", map[string]string{"mode": "full"}), 202, "")
+	// The history point is written when the scan is published; the worker closes the job a moment later. Wait for both, or the checks below
+	// (the job is "done", nothing is left to cancel) race the worker on a slow machine.
 	waitFor(t, "the second scan", func() bool {
 		h := admin.do("GET", s+"/history", nil)
-		return len(h.Body["items"].([]any)) == 2
+		return len(h.Body["items"].([]any)) == 2 && admin.do("GET", s, nil).Body["active_job"] == nil
 	})
 	h := admin.do("GET", s+"/history", nil).Body["items"].([]any)
 	if h[0].(map[string]any)["size"].(float64) != 5100 || h[1].(map[string]any)["size"].(float64) != 12100 {
