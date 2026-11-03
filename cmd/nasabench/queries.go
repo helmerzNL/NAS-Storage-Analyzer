@@ -39,7 +39,7 @@ type result struct {
 
 func runQueries(args []string) error {
 	fs := flag.NewFlagSet("queries", flag.ExitOnError)
-	dsn := fs.String("db", os.Getenv("NASA_DB_DSN"), "PostgreSQL connection string")
+	dsn := fs.String("db", os.Getenv("NASSA_DB_DSN"), "PostgreSQL connection string")
 	name := fs.String("share", "bench", "share to measure")
 	runs := fs.Int("runs", 30, "warm runs per scenario")
 	out := fs.String("out", "", "also write the markdown report to this file")
@@ -47,7 +47,7 @@ func runQueries(args []string) error {
 	csvRows := fs.Int("csv-rows", 100_000, "row cap for the CSV scenarios")
 	fs.Parse(args)
 	if *dsn == "" {
-		return errors.New("pass -db or set NASA_DB_DSN")
+		return errors.New("pass -db or set NASSA_DB_DSN")
 	}
 	ctx := context.Background()
 

@@ -26,7 +26,7 @@ registration: the administrator makes a link, the guest chooses their own passwo
   the guest cannot change it. An administrator can make a login link for any other user, not for themselves or for a disabled user.
 - **Removed:** `POST /api/v1/users` (create with a password) and `POST /api/v1/users/{id}/password` (set a password). `Service.CreateUser` lives on only as a test helper.
 - **Caps:** 50 users (pending `new` invitations count as users) and 50 open invitations.
-- **The link's address** comes from `NASA_PUBLIC_URL`, then the first `NASA_RP_ORIGINS`, then the address the administrator is using; never the request's own host.
+- **The link's address** comes from `NASSA_PUBLIC_URL`, then the first `NASSA_RP_ORIGINS`, then the address the administrator is using; never the request's own host.
 
 ## Consequences
 

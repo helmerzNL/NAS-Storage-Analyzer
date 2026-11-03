@@ -61,7 +61,7 @@ func TestValidateBind(t *testing.T) {
 	}
 }
 
-// The shares root is NASA_SHARES_MOUNT, so it need not be /mnt/shares: the check and the example in
+// The shares root is NASSA_SHARES_MOUNT, so it need not be /mnt/shares: the check and the example in
 // the error message must follow it.
 func TestValidateBindFollowsConfiguredRoot(t *testing.T) {
 	opt := shares.Options{SharesRoot: "/mnt/user"}

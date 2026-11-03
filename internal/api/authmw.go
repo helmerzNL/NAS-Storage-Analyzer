@@ -34,7 +34,7 @@ type Options struct {
 	// SetupToken must be presented by the setup wizard to create the first
 	// administrator, so that whoever reaches a fresh install first cannot take it.
 	SetupToken string
-	// SetupTokenFixed is true when the token was configured (NASA_SETUP_TOKEN) and not made up at start. After a factory reset a configured token
+	// SetupTokenFixed is true when the token was configured (NASSA_SETUP_TOKEN) and not made up at start. After a factory reset a configured token
 	// stays; one that was made up is replaced, because the log it was printed in may have been read by the previous owner.
 	SetupTokenFixed bool
 	// MetricsToken is the bearer token for /metrics. Without one, /metrics is

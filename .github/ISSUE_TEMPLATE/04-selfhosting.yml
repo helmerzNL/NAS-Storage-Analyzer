@@ -91,6 +91,6 @@ body:
       options:
         - label: Hard refresh and cleared the cache
         - label: Tested in a private window or a different browser
-        - label: Checked docs/deploy.md (troubleshooting) and that NASA_SHARES_DIR is an absolute path
+        - label: Checked docs/deploy.md (troubleshooting) and that NASSA_SHARES_DIR is an absolute path
         - label: I searched for existing reports of this problem
           required: true

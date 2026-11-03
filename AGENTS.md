@@ -49,7 +49,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   case in `TestUpgradeKeepsExistingRows`, because a fresh database never meets that path.
 - Every interface string exists in Dutch and English (`web/src/lib/i18n/`); a test fails when the key sets differ.
 - The interface is built into `internal/webui/dist` and embedded with `go:embed`; `dist/` is not committed.
-- Tests: `go vet ./... && go test -race ./...` (database tests need `NASA_TEST_DSN` and `NASA_REQUIRE_DB=1`),
+- Tests: `go vet ./... && go test -race ./...` (database tests need `NASSA_TEST_DSN` and `NASSA_REQUIRE_DB=1`),
   `cd web && npm run check && npx vitest run`, and the browser test in [`web/e2e`](web/e2e/e2e.cjs).
 - Do not weaken a check to make it pass. A test that fails is reported with its output; a skipped control is a missing control.
 - [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is re-answered after a major change and before a public
@@ -82,7 +82,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `app-engineering-conformance` | that every one of the 111 engineering topics in [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is answered, with evidence or a reason, and that the measured gates are filled in |
   | `enforce-version-bump` | that a pull request does not change `VERSION` |
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
-  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
+  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASSA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
   | `delete-script-shells` | that the delete scripts of `internal/delscript` really delete exactly the selected files: `sh`, `dash` and `bash` on Linux and macOS, `cmd.exe` and PowerShell (5.1 and 7) on Windows, with no skipped test (suffixed with the operating system on the pull request) |
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped test, and with every shell the delete-script tests need present |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
@@ -96,11 +96,11 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
 
 - Never commit `.env`, `secrets/` or real secrets; only `.env.example` is tracked. `.env.example` stays complete and safe
   (placeholders only).
-- `NASA_ENCRYPTION_KEY` encrypts the stored SMB passwords. It is never logged, never in a backup file and never
+- `NASSA_ENCRYPTION_KEY` encrypts the stored SMB passwords. It is never logged, never in a backup file and never
   in the database; a new secret follows the same rule.
 - Persistent data lives in one absolute host folder (`DATA_PATH`, baseline §21): required by Compose, never `./data`, plain
   folders and never Docker volumes. The database is `DATA_PATH/postgres`, mounted by the `db` service only; the scan target
-  `NASA_SHARES_DIR` is required and absolute for the same reason. A new kind of persistent data (a backup folder, uploads) gets
+  `NASSA_SHARES_DIR` is required and absolute for the same reason. A new kind of persistent data (a backup folder, uploads) gets
   its own sub-folder of `DATA_PATH`, not a new variable and not a volume. The containers warn when `DATA_PATH` is relative.
 - Rotate sensitive keys before public releases.
 
@@ -111,7 +111,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   one, merged with a merge commit (baseline §20). `only-from-beta` fails every other pull request into `main`; the
   owner makes it required, and forbids direct pushes to `main`, in the branch protection.
 - A push to `beta` publishes the `beta` channel only; a promotion publishes `latest` and the release.
-  `NASA_TAG` (`latest`, `beta` or a version number, in `.env`) picks the image `ghcr.io/helmerznl/nas-storage-analyzer` in
+  `NASSA_TAG` (`latest`, `beta` or a version number, in `.env`) picks the image `ghcr.io/helmerznl/nas-storage-analyzer` in
   `docker-compose.yml` and is passed into the containers; the app reports its channel at `GET /api/v1/version` and shows a **beta**
   label on a beta build. There is no second variable that names the whole image; building from a checkout is the override
   `docker-compose.build.yml`.
@@ -178,7 +178,7 @@ A pull request that raises a size, rate or timeout limit states the new value as
   personal screen goes in the user menu; the browser test checks both menus.
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
-  the installation; it never updates anything; and `NASA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.
+  the installation; it never updates anything; and `NASSA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.
 - **Reuse before writing new code.** The shared `query` and `store` packages, the `testsupport` helpers and the existing UI
   components come first; a second implementation of the same thing is the bug (baseline §10).
 

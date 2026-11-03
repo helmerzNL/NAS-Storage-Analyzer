@@ -18,13 +18,13 @@ import (
 // "queries", so the query is called directly, the way the handler calls it.
 func runScript(args []string) error {
 	fs := flag.NewFlagSet("script", flag.ExitOnError)
-	dsn := fs.String("db", os.Getenv("NASA_DB_DSN"), "PostgreSQL connection string")
+	dsn := fs.String("db", os.Getenv("NASSA_DB_DSN"), "PostgreSQL connection string")
 	name := fs.String("share", "bench", "share to measure")
 	n := fs.Int("n", 2000, "files per request")
 	runs := fs.Int("runs", 20, "warm runs per scenario")
 	fs.Parse(args)
 	if *dsn == "" {
-		return errors.New("pass -db or set NASA_DB_DSN")
+		return errors.New("pass -db or set NASSA_DB_DSN")
 	}
 	ctx := context.Background()
 	pool, err := store.OpenReadOnly(ctx, *dsn, 5, 60*time.Second)

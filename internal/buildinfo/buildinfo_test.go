@@ -4,7 +4,7 @@ import "testing"
 
 func TestChannelOf(t *testing.T) {
 	for tag, want := range map[string]string{
-		"":               Stable, // NASA_TAG unset
+		"":               Stable, // NASSA_TAG unset
 		"latest":         Stable,
 		"0.1.0":          Stable, // pinned to a version
 		"v0.1.0":         Stable,
@@ -29,8 +29,8 @@ func TestNew(t *testing.T) {
 	if got := New("0.1.0", "abc1234", "beta"); got != (Info{Version: "0.1.0", Commit: "abc1234", Channel: Beta}) {
 		t.Errorf("a beta build = %+v", got)
 	}
-	// The same binary reports a different channel for a different NASA_TAG: the channel is not baked in.
+	// The same binary reports a different channel for a different NASSA_TAG: the channel is not baked in.
 	if New("0.1.0", "abc1234", "beta").Channel == New("0.1.0", "abc1234", "").Channel {
-		t.Error("beta and unset NASA_TAG report the same channel")
+		t.Error("beta and unset NASSA_TAG report the same channel")
 	}
 }

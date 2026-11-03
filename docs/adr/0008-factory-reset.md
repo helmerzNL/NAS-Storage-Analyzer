@@ -25,7 +25,7 @@ everything on purpose, so the design is about making sure the administrator aske
 - **No restart.** The guideline restarts the process because it holds an open database and a secret key. Here everything the installation keeps is in PostgreSQL and the encryption key is in
   the environment, so the running process picks the empty database up by itself, and nothing needs a restart policy. The key stays (it is outside the database); the SMB passwords it sealed are
   gone with the shares. The response says `restarting: false`.
-- **The setup token** is part of the process, not the database. A configured `NASA_SETUP_TOKEN` stays; one that was made up at start is **replaced** and written to the log like at start, because the
+- **The setup token** is part of the process, not the database. A configured `NASSA_SETUP_TOKEN` stays; one that was made up at start is **replaced** and written to the log like at start, because the
   log it was printed in may have been read by the previous owner, and the previous owner is exactly who a reset hands the server over from.
 - **The record** is one warning in the process log (who, from which address, how many tables, rows and shares, and rows per table): the audit log goes with the database. Never contents, never a
   secret; a test greps the log for each.

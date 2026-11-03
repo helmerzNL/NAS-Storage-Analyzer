@@ -11,16 +11,16 @@
 # cannot touch them. A relative DATA_PATH is resolved by whatever tool starts the stack, not by Docker.
 #
 # Shares are scanned read-only. The recommended route is to mount the NFS/SMB share on the
-# Docker host and point NASA_SHARES_DIR at the folder that holds the mounts; see docs/deploy.md.
-# On a NAS that runs this stack itself, point NASA_SHARES_DIR at the folder that holds its shares
-# (Unraid: /mnt/user). Set NASA_SHARES_MOUNT to the same path to type host paths in the interface.
+# Docker host and point NASSA_SHARES_DIR at the folder that holds the mounts; see docs/deploy.md.
+# On a NAS that runs this stack itself, point NASSA_SHARES_DIR at the folder that holds its shares
+# (Unraid: /mnt/user). Set NASSA_SHARES_MOUNT to the same path to type host paths in the interface.
 
 name: nas-storage-analyzer
 
 x-nasa: &nasa
-  # NASA_TAG is chosen in .env next to this file: latest (stable, the default), beta, or a version number to pin.
+  # NASSA_TAG is chosen in .env next to this file: latest (stable, the default), beta, or a version number to pin.
   # The same value goes into the container (below), so a beta build shows a beta label in the interface.
-  image: ghcr.io/helmerznl/nas-storage-analyzer:${NASA_TAG:-latest}
+  image: ghcr.io/helmerznl/nas-storage-analyzer:${NASSA_TAG:-latest}
   restart: unless-stopped
   init: true
   read_only: true
@@ -31,10 +31,10 @@ x-nasa: &nasa
   cap_drop:
     - ALL
   # A supplementary group, so the containers can read shares that only the owner and one group may read (Unraid:
-  # nobody:users with mode 770, so NASA_SHARES_GID=100). They keep their own uid. The default is the image's own
+  # nobody:users with mode 770, so NASSA_SHARES_GID=100). They keep their own uid. The default is the image's own
   # group, which changes nothing.
   group_add:
-    - "${NASA_SHARES_GID:-10001}"
+    - "${NASSA_SHARES_GID:-10001}"
   depends_on:
     db:
       condition: service_healthy
@@ -42,48 +42,52 @@ x-nasa: &nasa
     driver: json-file
     options: {max-size: 10m, max-file: "5"}
   volumes:
-    # The scan target, read-only. NASA_SHARES_DIR is an absolute path on the host (see docs/deploy.md): a
+    # The scan target, read-only. NASSA_SHARES_DIR is an absolute path on the host (see docs/deploy.md): a
     # relative one is resolved by whatever tool starts the stack, and under Dockhand that is not the host.
-    # It appears at NASA_SHARES_MOUNT in the container (default /mnt/shares). Setting that to the same
-    # value as NASA_SHARES_DIR makes the paths in the interface identical to the paths on the host.
+    # It appears at NASSA_SHARES_MOUNT in the container (default /mnt/shares). Setting that to the same
+    # value as NASSA_SHARES_DIR makes the paths in the interface identical to the paths on the host.
     # rprivate works on every host and shows the mounts that exist when the containers start. rslave
     # also shows mounts the host makes later (autofs), but Docker refuses it unless the host mount is
     # shared or slave ("not a shared or slave mount"), which is not the case on Unraid and many NAS systems.
     - type: bind
-      source: ${NASA_SHARES_DIR:?Set NASA_SHARES_DIR in .env to the absolute folder of the host that holds the shares, e.g. /mnt/user}
-      target: ${NASA_SHARES_MOUNT:-/mnt/shares}
+      source: ${NASSA_SHARES_DIR:?Set NASSA_SHARES_DIR in .env to the absolute folder of the host that holds the shares, e.g. /mnt/user. The variables were called NASA_ before v0.2.0, and sed -i 's/^NASA_/NASSA_/' .env renames them all}
+      target: ${NASSA_SHARES_MOUNT:-/mnt/shares}
       read_only: true
       bind:
-        propagation: ${NASA_SHARES_PROPAGATION:-rprivate}
+        propagation: ${NASSA_SHARES_PROPAGATION:-rprivate}
   environment: &nasa-env
-    NASA_TAG: ${NASA_TAG:-latest}
+    NASSA_TAG: ${NASSA_TAG:-latest}
+    # The variables were called NASA_* before they were called NASSA_* (docs/adr/0012-nassa-environment-variables.md). Compose passes on only what is
+    # listed here, so an .env with the old names reads as "nothing set". Every working old .env has NASA_SHARES_DIR, and NASSA_SHARES_DIR is required
+    # (above), so it is refused there, with the rename in the message. A conditional substitution nested in a required one would do it for any
+    # variable, but not every Compose version evaluates that lazily: it refused a valid .env in CI.
     # The app does not use it; it is passed in so the container can warn when the value is relative.
     DATA_PATH: ${DATA_PATH:?Set DATA_PATH in .env to an absolute folder of the host, e.g. /srv/nas-storage-analyzer}
-    NASA_DB_HOST: db
-    NASA_DB_NAME: ${NASA_DB_NAME:-nasa}
-    NASA_DB_USER: ${NASA_DB_USER:-nasa}
-    NASA_DB_PASSWORD: ${NASA_DB_PASSWORD:-}
-    NASA_ENCRYPTION_KEY: ${NASA_ENCRYPTION_KEY:-}
-    NASA_TZ: ${NASA_TZ:-Europe/Amsterdam}
-    NASA_SHARES_ROOT: ${NASA_SHARES_MOUNT:-/mnt/shares}
+    NASSA_DB_HOST: db
+    NASSA_DB_NAME: ${NASSA_DB_NAME:-nasa}
+    NASSA_DB_USER: ${NASSA_DB_USER:-nasa}
+    NASSA_DB_PASSWORD: ${NASSA_DB_PASSWORD:-}
+    NASSA_ENCRYPTION_KEY: ${NASSA_ENCRYPTION_KEY:-}
+    NASSA_TZ: ${NASSA_TZ:-Europe/Amsterdam}
+    NASSA_SHARES_ROOT: ${NASSA_SHARES_MOUNT:-/mnt/shares}
 
 services:
   app:
     <<: *nasa
     command: ["serve"]
     ports:
-      - "${NASA_HTTP_BIND:-127.0.0.1}:${NASA_HTTP_PORT:-8080}:8080"
+      - "${NASSA_HTTP_BIND:-127.0.0.1}:${NASSA_HTTP_PORT:-8080}:8080"
     environment:
       <<: *nasa-env
-      NASA_SETUP_TOKEN: ${NASA_SETUP_TOKEN:-}
-      NASA_RP_ID: ${NASA_RP_ID:-}
-      NASA_RP_ORIGINS: ${NASA_RP_ORIGINS:-}
-      NASA_PUBLIC_URL: ${NASA_PUBLIC_URL:-}
-      NASA_RP_NAME: ${NASA_RP_NAME:-NAS Storage Analyzer}
-      NASA_TRUSTED_PROXIES: ${NASA_TRUSTED_PROXIES:-}
-      NASA_REQUIRE_HTTPS: ${NASA_REQUIRE_HTTPS:-false}
-      NASA_METRICS_TOKEN: ${NASA_METRICS_TOKEN:-}
-      NASA_UPDATE_CHECK: ${NASA_UPDATE_CHECK:-true}
+      NASSA_SETUP_TOKEN: ${NASSA_SETUP_TOKEN:-}
+      NASSA_RP_ID: ${NASSA_RP_ID:-}
+      NASSA_RP_ORIGINS: ${NASSA_RP_ORIGINS:-}
+      NASSA_PUBLIC_URL: ${NASSA_PUBLIC_URL:-}
+      NASSA_RP_NAME: ${NASSA_RP_NAME:-NAS Storage Analyzer}
+      NASSA_TRUSTED_PROXIES: ${NASSA_TRUSTED_PROXIES:-}
+      NASSA_REQUIRE_HTTPS: ${NASSA_REQUIRE_HTTPS:-false}
+      NASSA_METRICS_TOKEN: ${NASSA_METRICS_TOKEN:-}
+      NASSA_UPDATE_CHECK: ${NASSA_UPDATE_CHECK:-true}
     healthcheck:
       test: ["CMD", "nasa", "healthcheck", "-url", "http://127.0.0.1:8080/readyz"]
       interval: 30s
@@ -96,8 +100,8 @@ services:
     command: ["worker"]
     environment:
       <<: *nasa-env
-      NASA_WORKER_PARALLEL: ${NASA_WORKER_PARALLEL:-2}
-      NASA_WORKER_HEALTH_LISTEN: 127.0.0.1:8081
+      NASSA_WORKER_PARALLEL: ${NASSA_WORKER_PARALLEL:-2}
+      NASSA_WORKER_HEALTH_LISTEN: 127.0.0.1:8081
     healthcheck:
       test: ["CMD", "nasa", "healthcheck", "-url", "http://127.0.0.1:8081/healthz"]
       interval: 30s
@@ -111,9 +115,9 @@ services:
     shm_size: 256mb
     stop_grace_period: 1m
     environment:
-      POSTGRES_DB: ${NASA_DB_NAME:-nasa}
-      POSTGRES_USER: ${NASA_DB_USER:-nasa}
-      POSTGRES_PASSWORD: ${NASA_DB_PASSWORD:-}
+      POSTGRES_DB: ${NASSA_DB_NAME:-nasa}
+      POSTGRES_USER: ${NASSA_DB_USER:-nasa}
+      POSTGRES_PASSWORD: ${NASSA_DB_PASSWORD:-}
     # Sizing for the queries on the aggregate tables: about 25% of RAM for shared_buffers and
     # 50-75% for effective_cache_size. The defaults suit a few million files; see docs/deploy.md.
     command:

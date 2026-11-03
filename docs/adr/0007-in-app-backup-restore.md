@@ -19,7 +19,7 @@ the restore belongs to the server. The owner chose to adopt it (a reference to a
 - **What is not**, and why: accounts, roles, passwords, passkeys, authenticator secrets, recovery codes, sessions and invitations (they would let a mailed file open the
   application on another server, and a crafted file could otherwise promote a viewer); the audit log (a record of what happened here); and **scan results and history** (derived
   from the files on the NAS: they come back by scanning, and a dump is the way to keep them). The one allowed exception is the **SMB password of a share, as the ciphertext the
-  database already holds**, sealed with `NASA_ENCRYPTION_KEY`, which is never in the file. A restore on an installation whose key cannot open it leaves that password out and
+  database already holds**, sealed with `NASSA_ENCRYPTION_KEY`, which is never in the file. A restore on an installation whose key cannot open it leaves that password out and
   says which share.
 - **The file is not trusted.** It is read with unknown fields refused (so a `password` or a `role` is refused, not ignored), and held to the validators of the forms:
   `shares.Validate`, the file-type rules, `auth.CleanPrefs`. A refused file changes nothing and is not kept; a refusal names the place in the file (`shares[2].cron`).

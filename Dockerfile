@@ -41,7 +41,7 @@ LABEL org.opencontainers.image.title="NAS Storage Analyzer" \
       org.opencontainers.image.source="https://github.com/helmerzNL/NAS-Storage-Analyzer"
 
 USER nasa
-ENV NASA_LISTEN=0.0.0.0:8080
+ENV NASSA_LISTEN=0.0.0.0:8080
 EXPOSE 8080
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 CMD ["nasa", "healthcheck"]

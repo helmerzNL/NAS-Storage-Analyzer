@@ -369,7 +369,7 @@ func only(t *testing.T, rows []auditRow, action string) auditRow {
 // The outcome of every scan, including the ones nobody started by hand, is in the audit log.
 func TestAScanThatFindsNothingIsInTheAuditLog(t *testing.T) {
 	e := newEnv(t, nil, nil)
-	id := e.share(t, t.TempDir(), nil) // an empty folder: a wrong NASA_SHARES_DIR looks exactly like this
+	id := e.share(t, t.TempDir(), nil) // an empty folder: a wrong NASSA_SHARES_DIR looks exactly like this
 	if j := e.scan(t, id, "auto", "schedule"); j.State != jobs.StateDone {
 		t.Fatalf("job = %+v", j)
 	}

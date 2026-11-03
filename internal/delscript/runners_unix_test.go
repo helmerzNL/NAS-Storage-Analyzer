@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// runners returns the POSIX shells that can run on this machine. A shell named in NASA_REQUIRE_SHELLS has to be there.
+// runners returns the POSIX shells that can run on this machine. A shell named in NASSA_REQUIRE_SHELLS has to be there.
 func runners(t *testing.T) []runner {
 	var out []runner
 	posix := []struct {
@@ -26,7 +26,7 @@ func runners(t *testing.T) []runner {
 		r := runner{name: s.name, target: TargetSh, eol: "\n"}
 		switch {
 		case err != nil && shellRequired(s.name):
-			t.Fatalf("%s is required by NASA_REQUIRE_SHELLS but is not installed", s.name)
+			t.Fatalf("%s is required by NASSA_REQUIRE_SHELLS but is not installed", s.name)
 		case err != nil:
 			r.absent = s.bin + " is not installed"
 		default:

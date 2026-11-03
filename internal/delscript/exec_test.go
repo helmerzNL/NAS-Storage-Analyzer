@@ -18,7 +18,7 @@ import (
 type runner struct {
 	name   string
 	target Target
-	// absent says why the shell cannot run here; the subtest is skipped. A shell named in NASA_REQUIRE_SHELLS that
+	// absent says why the shell cannot run here; the subtest is skipped. A shell named in NASSA_REQUIRE_SHELLS that
 	// is absent fails the test instead, so a CI image that lost a shell does not turn the test into a green no-op.
 	absent string
 	// run feeds stdin to the script and returns its combined output and exit code.
@@ -44,9 +44,9 @@ func present(t *testing.T, all []runner) []runner {
 	return out
 }
 
-// shellRequired reports whether NASA_REQUIRE_SHELLS names this shell.
+// shellRequired reports whether NASSA_REQUIRE_SHELLS names this shell.
 func shellRequired(name string) bool {
-	for _, n := range strings.Split(os.Getenv("NASA_REQUIRE_SHELLS"), ",") {
+	for _, n := range strings.Split(os.Getenv("NASSA_REQUIRE_SHELLS"), ",") {
 		if strings.TrimSpace(n) == name {
 			return true
 		}

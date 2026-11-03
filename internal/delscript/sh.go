@@ -4,7 +4,7 @@ import "strings"
 
 // shDataTag ends the here-document that holds the data. A record never equals it: records start with a letter and
 // a bar, and the tag has neither.
-const shDataTag = "NASA_DELSCRIPT_DATA_END"
+const shDataTag = "NASSA_DELSCRIPT_DATA_END"
 
 // renderSh writes the POSIX shell script. The data sits in a quoted here-document, so no character in it is
 // special; the code reads it back with read -r and quotes every use of a path.

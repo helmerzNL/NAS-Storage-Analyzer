@@ -1,6 +1,6 @@
 // Package buildinfo says which build is running and on which release channel.
 //
-// The channel comes from NASA_TAG, the one variable that picks the image in docker-compose.yml
+// The channel comes from NASSA_TAG, the one variable that picks the image in docker-compose.yml
 // (`latest`, `beta` or a version number) and is passed on into the container (baseline section 20).
 // A build whose tag contains "beta" is a beta build; everything else is stable.
 package buildinfo
@@ -22,7 +22,7 @@ type Info struct {
 	Channel string `json:"channel"`
 }
 
-// ChannelOf derives the channel from the image tag (NASA_TAG): "beta", "beta-<sha>" and
+// ChannelOf derives the channel from the image tag (NASSA_TAG): "beta", "beta-<sha>" and
 // "1.2.0-beta.3" are beta, "latest", "" and "1.2.0" are stable.
 func ChannelOf(tag string) string {
 	if strings.Contains(strings.ToLower(tag), "beta") {

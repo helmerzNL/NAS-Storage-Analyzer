@@ -61,8 +61,8 @@ func TestDeleteScriptIsAdminOnly(t *testing.T) {
 func TestDeleteScriptDeletesExactlyTheSelectionWhenRun(t *testing.T) {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
-		if strings.Contains(os.Getenv("NASA_REQUIRE_SHELLS"), "sh") {
-			t.Fatalf("sh is required by NASA_REQUIRE_SHELLS but is not installed")
+		if strings.Contains(os.Getenv("NASSA_REQUIRE_SHELLS"), "sh") {
+			t.Fatalf("sh is required by NASSA_REQUIRE_SHELLS but is not installed")
 		}
 		t.Skip("sh is not installed")
 	}

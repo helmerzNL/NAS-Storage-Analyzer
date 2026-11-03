@@ -26,9 +26,9 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
-      NASA_TEST_DSN: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
-      NASA_REQUIRE_DB: "1"      # a database test that cannot run fails instead of skipping
-      NASA_REQUIRE_SHELLS: sh,dash,bash,bash-posix   # same for the shells the delete-script tests run scripts in
+      NASSA_TEST_DSN: postgres://postgres:test@localhost:5432/postgres?sslmode=disable
+      NASSA_REQUIRE_DB: "1"      # a database test that cannot run fails instead of skipping
+      NASSA_REQUIRE_SHELLS: sh,dash,bash,bash-posix   # same for the shells the delete-script tests run scripts in
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -112,7 +112,7 @@ jobs:
   # The delete scripts (internal/delscript) are run for real, in the shell they are written for, against files with the
   # names that break scripts. cmd.exe and Windows PowerShell 5.1 only exist on Windows, and the BSD stat of macOS is
   # what the sh script has to cope with there, so this cannot be proven on one operating system. The package needs
-  # no database. A shell that is missing fails the job (NASA_REQUIRE_SHELLS) and so does a skipped test.
+  # no database. A shell that is missing fails the job (NASSA_REQUIRE_SHELLS) and so does a skipped test.
   delete-script-shells:
     name: delete-script-shells (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -127,7 +127,7 @@ jobs:
           - os: windows-latest
             shells: pwsh
     env:
-      NASA_REQUIRE_SHELLS: ${{ matrix.shells }}
+      NASSA_REQUIRE_SHELLS: ${{ matrix.shells }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -149,14 +149,29 @@ jobs:
         run: docker build --build-arg VERSION=ci -t nas-storage-analyzer:ci .
       - name: The binary in the image starts and reports its version
         run: docker run --rm nas-storage-analyzer:ci version
+      - name: The binary refuses to start with an old NASA_ variable
+        run: |
+          # Compose does not forward an old name to the container, but a process started without Compose (docker run, systemd) can still have one.
+          set +e
+          out="$(docker run --rm -e NASA_TAG=beta nas-storage-analyzer:ci serve 2>&1)"; code=$?
+          set -e
+          if [ "$code" != 2 ] || ! grep -q "NASA_TAG is now NASSA_TAG" <<<"$out"; then echo "::error::exit $code, and said: $out"; exit 1; fi
       - name: Compose refuses to start without DATA_PATH or the shares folder
         run: |
           rm -f .env
-          for var in DATA_PATH NASA_SHARES_DIR; do
+          for var in DATA_PATH NASSA_SHARES_DIR; do
             grep -v "^$var=" .env.example > .env
             if docker compose config -q 2>compose.err; then echo "::error::compose started without $var"; exit 1; fi
             grep -q "$var" compose.err || { echo "::error::compose failed, but not on $var:"; cat compose.err; exit 1; }
           done
+          rm -f .env compose.err
+      - name: Compose refuses an .env that still has the old NASA_ names
+        run: |
+          # The variables were called NASA_* before NASSA_* (docs/adr/0012). Compose passes on only what it lists, so an old .env reads as "nothing
+          # set"; the required NASSA_SHARES_DIR refuses it, and the message says what to do.
+          sed 's/^NASSA_/NASA_/' .env.example > .env
+          if docker compose config -q 2>compose.err; then echo "::error::compose started with an .env that has the old names"; exit 1; fi
+          grep -q "sed -i 's/^NASA_/NASSA_/' .env" compose.err || { echo "::error::compose refused the old names, but without saying to rename them:"; cat compose.err; exit 1; }
           rm -f .env compose.err
       - name: Compose files are valid for the example env
         run: |

@@ -85,7 +85,7 @@ var (
 // Options configure validation.
 type Options struct {
 	// SharesRoot is the directory below which bind shares must lie
-	// (NASA_SHARES_MOUNT, "/mnt/shares" by default, in the container).
+	// (NASSA_SHARES_MOUNT, "/mnt/shares" by default, in the container).
 	// Empty disables the check (tests).
 	SharesRoot string
 }

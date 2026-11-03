@@ -6,7 +6,7 @@
 // emptied without anyone remembering to add it, and a test fails if it is not. Only the record of which migrations have run is kept, and the
 // built-in categories and the default file types are put back, so the application starts the setup wizard again exactly as on a first install.
 //
-// What it does not touch lives outside the database: the environment variables (including NASA_ENCRYPTION_KEY, which is why a restart is
+// What it does not touch lives outside the database: the environment variables (including NASSA_ENCRYPTION_KEY, which is why a restart is
 // not needed to "forget" it: it was never stored), the image, the host folder DATA_PATH itself, and the files on the NAS, which the scanner
 // only ever reads.
 package reset

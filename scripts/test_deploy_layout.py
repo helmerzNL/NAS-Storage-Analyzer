@@ -1,7 +1,7 @@
 """Where the data lives and which image runs (baseline sections 20 and 21).
 
 The database is the folder `DATA_PATH/postgres` of the host, mounted by the db service only. Nothing is a Docker
-volume: `docker compose down -v` or a prune must not be able to touch it. One variable, NASA_TAG, picks the image and
+volume: `docker compose down -v` or a prune must not be able to touch it. One variable, NASSA_TAG, picks the image and
 is passed into the container so a beta build can say so. These tests read the Compose file and `.env.example` as
 text and fail when either drifts, and drive `init-env.sh` and `migrate_data.sh` with a fake `docker`.
 
@@ -47,24 +47,24 @@ class ComposeLayout(unittest.TestCase):
         named = re.findall(r"^\s+- ([A-Za-z][\w.-]*):/", COMPOSE, re.M)
         self.assertEqual(named, [], f"named volume mounts: {named}")
         for src in re.findall(r"^\s+source: (\S+)", COMPOSE, re.M):
-            self.assertTrue(src.startswith("${NASA_SHARES_DIR"), f"a bind mount outside the shares folder: {src}")
+            self.assertTrue(src.startswith("${NASSA_SHARES_DIR"), f"a bind mount outside the shares folder: {src}")
 
     def test_data_path_and_the_shares_folder_are_required(self):
         """Compose refuses to start without them; DATA_PATH also reaches the containers so they can warn."""
         self.assertIn("DATA_PATH: ${DATA_PATH:?", COMPOSE)
-        self.assertIn("source: ${NASA_SHARES_DIR:?", COMPOSE)
+        self.assertIn("source: ${NASSA_SHARES_DIR:?", COMPOSE)
 
     def test_a_new_installation_gets_absolute_folders(self):
         """./data is resolved by whatever tool starts the stack (Dockhand on Unraid: a RAM disk), so no template hands it out."""
-        for name in ("DATA_PATH", "NASA_SHARES_DIR"):
+        for name in ("DATA_PATH", "NASSA_SHARES_DIR"):
             self.assertTrue(env_value(ENV_EXAMPLE, name).startswith("/"), f"{name} in .env.example is not absolute")
 
     def test_one_tag_picks_the_image_and_tells_the_container_which_channel_it_is(self):
-        self.assertIn("image: ghcr.io/helmerznl/nas-storage-analyzer:${NASA_TAG:-latest}", COMPOSE)
-        self.assertIn("NASA_TAG: ${NASA_TAG:-latest}", COMPOSE)
-        self.assertEqual(env_value(ENV_EXAMPLE, "NASA_TAG"), "latest")  # stable unless chosen otherwise
+        self.assertIn("image: ghcr.io/helmerznl/nas-storage-analyzer:${NASSA_TAG:-latest}", COMPOSE)
+        self.assertIn("NASSA_TAG: ${NASSA_TAG:-latest}", COMPOSE)
+        self.assertEqual(env_value(ENV_EXAMPLE, "NASSA_TAG"), "latest")  # stable unless chosen otherwise
         self.assertIn("separate DATA_PATH for beta", ENV_EXAMPLE)
-        self.assertNotRegex(COMPOSE + ENV_EXAMPLE, r"NASA_IMAGE")  # no second variable that names the whole image
+        self.assertNotRegex(COMPOSE + ENV_EXAMPLE, r"NASSA_IMAGE")  # no second variable that names the whole image
         self.assertNotIn("build:", COMPOSE)  # the pull is the default; building is the override
 
     def test_every_variable_the_compose_file_reads_is_in_the_env_example(self):
@@ -72,12 +72,33 @@ class ComposeLayout(unittest.TestCase):
         for name in sorted(used):
             self.assertRegex(ENV_EXAMPLE, rf"(?m)^#?{name}=", f"{name} is read by docker-compose.yml but not documented in .env.example")
 
+    def test_an_env_that_still_has_the_old_names_is_refused_and_told_what_to_do(self):
+        """The variables were called NASA_* before NASSA_* (ADR 0012). Compose passes on only what it lists, so an old .env would read as "nothing set".
+        Every working old .env has NASA_SHARES_DIR and NASSA_SHARES_DIR is required, so it is refused there, and the message says what to do. A
+        nested conditional substitution (an old name set: error) was tried and refused a valid .env on the Compose that CI has: do not bring it back."""
+        self.assertIn("${NASSA_SHARES_DIR:?", COMPOSE)
+        message = re.search(r"\$\{NASSA_SHARES_DIR:\?([^}]*)\}", COMPOSE).group(1)
+        self.assertIn("sed -i 's/^NASA_/NASSA_/' .env", message)
+        self.assertNotRegex(COMPOSE, r"x-nassa-renamed|:\+\$\{", "a nested substitution is not evaluated lazily by every Compose version")
+        self.assertNotRegex(COMPOSE, r"\$\{NASA_", "the compose file reads only the new names")
+        self.assertNotRegex(ENV_EXAMPLE, r"(?m)^#?NASA_")  # the example file only has the new names
+
+    def test_the_compose_files_are_valid_yaml(self):
+        """A message in a required variable is a plain scalar: a colon followed by a space in it ends the key and breaks the file."""
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed; the docker-build job runs docker compose config on every file")
+        for path in sorted(ROOT.glob("docker-compose*.yml")):
+            with self.subTest(path.name):
+                yaml.safe_load(path.read_text(encoding="utf-8"))
+
     def test_the_containers_can_join_the_group_that_owns_the_shares(self):
         """A share that only its owner and one group may read (Unraid: nobody:users, mode 770) is closed to the
-        containers' own uid. NASA_SHARES_GID adds that group; the default is the image's own group, so nothing changes."""
+        containers' own uid. NASSA_SHARES_GID adds that group; the default is the image's own group, so nothing changes."""
         gid = re.search(r"addgroup -S -g (\d+)", (ROOT / "Dockerfile").read_text(encoding="utf-8")).group(1)
-        self.assertRegex(COMPOSE, r"(?m)^  group_add:\n    - \"\$\{NASA_SHARES_GID:-" + gid + r"\}\"\n")  # in x-nasa: both services inherit it
-        self.assertEqual(env_value(ENV_EXAMPLE, "NASA_SHARES_GID"), gid)
+        self.assertRegex(COMPOSE, r"(?m)^  group_add:\n    - \"\$\{NASSA_SHARES_GID:-" + gid + r"\}\"\n")  # in x-nasa: both services inherit it
+        self.assertEqual(env_value(ENV_EXAMPLE, "NASSA_SHARES_GID"), gid)
         for name in ("app", "worker"):  # a list is replaced, not merged: a service that sets its own would drop the group
             self.assertNotIn("group_add", service_block(name))
 
@@ -85,7 +106,7 @@ class ComposeLayout(unittest.TestCase):
         build = (ROOT / "docker-compose.build.yml").read_text(encoding="utf-8")
         self.assertRegex(build, r"(?m)^  app:\n    build: \*build")
         self.assertRegex(build, r"(?m)^  worker:\n    build: \*build")
-        self.assertIn("GIT_COMMIT: ${NASA_COMMIT:-}", build)
+        self.assertIn("GIT_COMMIT: ${NASSA_COMMIT:-}", build)
         self.assertIn("ARG GIT_COMMIT", (ROOT / "Dockerfile").read_text(encoding="utf-8"))
 
     def test_the_shell_scripts_parse(self):
@@ -115,22 +136,22 @@ class InitEnv(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         env = (self.tmp / ".env").read_text(encoding="utf-8")
         self.assertEqual(env_value(env, "DATA_PATH"), "/srv/nasa-data")
-        self.assertEqual(env_value(env, "NASA_SHARES_DIR"), "/mnt/shares-on-host")
-        self.assertEqual(env_value(env, "NASA_TAG"), "latest")
-        self.assertGreater(len(env_value(env, "NASA_DB_PASSWORD")), 20)
+        self.assertEqual(env_value(env, "NASSA_SHARES_DIR"), "/mnt/shares-on-host")
+        self.assertEqual(env_value(env, "NASSA_TAG"), "latest")
+        self.assertGreater(len(env_value(env, "NASSA_DB_PASSWORD")), 20)
         (self.tmp / ".env").unlink()
         done = self.run_script("--secrets", "--data-path", "/srv/nasa-data", "--shares-dir", "/mnt/shares-on-host")
         self.assertEqual(done.returncode, 0, done.stderr)
         env = (self.tmp / ".env").read_text(encoding="utf-8")
         self.assertEqual(env_value(env, "DATA_PATH"), "/srv/nasa-data")  # the secrets variant needs both too, or compose refuses it
-        self.assertNotIn("NASA_DB_PASSWORD", env)
+        self.assertNotIn("NASSA_DB_PASSWORD", env)
 
     def test_the_default_is_absolute_too(self):
         done = self.run_script()
         self.assertEqual(done.returncode, 0, done.stderr)
         env = (self.tmp / ".env").read_text(encoding="utf-8")
         self.assertTrue(env_value(env, "DATA_PATH").startswith("/"))
-        self.assertTrue(env_value(env, "NASA_SHARES_DIR").startswith("/"))
+        self.assertTrue(env_value(env, "NASSA_SHARES_DIR").startswith("/"))
 
     def test_an_existing_env_is_never_overwritten(self):
         (self.tmp / ".env").write_text("KEEP=me\n", encoding="utf-8")
