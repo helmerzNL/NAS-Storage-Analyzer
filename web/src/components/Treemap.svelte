@@ -4,7 +4,7 @@
   import { formatBytes } from '../lib/format';
   import { prefs } from '../lib/session.svelte';
   import { i18n, t } from '../lib/i18n.svelte';
-  import { paletteColor } from '../lib/colors';
+  import { paletteColor, filesColor, otherColor } from '../lib/colors';
 
   let { tree, onopen }: { tree: TreeNode; onopen: (id: number) => void } = $props();
   const W = 1000, H = 420, HEAD = 18;
@@ -16,7 +16,7 @@
     const out: Drawn[] = [];
     const top = squarify((tree.children ?? []).map((c) => ({ item: c, value: c.size })), { x: 0, y: 0, w: W, h: H });
     top.forEach((cell, i) => {
-      const colour = cell.item.kind === 'dir' ? paletteColor(i) : cell.item.kind === 'files' ? '#64748b' : '#94a3b8';
+      const colour = cell.item.kind === 'dir' ? paletteColor(i) : cell.item.kind === 'files' ? filesColor : otherColor;
       const kids = cell.item.children ?? [];
       const inner = kids.length > 0 && cell.w > 60 && cell.h > HEAD + 20;
       out.push({ key: out.length, cell, depth: 1, colour, inner });

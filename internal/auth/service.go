@@ -4,9 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"regexp"
 	"strings"
 	"time"
@@ -86,7 +86,7 @@ type User struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	LastLoginAt   *time.Time `json:"last_login_at"`
 	// Prefs are the user's interface settings: units (binary|decimal),
-	// language (nl|en), theme (system|light|dark).
+	// language (nl|en), theme (system|light|dark), accent (#rrggbb, empty: the default).
 	Prefs map[string]string `json:"prefs"`
 
 	passwordHash *string
@@ -191,30 +191,6 @@ func (s *Service) CreateFirstAdmin(ctx context.Context, username, password strin
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return nil, err
-	}
-	return s.GetUser(ctx, id)
-}
-
-// CreateUser adds an account (by an administrator). The user must enrol a
-// second factor at the first sign-in.
-func (s *Service) CreateUser(ctx context.Context, username, displayName, password, role string) (*User, error) {
-	if !usernameRE.MatchString(username) {
-		return nil, ErrBadUsername
-	}
-	if role != "admin" && role != "viewer" {
-		return nil, fmt.Errorf("role must be admin or viewer")
-	}
-	if err := CheckPasswordPolicy(password, username); err != nil {
-		return nil, err
-	}
-	var id int64
-	err := s.pool.QueryRow(ctx, `INSERT INTO users (username, display_name, role, password_hash) VALUES ($1, $2, $3, $4) RETURNING id`,
-		username, displayName, role, HashPassword(password)).Scan(&id)
-	if isUnique(err) {
-		return nil, ErrConflict
-	}
-	if err != nil {
 		return nil, err
 	}
 	return s.GetUser(ctx, id)
@@ -333,6 +309,15 @@ type Session struct {
 	CSRFToken string
 	ExpiresAt time.Time
 	hash      []byte
+}
+
+// NewSetupToken is a fresh token for the setup wizard: whoever reaches a new installation first cannot take it without the one in the log.
+func NewSetupToken() string {
+	b := make([]byte, 15)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
 }
 
 func randToken(n int) string {
@@ -502,6 +487,29 @@ func (s *Service) AuditPage(ctx context.Context, before int64, limit int, action
 	return out, rows.Err()
 }
 
+// scanOutcomes are the audit actions that say how a scan ended: the ones a person looks for when a scan shows an error.
+var scanOutcomes = []string{"scan.finished", "scan.errors", "scan.empty", "scan.failed"}
+
+// AuditForScan returns the audit entry that says how scan scanID ended, if there is one. The worker writes the scan's id into the entry
+// ("scan_id"); an entry of a failed scan from before it did so is found through its job, which still knows the scan (jobs are kept for 30
+// days). The entry that only says a scan was asked for (scan.start) is not an outcome and is never returned.
+func (s *Service) AuditForScan(ctx context.Context, scanID int64) (*AuditEntry, error) {
+	var e AuditEntry
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, at, user_id, username, ip, action, target, detail FROM audit_log
+		WHERE action = ANY($2)
+		  AND (detail ->> 'scan_id' = ($1::bigint)::text
+		       OR (detail ->> 'scan_id' IS NULL AND detail ->> 'job' IN (SELECT id::text FROM jobs WHERE scan_id = $1::bigint)))
+		ORDER BY id DESC LIMIT 1`, scanID, scanOutcomes).Scan(&e.ID, &e.At, &e.UserID, &e.Username, &e.IP, &e.Action, &e.Target, &e.Detail)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
+
 func randEncode(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
 func randDecode(s string) ([]byte, error) { return base64.RawURLEncoding.DecodeString(s) }
@@ -526,16 +534,33 @@ var prefValues = map[string]map[string]bool{
 	"units":    {"binary": true, "decimal": true},
 	"language": {"nl": true, "en": true},
 	"theme":    {"system": true, "light": true, "dark": true},
+	// Which delete scripts the interface asks for: the advanced script (a summary, a typed confirmation, a check of every file) or the
+	// simple one (a .txt with one command per file or folder, to paste into a terminal). See ADR-0011.
+	"delete_scripts": {"advanced": true, "simple": true},
+}
+
+// accentRE is the accent colour a person may pick: #rrggbb. Anything else would end up in a CSS custom property.
+var accentRE = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// validPref checks one preference and returns the value to store. "accent" is a free colour (#rrggbb, stored in
+// lower case) or empty for the app's default; the other preferences are a fixed set.
+func validPref(key, value string) (string, bool) {
+	if key == "accent" {
+		if value == "" {
+			return "", true
+		}
+		return strings.ToLower(value), accentRE.MatchString(value)
+	}
+	return value, prefValues[key][value]
 }
 
 // SetPrefs stores interface settings; unknown keys and values are rejected.
 func (s *Service) SetPrefs(ctx context.Context, userID int64, prefs map[string]string) (map[string]string, error) {
-	for k, v := range prefs {
-		if !prefValues[k][v] {
-			return nil, fmt.Errorf("invalid preference %s=%q", k, v)
-		}
+	prefs, err := CleanPrefs(prefs)
+	if err != nil {
+		return nil, err
 	}
 	var out map[string]string
-	err := s.pool.QueryRow(ctx, `UPDATE users SET prefs = prefs || $2::jsonb WHERE id = $1 RETURNING prefs`, userID, prefs).Scan(&out)
+	err = s.pool.QueryRow(ctx, `UPDATE users SET prefs = prefs || $2::jsonb WHERE id = $1 RETURNING prefs`, userID, prefs).Scan(&out)
 	return out, err
 }

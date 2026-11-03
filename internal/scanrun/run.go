@@ -68,7 +68,13 @@ type Result struct {
 	Progress Progress
 	Atime    scanner.AtimeQuality
 	Duration time.Duration
+	// Unreadable is the folders the scan could not read completely: the first MaxUnreadableListed of them, and how many there are.
+	Unreadable scanner.UnreadableReport
 }
+
+// MaxUnreadableListed is how many unreadable folders a finished scan names. The audit log shows an overview to act on, not
+// a file per line (the dashboard lists every error of a scan); the total says how many there are.
+const MaxUnreadableListed = 50
 
 // Run scans share and publishes the result. On failure or cancellation the
 // previously published data of the share is left untouched.
@@ -176,7 +182,7 @@ func Run(ctx context.Context, st *store.Store, share *store.Share, o Options) (*
 		return nil, fail(fmt.Errorf("publish scan: %w", err), prog.Errors.Load())
 	}
 	return &Result{ScanID: scanID, Mode: plan.Mode, Totals: tot, Progress: snapshot(), Atime: quality,
-		Duration: time.Since(started)}, nil
+		Duration: time.Since(started), Unreadable: prog.Unreadable(MaxUnreadableListed)}, nil
 }
 
 func startReporter(o Options, snapshot func() Progress) (stop func()) {

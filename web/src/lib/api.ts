@@ -7,18 +7,23 @@ export class ApiError extends Error {
   field?: string;
   detail?: string;
   retryAfter?: number;
-  constructor(status: number, title: string, code = '', detail = '', field = '', retryAfter = 0) {
+  /** Values a message needs (a version, a limit), for the screen to put in a sentence in the reader's language. */
+  params?: Record<string, string>;
+  constructor(status: number, title: string, code = '', detail = '', field = '', retryAfter = 0, params?: Record<string, string>) {
     super(detail ? `${title}: ${detail}` : title);
     this.status = status;
     this.code = code;
     this.field = field || undefined;
     this.detail = detail || undefined;
     this.retryAfter = retryAfter || undefined;
+    this.params = params;
   }
 }
 
 let csrf = '';
 export const setCsrf = (t: string) => { csrf = t; };
+/** The token a request that changes something must carry. A request made outside `api()` (an upload with progress) needs it too. */
+export const getCsrf = () => csrf;
 
 // Called when the server says the browser's session is missing or incomplete,
 // so the shell can switch to the sign-in screens.
@@ -35,8 +40,8 @@ export function qs(params: Record<string, string | number | boolean | undefined 
   return s ? `?${s}` : '';
 }
 
-export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-  const headers: Record<string, string> = { Accept: 'application/json' };
+export async function api<T = unknown>(method: string, path: string, body?: unknown, signal?: AbortSignal, extra?: Record<string, string>): Promise<T> {
+  const headers: Record<string, string> = { Accept: 'application/json', ...extra };
   let payload: BodyInit | undefined;
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -48,18 +53,54 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   const text = await res.text();
   let data: any = undefined;
   try { data = text ? JSON.parse(text) : undefined; } catch { /* not JSON */ }
-  if (!res.ok) {
-    const err = new ApiError(res.status, data?.title || res.statusText || 'error', data?.code || '', data?.detail || '', data?.field || '',
-      Number(res.headers.get('Retry-After')) || 0);
-    if (['unauthenticated', 'mfa_required', 'enroll_required'].includes(err.code) && !path.startsWith('/auth/')) onAuthProblem(err.code);
-    throw err;
-  }
+  if (!res.ok) throw failure(res, data, path);
   if (data?.csrf_token) csrf = data.csrf_token;
   return data as T;
 }
 
-export const get = <T = unknown>(path: string, signal?: AbortSignal) => api<T>('GET', path, undefined, signal);
-export const post = <T = unknown>(path: string, body?: unknown) => api<T>('POST', path, body ?? {});
+/** The error for a response that is not OK: carries the problem document's stable code and field. */
+function failure(res: Response, data: any, path: string): ApiError {
+  const err = new ApiError(res.status, data?.title || res.statusText || 'error', data?.code || '', data?.detail || '', data?.field || '',
+    Number(res.headers.get('Retry-After')) || 0, data?.params);
+  if (['unauthenticated', 'mfa_required', 'enroll_required'].includes(err.code) && !path.startsWith('/auth/')) onAuthProblem(err.code);
+  return err;
+}
+
+/** A file the server made on request: its bytes, the name it suggests and the numbers it reports in headers. */
+export interface Download { blob: Blob; filename: string; files: number; folders: number; items: number; skipped: number; bytes: number }
+
+/**
+ * The file name a Content-Disposition header suggests: filename* (RFC 6266, any letters) before filename. Anything that could change the folder
+ * or the kind of file is replaced, because the name is only a suggestion from a server and ends up on the person's disk.
+ */
+export function filenameFromDisposition(header: string | null, fallback = 'download'): string {
+  let name = '';
+  const star = /filename\*\s*=\s*([^']*)'[^']*'([^;]+)/i.exec(header ?? '');
+  if (star) { try { name = decodeURIComponent(star[2].trim()); } catch { /* fall through to the plain form */ } }
+  if (!name) {
+    const plain = /filename\s*=\s*(?:"([^"]*)"|([^;]+))/i.exec(header ?? '');
+    name = (plain?.[1] ?? plain?.[2] ?? '').trim();
+  }
+  name = name.replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+/, '_').slice(0, 200);
+  return name || fallback;
+}
+
+/** POSTs JSON and returns the file in the answer (the delete script). Errors are the same ApiError as everywhere. */
+export async function postForFile(path: string, body: unknown): Promise<Download> {
+  const headers: Record<string, string> = { Accept: 'text/plain, application/problem+json', 'Content-Type': 'application/json' };
+  if (csrf) headers['X-CSRF-Token'] = csrf;
+  const res = await fetch('/api/v1' + path, { method: 'POST', headers, body: JSON.stringify(body), credentials: 'same-origin' });
+  if (!res.ok) {
+    let data: any = undefined;
+    try { data = JSON.parse(await res.text()); } catch { /* not JSON */ }
+    throw failure(res, data, path);
+  }
+  const num = (h: string) => Number(res.headers.get(h)) || 0;
+  return { blob: await res.blob(), filename: filenameFromDisposition(res.headers.get('Content-Disposition')), files: num('X-Files'), folders: num('X-Folders'), items: num('X-Items'), skipped: num('X-Skipped'), bytes: num('X-Bytes') };
+}
+
+export const get = <T = unknown>(path: string, signal?: AbortSignal, headers?: Record<string, string>) => api<T>('GET', path, undefined, signal, headers);
+export const post = <T = unknown>(path: string, body?: unknown, headers?: Record<string, string>) => api<T>('POST', path, body ?? {}, undefined, headers);
 export const patch = <T = unknown>(path: string, body: unknown) => api<T>('PATCH', path, body);
 export const put = <T = unknown>(path: string, body: unknown) => api<T>('PUT', path, body);
 export const del = <T = unknown>(path: string, body?: unknown) => api<T>('DELETE', path, body);
@@ -77,6 +118,19 @@ export interface SessionResponse {
 export interface AuthStatus {
   setup_required: boolean; authenticated: boolean; min_password_length: number; https_required: boolean;
   stage?: 'pending' | 'enroll' | 'active'; csrf_token?: string; methods?: string[]; user?: User;
+}
+/** An open invitation (never carries the token: that exists only in the answer that makes it). */
+export interface Invitation {
+  id: number; kind: 'new' | 'reset'; user_id: number | null; username: string; role: 'admin' | 'viewer'; created_by: string; created_at: string; expires_at: string;
+}
+/** The answer that makes an invitation: the only place the token and the link are ever shown. */
+export interface InvitationCreated extends Invitation { token: string; url: string }
+/** What the guest sees of an invitation. */
+export interface InviteInfo { kind: 'new' | 'reset'; username: string; role: 'admin' | 'viewer'; invited_by: string; expires_at: string }
+/** GET /api/v1/system/update: what the update check knows (administrators only). */
+export interface UpdateStatus {
+  enabled: boolean; current: string; latest: string; available: boolean; url: string;
+  checked_at: string | null; error: string; error_detail: string; repo: string;
 }
 export interface Progress {
   dirs: number; reused_dirs: number; files: number; errors: number; bytes: number; alloc: number; current_dir: string;
@@ -135,3 +189,19 @@ export interface Passkey { id: string; name: string; created_at: string; last_us
 export interface AuditEntry { id: number; at: string; user_id: number | null; username: string; ip: string; action: string; target: string; detail: Record<string, unknown>; }
 export interface Job { id: number; kind: string; share_id: number; state: string; mode: string; trigger: string; requested_by: string; requested_at: string; started_at: string | null; finished_at: string | null; error: string | null; }
 export interface Category { id: number; key: string; }
+
+// ---- in-app backup and restore (backup-restore.md) ----
+export interface BackupChanges {
+  shares_added: string[]; shares_updated: string[]; shares_removed: string[]; file_types_changed: number;
+  preferences_applied: number; preferences_skipped: string[]; passwords_unreadable: string[]; recategorize_shares: number;
+}
+export interface BackupSummary {
+  format_version: number; app_version: string; created_at: string; counts: { shares: number; file_types: number; preferences: number };
+  missing: string[]; changes: BackupChanges; scans_active: boolean;
+}
+export interface StagedBackup { token: string; summary: BackupSummary }
+export interface BackupJob {
+  id: number; status: 'running' | 'done' | 'failed'; phase: 'checking' | 'replacing'; step: number; steps: number;
+  error_key: string; error_params: Record<string, string>; summary: BackupChanges | null; checking_ms: number | null; replacing_ms: number | null;
+  started_by: string; started_at: string; finished_at: string | null;
+}

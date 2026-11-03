@@ -1,0 +1,55 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestDataPathWarningOnlyForARelativePath(t *testing.T) {
+	for _, rel := range []string{"./data", "data", "../nas", "~/nas", "appdata/nasa"} {
+		if w := dataPathWarning(rel); !strings.Contains(w, "relative path") || !strings.Contains(w, rel) {
+			t.Errorf("DATA_PATH=%q: warning = %q", rel, w)
+		}
+	}
+	for _, ok := range []string{"/srv/nasa", "/mnt/user/appdata/nas-storage-analyzer", "/", ""} {
+		if w := dataPathWarning(ok); w != "" {
+			t.Errorf("DATA_PATH=%q: unexpected warning %q", ok, w)
+		}
+	}
+}
+
+// A beta build says so: the same binary reports beta for NASSA_TAG=beta and stable when it is unset.
+func TestBuildInfoFollowsNASSA_TAG(t *testing.T) {
+	oldVersion, oldCommit := version, commit
+	t.Cleanup(func() { version, commit = oldVersion, oldCommit })
+	version, commit = "0.1.0", "abc1234"
+
+	t.Setenv("NASSA_TAG", "beta")
+	if got := buildInfo().Channel; got != "beta" {
+		t.Errorf("NASSA_TAG=beta: channel = %q", got)
+	}
+	t.Setenv("NASSA_TAG", "")
+	if got := buildInfo().Channel; got != "stable" {
+		t.Errorf("NASSA_TAG unset: channel = %q", got)
+	}
+	t.Setenv("NASSA_TAG", "latest")
+	if got := buildInfo().Channel; got != "stable" {
+		t.Errorf("NASSA_TAG=latest: channel = %q", got)
+	}
+	if got := versionLine(); got != "nasa 0.1.0 (abc1234)" {
+		t.Errorf("versionLine = %q", got)
+	}
+	commit = ""
+	if got := versionLine(); got != "nasa 0.1.0" {
+		t.Errorf("versionLine without a commit = %q", got)
+	}
+}
+
+func TestUpdateCheckIsOnUnlessSwitchedOff(t *testing.T) {
+	for v, want := range map[string]bool{"": true, "true": true, "1": true, "yes": true, "on": true, "anything": true,
+		"false": false, "FALSE": false, "0": false, "no": false, "No": false, "off": false, " off ": false} {
+		if got := updateCheckEnabled(v); got != want {
+			t.Errorf("NASSA_UPDATE_CHECK=%q: enabled = %v, want %v", v, got, want)
+		}
+	}
+}

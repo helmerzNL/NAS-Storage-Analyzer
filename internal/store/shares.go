@@ -26,7 +26,8 @@ type Share struct {
 }
 
 // EnsureShare creates or updates a bind-mount share by name and makes sure
-// its partitions exist.
+// its partitions exist. An existing share keeps the settings in its config that
+// this call does not know about (the base paths of the delete scripts).
 func (s *Store) EnsureShare(ctx context.Context, name, path string, excludes []string, workers, maxOps int) (*Share, error) {
 	cfg, _ := json.Marshal(map[string]string{"path": path})
 	if excludes == nil {
@@ -36,7 +37,7 @@ func (s *Store) EnsureShare(ctx context.Context, name, path string, excludes []s
 	err := s.Pool.QueryRow(ctx, `
 		INSERT INTO shares (name, kind, config, excludes, workers, max_ops_per_sec)
 		VALUES ($1, 'bind', $2, $3, $4, $5)
-		ON CONFLICT (name) DO UPDATE SET config = EXCLUDED.config, excludes = EXCLUDED.excludes,
+		ON CONFLICT (name) DO UPDATE SET config = shares.config || EXCLUDED.config, excludes = EXCLUDED.excludes,
 			workers = EXCLUDED.workers, max_ops_per_sec = EXCLUDED.max_ops_per_sec
 		RETURNING id`, name, cfg, excludes, workers, maxOps).Scan(&id)
 	if err != nil {

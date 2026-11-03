@@ -19,6 +19,7 @@ import (
 
 	apispec "github.com/helmerznl/nas-storage-analyzer/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/buildinfo"
 	"github.com/helmerznl/nas-storage-analyzer/internal/query"
 )
 
@@ -32,6 +33,8 @@ type Config struct {
 	CSVMaxRows int
 	// Now is the clock for relative filters such as unused_days (tests).
 	Now func() time.Time
+	// Build says which version and release channel this is; GET /api/v1/version reports it.
+	Build buildinfo.Info
 }
 
 // Server implements http.Handler.
@@ -50,6 +53,10 @@ type Server struct {
 
 	catMu sync.Mutex
 	cats  map[int16]string
+
+	// The token the setup wizard asks for. It is state of the running process: a factory reset replaces it.
+	tokMu    sync.RWMutex
+	setupTok string
 }
 
 // New builds the API on top of a read-only pool. Pass Options to require
@@ -68,6 +75,7 @@ func New(pool *pgxpool.Pool, log *slog.Logger, cfg Config, opts ...Options) *Ser
 	s := &Server{q: q, pool: pool, log: log, cfg: cfg, mux: http.NewServeMux()}
 	if len(opts) > 0 {
 		s.opts, s.auth = opts[0], opts[0].Auth
+		s.setupTok = opts[0].SetupToken
 	}
 	s.m = newMetrics(q, pool, log)
 	s.routes()
@@ -98,6 +106,16 @@ func (s *Server) routes() {
 		w.Write([]byte("ok\n"))
 	})
 	s.handleFunc("GET /readyz", s.ready)
+	// Public on purpose: the sign-in screen already shows the beta label, and nothing here is secret.
+	s.handleFunc("GET /api/v1/version", func(w http.ResponseWriter, r *http.Request) {
+		build := s.cfg.Build
+		if build.Version == "" && build.Channel == "" {
+			build = buildinfo.New("", "", "")
+		}
+		if err := writeJSON(w, build); err != nil {
+			s.log.Error("writing the version", "error", err)
+		}
+	})
 	metrics := promhttp.HandlerFor(s.m.reg, promhttp.HandlerOpts{})
 	s.handleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		if s.auth != nil && !s.metricsAllowed(r) {
@@ -270,7 +288,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 			"Narrow the filters (a smaller folder, a category, a size range) and try again.")
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
-	case s.authFail(w, r, err), s.adminFail(w, r, err):
+	case s.authFail(w, r, err), s.adminFail(w, r, err), s.backupFail(w, r, err), s.resetFail(w, r, err):
 	default:
 		s.log.Error("request failed", "request_id", requestID(r), "path", r.URL.Path, "error", err)
 		s.problem(w, r, http.StatusInternalServerError, "internal error", "")
@@ -286,9 +304,13 @@ type problemBody struct {
 	// enroll_required, forbidden, csrf, locked, ...) the UI switches on.
 	Code string `json:"code,omitempty"`
 	// Field names the form field a validation error is about.
-	Field     string `json:"field,omitempty"`
-	RequestID string `json:"request_id,omitempty"`
+	Field string `json:"field,omitempty"`
+	// Params are the values a message needs (a version, a limit), for the UI to put in a sentence in the reader's language.
+	Params    map[string]string `json:"params,omitempty"`
+	RequestID string            `json:"request_id,omitempty"`
 }
+
+func writeProblem(w http.ResponseWriter, p problemBody) { json.NewEncoder(w).Encode(p) }
 
 func (s *Server) problem(w http.ResponseWriter, r *http.Request, status int, title, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")

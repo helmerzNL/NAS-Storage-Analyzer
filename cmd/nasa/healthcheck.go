@@ -12,7 +12,7 @@ import (
 // image. It exits 0 when the URL answers 2xx and 1 otherwise.
 func runHealthcheck(args []string) error {
 	fs := flag.NewFlagSet("healthcheck", flag.ExitOnError)
-	url := fs.String("url", env("NASA_HEALTHCHECK_URL", "http://127.0.0.1:8080/readyz"), "address to request (env NASA_HEALTHCHECK_URL)")
+	url := fs.String("url", env("NASSA_HEALTHCHECK_URL", "http://127.0.0.1:8080/readyz"), "address to request (env NASSA_HEALTHCHECK_URL)")
 	timeout := fs.Duration("timeout", 4*time.Second, "give up after this long")
 	fs.Parse(args)
 	c := &http.Client{Timeout: *timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}

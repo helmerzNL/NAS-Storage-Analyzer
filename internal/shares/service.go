@@ -59,6 +59,8 @@ func configOf(in Input) []byte {
 	set("domain", in.Domain)
 	set("version", in.Version)
 	set("mount_options", in.MountOptions)
+	set("client_windows", in.ClientWindows)
+	set("client_posix", in.ClientPosix)
 	b, _ := json.Marshal(m)
 	return b
 }
@@ -68,6 +70,7 @@ func applyConfig(in *Input, raw []byte) {
 	_ = json.Unmarshal(raw, &m)
 	in.Path, in.Server, in.Export, in.Share = m["path"], m["server"], m["export"], m["share"]
 	in.Username, in.Domain, in.Version, in.MountOptions = m["username"], m["domain"], m["version"], m["mount_options"]
+	in.ClientWindows, in.ClientPosix = m["client_windows"], m["client_posix"]
 }
 
 const loadSQL = `SELECT id, name, kind, config, excludes, workers, max_ops_per_sec, max_ops_day, day_start_hour, day_end_hour, cron,

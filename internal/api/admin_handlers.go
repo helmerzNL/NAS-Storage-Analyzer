@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"regexp"
 	"strings"
 	"time"
 
@@ -26,7 +25,17 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("PUT "+v+"/extension-map/{ext}", lvAdmin, s.putExtension)
 		h("DELETE "+v+"/extension-map/{ext}", lvAdmin, s.deleteExtension)
 		h("GET "+v+"/settings", lvViewer, s.getSettings)
+		h("GET "+v+"/fs/dirs", lvAdmin, s.browseFolders)
 	}
+	s.backupRoutes(h, v)
+	s.resetRoutes(h, v)
+	if s.opts.Updates != nil {
+		// The administrator is told that a newer release exists; nobody else, and nothing is updated or downloaded.
+		h("GET "+v+"/system/update", lvAdmin, s.updateStatus)
+		h("POST "+v+"/system/update/check", lvAdmin, s.updateCheck)
+	}
+	// Writes the text of a script that deletes the selected files; the application itself deletes nothing (ADR 0006).
+	h("POST "+v+"/shares/{share}/delete-script", lvAdmin, s.deleteScript)
 	h("GET "+v+"/shares/{share}/history", lvViewer, s.history)
 	h("GET "+v+"/shares/{share}/dirs/{dir}/history", lvViewer, s.dirHistory)
 	h("PUT "+v+"/auth/prefs", lvViewer, s.putPrefs)
@@ -43,6 +52,8 @@ func (s *Server) adminFail(w http.ResponseWriter, r *http.Request, err error) bo
 			Detail: ve.Msg, Code: "invalid_request", Field: ve.Field, RequestID: requestID(r)})
 	case errors.Is(err, shares.ErrNotFound):
 		s.problemCode(w, r, http.StatusNotFound, "not found", "", "not_found")
+	case errors.Is(err, shares.ErrNoSharesRoot):
+		s.problemCode(w, r, http.StatusConflict, "no shares folder is configured", "Set NASSA_SHARES_DIR (see docs/deploy.md).", "not_configured")
 	case errors.Is(err, shares.ErrConflict):
 		s.problemCode(w, r, http.StatusConflict, "a share with this name already exists", "", "conflict")
 	case errors.Is(err, shares.ErrBusy):
@@ -197,8 +208,6 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) error {
 	return writeJSON(w, items[jobs.Job]{Items: list})
 }
 
-var extRE = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
-
 // scheduleRecategorize queues a re-categorisation of every share that has data.
 func (s *Server) scheduleRecategorize(ctx context.Context, by string) (int, error) {
 	list, err := s.q.Shares(ctx)
@@ -221,7 +230,7 @@ func (s *Server) scheduleRecategorize(ctx context.Context, by string) (int, erro
 
 func (s *Server) putExtension(w http.ResponseWriter, r *http.Request) error {
 	ext := strings.ToLower(strings.TrimPrefix(r.PathValue("ext"), "."))
-	if !extRE.MatchString(ext) {
+	if !shares.ValidExt(ext) {
 		return bad("an extension is 1-16 letters or digits, without a dot")
 	}
 	var in struct {
@@ -245,7 +254,7 @@ func (s *Server) putExtension(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) deleteExtension(w http.ResponseWriter, r *http.Request) error {
 	ext := strings.ToLower(strings.TrimPrefix(r.PathValue("ext"), "."))
-	if !extRE.MatchString(ext) {
+	if !shares.ValidExt(ext) {
 		return bad("an extension is 1-16 letters or digits, without a dot")
 	}
 	if err := s.opts.Shares.DeleteExtension(r.Context(), ext); err != nil {
@@ -257,6 +266,32 @@ func (s *Server) deleteExtension(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.audit(r, "extension.delete", ext, nil)
 	return writeJSON(w, map[string]any{"ext": ext, "recategorize_jobs": n})
+}
+
+// browseFolders lists the sub-folders of a folder below the shares root, for the folder
+// picker in the share form. Administrators only: it shows the layout of the file system.
+func (s *Server) browseFolders(w http.ResponseWriter, r *http.Request) error {
+	type result struct {
+		l   *shares.Listing
+		err error
+	}
+	p := r.URL.Query().Get("path")
+	done := make(chan result, 1)
+	// A hung network mount blocks readdir for as long as the kernel waits; answer on time
+	// and leave the goroutine to finish on its own.
+	go func() {
+		l, err := shares.Browse(s.opts.SharesRoot, p)
+		done <- result{l, err}
+	}()
+	select {
+	case <-r.Context().Done():
+		return r.Context().Err()
+	case res := <-done:
+		if res.err != nil {
+			return res.err
+		}
+		return writeJSON(w, res.l)
+	}
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) error {
@@ -365,4 +400,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) error {
 		case <-tick.C:
 		}
 	}
+}
+
+// updateStatus returns the remembered answer about newer releases; a page view never calls GitHub twice in six hours.
+func (s *Server) updateStatus(w http.ResponseWriter, r *http.Request) error {
+	return writeJSON(w, s.opts.Updates.Status(r.Context()))
+}
+
+// updateCheck asks GitHub again now (within a floor of 30 seconds between two real requests).
+func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) error {
+	return writeJSON(w, s.opts.Updates.Check(r.Context()))
 }

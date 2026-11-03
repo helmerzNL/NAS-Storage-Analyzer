@@ -1,0 +1,4 @@
+
+# The generated delete scripts are compared byte for byte, line endings included (cmd and PowerShell need CRLF, sh
+# needs LF): Git must not convert them on a Windows checkout.
+internal/delscript/testdata/golden/* -text

@@ -61,6 +61,27 @@ func TestValidateBind(t *testing.T) {
 	}
 }
 
+// The shares root is NASSA_SHARES_MOUNT, so it need not be /mnt/shares: the check and the example in
+// the error message must follow it.
+func TestValidateBindFollowsConfiguredRoot(t *testing.T) {
+	opt := shares.Options{SharesRoot: "/mnt/user"}
+	in := valid()
+	in.Path = "/mnt/user/media"
+	if err := shares.Validate(&in, opt); err != nil {
+		t.Fatalf("a path below the configured root: %v", err)
+	}
+	in = valid() // /mnt/shares/media is outside this root
+	if err := shares.Validate(&in, opt); field(err) != "path" || !strings.Contains(err.Error(), "/mnt/user") {
+		t.Errorf("a path outside the configured root: %v", err)
+	}
+	in = valid()
+	in.Path = "media"
+	err := shares.Validate(&in, opt)
+	if field(err) != "path" || !strings.Contains(err.Error(), "/mnt/user/media") {
+		t.Errorf("a relative path must show an example below the configured root: %v", err)
+	}
+}
+
 func TestValidateFields(t *testing.T) {
 	opt := shares.Options{}
 	cases := []struct {
@@ -100,6 +121,43 @@ func TestValidateFields(t *testing.T) {
 	in.Cron = "0 3 * * *"
 	if err := shares.Validate(&in, opt); err != nil || len(in.Excludes) != 2 || in.Excludes[0] != ".snapshot" {
 		t.Errorf("good input rejected or not trimmed: %v %v", err, in.Excludes)
+	}
+}
+
+// The base paths of the delete scripts are checked as hard as the generator checks them, because what is stored here
+// ends up in a script.
+func TestValidateClientRoots(t *testing.T) {
+	in := valid()
+	in.ClientWindows, in.ClientPosix = `  //NAS/Media//Films/ `, "/mnt/user//media/"
+	if err := shares.Validate(&in, shares.Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if in.ClientWindows != `\\NAS\Media\Films` || in.ClientPosix != "/mnt/user/media" {
+		t.Errorf("not normalised: %q %q", in.ClientWindows, in.ClientPosix)
+	}
+	in = valid()
+	in.ClientWindows, in.ClientPosix = "z:", "   "
+	if err := shares.Validate(&in, shares.Options{}); err != nil || in.ClientWindows != `Z:\` || in.ClientPosix != "" {
+		t.Errorf("drive letter and blank: %q %q %v", in.ClientWindows, in.ClientPosix, err)
+	}
+	for name, c := range map[string]struct{ windows, posix, field string }{
+		"posix path for Windows":    {"/mnt/user/media", "", "client_windows"},
+		"percent breaks cmd":        {`\\nas\100%`, "", "client_windows"},
+		"long-path prefix":          {`\\?\C:\x`, "", "client_windows"},
+		"control character":         {"Z:\\a\nb", "", "client_windows"},
+		"Windows path for Linux":    {"", `\\nas\media`, "client_posix"},
+		"relative path":             {"", "media/films", "client_posix"},
+		"dot-dot":                   {"", "/mnt/../etc", "client_posix"},
+		"newline in a Linux path":   {"", "/mnt/a\nrm -rf ~", "client_posix"},
+		"quote in a Linux path":     {"", `/mnt/a"b`, "client_posix"},
+		"bar in a Linux path":       {"", "/mnt/a|b", "client_posix"},
+		"replacement character too": {"", "/mnt/a\ufffdb", "client_posix"},
+	} {
+		in := valid()
+		in.ClientWindows, in.ClientPosix = c.windows, c.posix
+		if err := shares.Validate(&in, shares.Options{}); field(err) != c.field {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }
 
@@ -246,6 +304,54 @@ func TestCreateLoadUpdateDelete(t *testing.T) {
 	}
 	if err := svc.Delete(ctx, id); !errors.Is(err, shares.ErrNotFound) {
 		t.Errorf("delete twice: %v", err)
+	}
+}
+
+// A base path is stored in the config column next to the settings of the kind, so everything that rewrites that
+// column has to carry it along: a partial update of something else, and the scan command's EnsureShare.
+func TestClientRootsSurviveOtherChanges(t *testing.T) {
+	svc, db := newService(t)
+	in := valid()
+	in.ClientWindows, in.ClientPosix = `\\NAS\Media`, "/mnt/user/media"
+	id, err := svc.Create(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, _ := svc.Load(ctx, id)
+	if f.Input.ClientWindows != `\\NAS\Media` || f.Input.ClientPosix != "/mnt/user/media" {
+		t.Fatalf("after create: %+v", f.Input)
+	}
+
+	if err := svc.Update(ctx, id, []byte(`{"cron": "0 3 * * *", "workers": 2}`)); err != nil {
+		t.Fatal(err)
+	}
+	f, _ = svc.Load(ctx, id)
+	if f.Input.ClientWindows != `\\NAS\Media` || f.Input.ClientPosix != "/mnt/user/media" {
+		t.Errorf("a partial update lost the base paths: %+v", f.Input)
+	}
+
+	if _, err := db.Store.EnsureShare(ctx, "media", "/mnt/shares/elsewhere", nil, 3, 0); err != nil {
+		t.Fatal(err)
+	}
+	f, _ = svc.Load(ctx, id)
+	if f.Input.Path != "/mnt/shares/elsewhere" || f.Input.ClientWindows != `\\NAS\Media` || f.Input.ClientPosix != "/mnt/user/media" {
+		t.Errorf("EnsureShare must change the path and keep the base paths: %+v", f.Input)
+	}
+
+	// One of them is changed, the other is cleared with an empty string, and an invalid one changes nothing.
+	if err := svc.Update(ctx, id, []byte(`{"client_windows": "", "client_posix": "/volume1/media"}`)); err != nil {
+		t.Fatal(err)
+	}
+	f, _ = svc.Load(ctx, id)
+	if f.Input.ClientWindows != "" || f.Input.ClientPosix != "/volume1/media" {
+		t.Errorf("after change and clear: %+v", f.Input)
+	}
+	if err := svc.Update(ctx, id, []byte(`{"client_posix": "relative"}`)); field(err) != "client_posix" {
+		t.Errorf("invalid base path: %v", err)
+	}
+	f, _ = svc.Load(ctx, id)
+	if f.Input.ClientPosix != "/volume1/media" {
+		t.Errorf("an invalid update changed the stored path: %q", f.Input.ClientPosix)
 	}
 }
 

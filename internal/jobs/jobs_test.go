@@ -245,3 +245,107 @@ func TestOnlyOneSchedulerLeads(t *testing.T) {
 		t.Errorf("%d jobs created by four schedulers in a moment, want exactly 1", n)
 	}
 }
+
+// The file-type map is read when a re-categorisation runs. An edit made while one is RUNNING is not in it, so a job has to be able to follow:
+// refusing it (because "one is active") lost the edit, and nobody was told. This is the failure of TestEditingTheExtensionMapRecategorizes
+// that turned CI red on beta, as a test that does not depend on timing.
+func TestAnEditWhileARecategorizationRunsGetsAnotherOneAfterIt(t *testing.T) {
+	_, q, sh := setup(t)
+	first, err := q.Enqueue(ctx, jobs.KindRecategorize, sh.ID, "auto", "manual", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err := q.Claim(ctx, "w1"); err != nil || c == nil || c.ID != first.ID {
+		t.Fatalf("claim: %+v %v", c, err)
+	}
+	// The map is edited now, while the first job runs: the follow-up is accepted.
+	second, err := q.Enqueue(ctx, jobs.KindRecategorize, sh.ID, "auto", "manual", "")
+	if err != nil {
+		t.Fatalf("an edit while a re-categorisation runs must queue another one: %v", err)
+	}
+	// A second WAITING one adds nothing (a waiting job reads the map when it starts), so that refusal stays, and is safe to ignore.
+	if _, err := q.Enqueue(ctx, jobs.KindRecategorize, sh.ID, "auto", "manual", ""); !errors.Is(err, jobs.ErrAlreadyActive) {
+		t.Errorf("two waiting re-categorisations: %v", err)
+	}
+	// The waiting one does not start next to the running one, however many workers ask...
+	var wg sync.WaitGroup
+	var started atomic.Int32
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if c, _ := q.Claim(ctx, "w"+string(rune('2'+i))); c != nil {
+				started.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if started.Load() != 0 {
+		t.Fatalf("%d workers started a second re-categorisation of the same share next to the running one", started.Load())
+	}
+	// ...and starts once the running one is finished.
+	if err := q.Finish(ctx, first.ID, jobs.StateDone, ""); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := q.Claim(ctx, "w9"); err != nil || c == nil || c.ID != second.ID {
+		t.Fatalf("the follow-up did not start after the first: %+v %v", c, err)
+	}
+}
+
+func TestAScanStillCannotBeQueuedWhileOneRuns(t *testing.T) {
+	_, q, sh := setup(t)
+	if _, err := q.Enqueue(ctx, jobs.KindScan, sh.ID, "auto", "manual", ""); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := q.Claim(ctx, "w1"); c == nil {
+		t.Fatal("no scan to claim")
+	}
+	if _, err := q.Enqueue(ctx, jobs.KindScan, sh.ID, "full", "manual", ""); !errors.Is(err, jobs.ErrAlreadyActive) {
+		t.Errorf("a second scan while one runs: %v (the old rule holds for scans: a second \"scan now\" is refused)", err)
+	}
+}
+
+func TestARunningRecategorizationOfOneShareDoesNotHoldBackAnotherShare(t *testing.T) {
+	st, q, a := setup(t)
+	b, err := st.EnsureShare(ctx, "other", t.TempDir(), nil, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []int64{a.ID, b.ID} {
+		if _, err := q.Enqueue(ctx, jobs.KindRecategorize, id, "auto", "manual", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c1, _ := q.Claim(ctx, "w1")
+	c2, _ := q.Claim(ctx, "w2")
+	if c1 == nil || c2 == nil || c1.ShareID == c2.ShareID {
+		t.Fatalf("each share's re-categorisation runs on its own: %+v %+v", c1, c2)
+	}
+}
+
+// A follow-up that has to wait must not hold back the work behind it: if Claim kept choosing it (and failing), every other job would wait
+// until the running re-categorisation of that one share was done.
+func TestAWaitingFollowUpDoesNotHoldBackOtherJobs(t *testing.T) {
+	st, q, a := setup(t)
+	b, err := st.EnsureShare(ctx, "other", t.TempDir(), nil, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Enqueue(ctx, jobs.KindRecategorize, a.ID, "auto", "manual", ""); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := q.Claim(ctx, "w1"); c == nil {
+		t.Fatal("no first job")
+	}
+	if _, err := q.Enqueue(ctx, jobs.KindRecategorize, a.ID, "auto", "manual", ""); err != nil { // the follow-up, waiting, with the lower id
+		t.Fatal(err)
+	}
+	scan, err := q.Enqueue(ctx, jobs.KindScan, b.ID, "auto", "manual", "") // work for another share, behind it
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := q.Claim(ctx, "w2")
+	if err != nil || c == nil || c.ID != scan.ID {
+		t.Fatalf("the scan of another share was held back by a follow-up that has to wait: %+v %v", c, err)
+	}
+}

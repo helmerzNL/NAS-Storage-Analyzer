@@ -1,0 +1,67 @@
+name: Release checklist
+description: Standard checklist for shipping a new version
+title: "Release x.y.z"
+labels: ["release"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version number
+      placeholder: "1.5.0"
+    validations:
+      required: true
+
+  - type: input
+    id: date
+    attributes:
+      label: Planned release date
+      placeholder: "2026-09-15"
+
+  - type: textarea
+    id: highlights
+    attributes:
+      label: Main changes
+      description: Short list for the release notes.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: preparation
+    attributes:
+      label: Preparation
+      options:
+        - label: All planned issues closed or moved to the next milestone
+        - label: Version number bumped on all platforms
+        - label: Changelog updated
+        - label: Database migrations tested, including rollback
+        - label: Translations complete
+
+  - type: checkboxes
+    id: testing
+    attributes:
+      label: Testing
+      options:
+        - label: CI green on the release branch
+        - label: Web interface tested in Chrome, Safari and Firefox
+        - label: Browser end-to-end test (web/e2e) green on beta
+        - label: Upgrade from the previous version tested, including the database migration
+        - label: A scan of a real share tested (mounted read-only)
+
+  - type: checkboxes
+    id: rollout
+    attributes:
+      label: Rollout
+      options:
+        - label: Tag and GitHub release created
+        - label: Release notes docs/releases/<tag>.md reviewed and merged into beta first
+        - label: Promotion pull request beta to main merged with a merge commit
+        - label: Docker images published (latest and the version tag, amd64 and arm64)
+
+  - type: checkboxes
+    id: after
+    attributes:
+      label: After release
+      options:
+        - label: Release notes published and shared
+        - label: Error reports and crash logs monitored
+        - label: Documentation updated

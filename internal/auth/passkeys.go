@@ -12,6 +12,7 @@ import (
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // webAuthn is reserved for per-service state; the relying party is passed per
@@ -92,8 +93,13 @@ func (s *Service) waUser(ctx context.Context, u *User) (waUser, error) {
 // Ceremonies keep the server's half of a WebAuthn exchange between the "begin"
 // and "finish" request. They are single use and short lived.
 func (s *Service) saveCeremony(ctx context.Context, kind string, userID *int64, sd *webauthn.SessionData) (string, error) {
+	return s.saveCeremonyData(ctx, kind, userID, sd)
+}
+
+// saveCeremonyData stores any JSON payload as a ceremony: an invitation keeps the chosen name with it.
+func (s *Service) saveCeremonyData(ctx context.Context, kind string, userID *int64, v any) (string, error) {
 	id := randToken(18)
-	data, err := json.Marshal(sd)
+	data, err := json.Marshal(v)
 	if err != nil {
 		return "", err
 	}
@@ -103,50 +109,103 @@ func (s *Service) saveCeremony(ctx context.Context, kind string, userID *int64, 
 }
 
 func (s *Service) takeCeremony(ctx context.Context, id, kind string, wantUser *int64) (*webauthn.SessionData, error) {
-	var data []byte
-	var uid *int64
-	err := s.pool.QueryRow(ctx, `DELETE FROM webauthn_ceremonies WHERE id = $1 AND kind = $2 AND expires_at > now() RETURNING data, user_id`,
-		id, kind).Scan(&data, &uid)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, errors.New("the passkey request expired, start again")
-	}
-	if err != nil {
-		return nil, err
-	}
-	if wantUser != nil && (uid == nil || *uid != *wantUser) {
-		return nil, errors.New("the passkey request belongs to another user")
-	}
 	var sd webauthn.SessionData
-	if err := json.Unmarshal(data, &sd); err != nil {
+	if err := s.takeCeremonyData(ctx, id, kind, wantUser, &sd); err != nil {
 		return nil, err
 	}
 	return &sd, nil
 }
 
-// BeginPasskeyRegistration starts adding a passkey. Passkeys must be
-// discoverable and verify the user (PIN or biometrics), so that one passkey
-// can replace password and second factor.
-func (s *Service) BeginPasskeyRegistration(ctx context.Context, rp RelyingParty, u *User) (*protocol.CredentialCreation, string, error) {
+func (s *Service) takeCeremonyData(ctx context.Context, id, kind string, wantUser *int64, into any) error {
+	var data []byte
+	var uid *int64
+	err := s.pool.QueryRow(ctx, `DELETE FROM webauthn_ceremonies WHERE id = $1 AND kind = $2 AND expires_at > now() RETURNING data, user_id`,
+		id, kind).Scan(&data, &uid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("the passkey request expired, start again")
+	}
+	if err != nil {
+		return err
+	}
+	if wantUser != nil && (uid == nil || *uid != *wantUser) {
+		return errors.New("the passkey request belongs to another user")
+	}
+	return json.Unmarshal(data, into)
+}
+
+// beginRegistration is the ceremony for adding a passkey to wu. Passkeys must be discoverable and verify the user (PIN or biometrics),
+// so that one passkey can replace password and second factor. An invitation uses it too: one code path, one set of rules.
+func beginRegistration(rp RelyingParty, wu waUser) (*protocol.CredentialCreation, *webauthn.SessionData, error) {
 	wa, err := rp.instance()
 	if err != nil {
-		return nil, "", err
-	}
-	wu, err := s.waUser(ctx, u)
-	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	var exclude []protocol.CredentialDescriptor
 	for _, c := range wu.creds {
 		exclude = append(exclude, c.Descriptor())
 	}
 	req := true
-	creation, sd, err := wa.BeginRegistration(wu,
+	return wa.BeginRegistration(wu,
 		webauthn.WithAuthenticatorSelection(protocol.AuthenticatorSelection{
 			RequireResidentKey: &req, ResidentKey: protocol.ResidentKeyRequirementRequired,
 			UserVerification: protocol.VerificationRequired,
 		}),
 		webauthn.WithExclusions(exclude),
 		webauthn.WithConveyancePreference(protocol.PreferNoAttestation))
+}
+
+// verifyRegistration checks the authenticator's answer (the request body) against the ceremony and returns the new credential.
+func verifyRegistration(rp RelyingParty, wu waUser, sd webauthn.SessionData, r *http.Request) (*webauthn.Credential, error) {
+	wa, err := rp.instance()
+	if err != nil {
+		return nil, err
+	}
+	cred, err := wa.FinishRegistration(wu, sd, r)
+	if err != nil {
+		return nil, fmt.Errorf("passkey rejected: %w", err)
+	}
+	if !cred.Flags.UserVerified {
+		return nil, errors.New("the passkey must verify you with a PIN or biometrics")
+	}
+	return cred, nil
+}
+
+func passkeyName(name string) string {
+	if name == "" {
+		name = "Passkey"
+	}
+	if len(name) > 60 {
+		name = name[:60]
+	}
+	return name
+}
+
+// execer is what a pool and a transaction have in common.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+func storeCredential(ctx context.Context, db execer, userID int64, name string, cred *webauthn.Credential) error {
+	transports := make([]string, len(cred.Transport))
+	for i, t := range cred.Transport {
+		transports[i] = string(t)
+	}
+	_, err := db.Exec(ctx, `
+		INSERT INTO webauthn_credentials (credential_id, user_id, name, public_key, attestation_type, aaguid, sign_count, transports,
+			backup_eligible, backup_state, user_verified)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		cred.ID, userID, passkeyName(name), cred.PublicKey, cred.AttestationType, cred.Authenticator.AAGUID, int64(cred.Authenticator.SignCount),
+		transports, cred.Flags.BackupEligible, cred.Flags.BackupState, cred.Flags.UserVerified)
+	return err
+}
+
+// BeginPasskeyRegistration starts adding a passkey to a signed-in user.
+func (s *Service) BeginPasskeyRegistration(ctx context.Context, rp RelyingParty, u *User) (*protocol.CredentialCreation, string, error) {
+	wu, err := s.waUser(ctx, u)
+	if err != nil {
+		return nil, "", err
+	}
+	creation, sd, err := beginRegistration(rp, wu)
 	if err != nil {
 		return nil, "", err
 	}
@@ -157,17 +216,7 @@ func (s *Service) BeginPasskeyRegistration(ctx context.Context, rp RelyingParty,
 // FinishPasskeyRegistration verifies the authenticator's answer (the request
 // body) and stores the new passkey under name.
 func (s *Service) FinishPasskeyRegistration(ctx context.Context, rp RelyingParty, u *User, ceremony, name string, r *http.Request) error {
-	if name == "" {
-		name = "Passkey"
-	}
-	if len(name) > 60 {
-		name = name[:60]
-	}
 	sd, err := s.takeCeremony(ctx, ceremony, "register", &u.ID)
-	if err != nil {
-		return err
-	}
-	wa, err := rp.instance()
 	if err != nil {
 		return err
 	}
@@ -175,24 +224,11 @@ func (s *Service) FinishPasskeyRegistration(ctx context.Context, rp RelyingParty
 	if err != nil {
 		return err
 	}
-	cred, err := wa.FinishRegistration(wu, *sd, r)
+	cred, err := verifyRegistration(rp, wu, *sd, r)
 	if err != nil {
-		return fmt.Errorf("passkey rejected: %w", err)
+		return err
 	}
-	if !cred.Flags.UserVerified {
-		return errors.New("the passkey must verify you with a PIN or biometrics")
-	}
-	transports := make([]string, len(cred.Transport))
-	for i, t := range cred.Transport {
-		transports[i] = string(t)
-	}
-	_, err = s.pool.Exec(ctx, `
-		INSERT INTO webauthn_credentials (credential_id, user_id, name, public_key, attestation_type, aaguid, sign_count, transports,
-			backup_eligible, backup_state, user_verified)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-		cred.ID, u.ID, name, cred.PublicKey, cred.AttestationType, cred.Authenticator.AAGUID, int64(cred.Authenticator.SignCount),
-		transports, cred.Flags.BackupEligible, cred.Flags.BackupState, cred.Flags.UserVerified)
-	return err
+	return storeCredential(ctx, s.pool, u.ID, name, cred)
 }
 
 func (s *Service) touchCredential(ctx context.Context, c *webauthn.Credential) error {

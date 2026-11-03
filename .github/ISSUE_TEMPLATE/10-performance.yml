@@ -1,0 +1,79 @@
+name: Performance
+description: Slowness, high memory use or battery drain
+title: "[Performance]: "
+labels: ["performance"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: What is slow or heavy?
+      placeholder: Opening a list of 2000 items takes over 10 seconds.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type of problem
+      multiple: true
+      options:
+        - Slow load time
+        - Janky scrolling or animation
+        - High memory use
+        - Battery drain
+        - High data usage
+        - Slow synchronisation
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: When does it happen?
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: input
+    id: size
+    attributes:
+      label: Size of your data set
+      description: The number of items helps us spot scaling problems.
+      placeholder: "around 2000 items"
+
+  - type: input
+    id: measurement
+    attributes:
+      label: Measured value
+      description: For example load time in seconds or memory use in MB.
+      placeholder: "10.4 s to first render"
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      multiple: true
+      options:
+        - Web interface (browser)
+        - REST API
+        - Scanner / worker
+        - Docker deployment
+    validations:
+      required: true
+
+  - type: input
+    id: device
+    attributes:
+      label: Host, data size and version
+      placeholder: "Debian 12, 4 cores, 8 GB, PostgreSQL 16, 10 million files, app 0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: profile
+    attributes:
+      label: Profiling data
+      description: Lighthouse score, DevTools performance profile, or a trace. Optional but very welcome.

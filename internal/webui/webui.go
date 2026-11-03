@@ -61,7 +61,10 @@ func handler(files fs.FS) http.Handler {
 		}
 		if fi, err := fs.Stat(files, name); err != nil || fi.IsDir() {
 			if strings.Contains(path.Base(name), ".") && !strings.HasSuffix(name, ".html") {
-				http.NotFound(w, r) // a missing asset must not turn into the HTML page
+				// A missing asset must not turn into the HTML page. A 404 may be kept by a cache without any header saying so, and the name that
+				// is missing now may be the one the next build brings (a proxy asked during an update): that answer must not outlive the update.
+				h.Set("Cache-Control", "no-store")
+				http.NotFound(w, r)
 				return
 			}
 			name = "index.html"

@@ -49,6 +49,35 @@ const migrateLockKey int64 = 0x4e41534d // "NASM"
 // Migrate applies all embedded migrations that have not run yet, then seeds
 // categories and default extensions.
 func (s *Store) Migrate(ctx context.Context) error {
+	if err := s.MigrateTo(ctx, 0); err != nil {
+		return err
+	}
+	return s.seed(ctx)
+}
+
+// MigrationVersions lists the versions of the embedded migrations in order.
+func MigrationVersions() ([]int, error) {
+	entries, err := fs.ReadDir(migrationFS, "migrations")
+	if err != nil {
+		return nil, err
+	}
+	var out []int
+	for _, e := range entries {
+		ver, err := strconv.Atoi(strings.SplitN(e.Name(), "_", 2)[0])
+		if err != nil {
+			return nil, fmt.Errorf("migration %q: name must start with a number", e.Name())
+		}
+		out = append(out, ver)
+	}
+	sort.Ints(out)
+	return out, nil
+}
+
+// MigrateTo applies the embedded migrations that have not run yet, up to and
+// including version max (0 means all of them), without seeding. Migrate uses
+// it; the schema and upgrade tests use it to stand a database at an older
+// version and move it forward one migration at a time.
+func (s *Store) MigrateTo(ctx context.Context, max int) error {
 	conn, err := s.Pool.Acquire(ctx)
 	if err != nil {
 		return err
@@ -73,6 +102,9 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ver, err := strconv.Atoi(strings.SplitN(name, "_", 2)[0])
 		if err != nil {
 			return fmt.Errorf("migration %q: name must start with a number", name)
+		}
+		if max > 0 && ver > max {
+			break
 		}
 		var done bool
 		if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)`, ver).Scan(&done); err != nil {
@@ -101,12 +133,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 			return err
 		}
 	}
-	return s.seed(ctx)
+	return nil
 }
 
-// seed inserts the built-in categories and default extension mapping. Rows
-// already present (including ones edited through the UI) are left alone.
-func (s *Store) seed(ctx context.Context) error {
+// seedBatch queues the built-in categories and the default extension mapping. Rows already present (including ones edited through the UI) are
+// left alone.
+func seedBatch() *pgx.Batch {
 	b := &pgx.Batch{}
 	for _, c := range categorize.Categories {
 		b.Queue(`INSERT INTO categories (id, key) VALUES ($1, $2) ON CONFLICT (id) DO UPDATE SET key = EXCLUDED.key`, c.ID, c.Key)
@@ -114,7 +146,16 @@ func (s *Store) seed(ctx context.Context) error {
 	for ext, cat := range categorize.DefaultExtensions() {
 		b.Queue(`INSERT INTO extension_map (ext, category_id) VALUES ($1, $2) ON CONFLICT (ext) DO NOTHING`, ext, cat)
 	}
-	res := s.Pool.SendBatch(ctx, b)
+	return b
+}
+
+type batchSender interface {
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
+}
+
+func runSeed(ctx context.Context, db batchSender) error {
+	b := seedBatch()
+	res := db.SendBatch(ctx, b)
 	defer res.Close()
 	for i := 0; i < b.Len(); i++ {
 		if _, err := res.Exec(); err != nil {
@@ -123,6 +164,13 @@ func (s *Store) seed(ctx context.Context) error {
 	}
 	return nil
 }
+
+// seed inserts the built-in categories and default extension mapping.
+func (s *Store) seed(ctx context.Context) error { return runSeed(ctx, s.Pool) }
+
+// SeedTx does the same inside a transaction: a factory reset empties the tables and puts the seed back in the same transaction, so the
+// installation is never seen without its categories.
+func SeedTx(ctx context.Context, tx pgx.Tx) error { return runSeed(ctx, tx) }
 
 // LoadMapper builds the extension mapper from the extension_map table.
 func (s *Store) LoadMapper(ctx context.Context) (*categorize.Mapper, error) {

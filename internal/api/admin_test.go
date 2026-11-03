@@ -4,11 +4,18 @@ import (
 	"bufio"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	ts "github.com/helmerznl/nas-storage-analyzer/internal/testsupport"
+	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 )
 
 func shareBody(name, path string) map[string]any {
@@ -30,11 +37,7 @@ func waitFor(t *testing.T, what string, f func() bool) {
 func TestShareManagementRequiresAdmin(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	admin, _, _ := e.setupAdmin()
-	expect(t, admin.do("POST", "/api/v1/users", map[string]string{"username": "viewer1", "password": pw, "role": "viewer"}), 201, "")
-	v := e.client()
-	v.do("POST", "/api/v1/auth/login", map[string]string{"username": "viewer1", "password": pw})
-	sec := v.do("POST", "/api/v1/auth/totp/begin", nil).Body["secret"].(string)
-	v.do("POST", "/api/v1/auth/totp/confirm", map[string]string{"code": codeFor(sec)})
+	v, _ := e.newUser(admin, "viewer1", "viewer")
 
 	root := t.TempDir()
 	for _, r := range []reply{
@@ -54,6 +57,85 @@ func TestShareManagementRequiresAdmin(t *testing.T) {
 	expect(t, admin.do("POST", "/api/v1/shares", shareBody("media", root)), 201, "")
 	expect(t, v.do("GET", "/api/v1/shares/1/history", nil), 200, "")
 	expect(t, v.do("GET", "/api/v1/shares/1/jobs", nil), 200, "")
+}
+
+func TestFolderPickerIsAdminOnlyAndStaysInsideTheRoot(t *testing.T) {
+	base := t.TempDir()
+	root, outside := filepath.Join(base, "shares"), filepath.Join(base, "outside")
+	for _, d := range []string{"media/Movies", "media/music", "backups"} {
+		if err := os.MkdirAll(filepath.Join(root, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+
+	e := newAuthEnv(t, func(o *api.Options) { o.SharesRoot = root })
+	browse := func(c *client, p string) reply {
+		q := ""
+		if p != "" {
+			q = "?path=" + url.QueryEscape(p)
+		}
+		return c.do("GET", "/api/v1/fs/dirs"+q, nil)
+	}
+
+	// Nobody signed in, and a viewer, are refused.
+	expect(t, browse(e.client(), ""), 401, "unauthenticated")
+	admin, _, _ := e.setupAdmin()
+	v, _ := e.newUser(admin, "viewer1", "viewer")
+	expect(t, browse(v, ""), 403, "forbidden")
+
+	// The root: folders only, sorted, no parent, and the link that leaves the root is not offered.
+	r := browse(admin, "")
+	expect(t, r, 200, "")
+	dirs, _ := r.Body["dirs"].([]any)
+	var got []string
+	for _, d := range dirs {
+		got = append(got, d.(map[string]any)["name"].(string))
+	}
+	if strings.Join(got, ",") != "backups,media" || r.Body["root"] != root || r.Body["path"] != root || r.Body["truncated"] != false {
+		t.Errorf("root listing: %s", r.Raw)
+	}
+	if _, has := r.Body["parent"]; has {
+		t.Errorf("the root has no parent: %s", r.Raw)
+	}
+
+	// A sub-folder names its parent, and the entries carry paths a share can use as they are.
+	r = browse(admin, root+"/media")
+	expect(t, r, 200, "")
+	if r.Body["parent"] != root {
+		t.Errorf("parent: %s", r.Raw)
+	}
+	dirs, _ = r.Body["dirs"].([]any)
+	if len(dirs) != 2 || dirs[0].(map[string]any)["path"] != root+"/media/Movies" {
+		t.Errorf("sub-folder listing: %s", r.Raw)
+	}
+
+	// Outside the root, through a link, and malformed paths are 400 with the field; a missing folder is 404.
+	for _, p := range []string{"/etc", outside, root + "/../outside", root + "/escape", "media", root + "/notes.txt"} {
+		r := browse(admin, p)
+		if r.Status != 400 || r.Body["field"] != "path" {
+			t.Errorf("%q: got %d %s", p, r.Status, r.Raw)
+		}
+	}
+	expect(t, browse(admin, root+"/missing"), 404, "")
+	// "/escape/.." is tidied to the root before anything is opened, so it lists the root.
+	if r := browse(admin, root+"/escape/.."); r.Status != 200 || r.Body["path"] != root {
+		t.Errorf("a path that tidies to the root: %d %s", r.Status, r.Raw)
+	}
+}
+
+func TestFolderPickerWithoutAConfiguredRoot(t *testing.T) {
+	e := newAuthEnv(t, nil) // no shares root
+	admin, _, _ := e.setupAdmin()
+	expect(t, admin.do("GET", "/api/v1/fs/dirs", nil), 409, "not_configured")
 }
 
 func TestCreateEditAndDeleteAShare(t *testing.T) {
@@ -141,9 +223,11 @@ func TestScanFromTheAPIThroughTheWorkerWithHistory(t *testing.T) {
 	ts.Settle()
 	ts.Write(t, root+"/video/c.mkv", 7000)
 	expect(t, admin.do("POST", s+"/scan", map[string]string{"mode": "full"}), 202, "")
+	// The history point is written when the scan is published; the worker closes the job a moment later. Wait for both, or the checks below
+	// (the job is "done", nothing is left to cancel) race the worker on a slow machine.
 	waitFor(t, "the second scan", func() bool {
 		h := admin.do("GET", s+"/history", nil)
-		return len(h.Body["items"].([]any)) == 2
+		return len(h.Body["items"].([]any)) == 2 && admin.do("GET", s, nil).Body["active_job"] == nil
 	})
 	h := admin.do("GET", s+"/history", nil).Body["items"].([]any)
 	if h[0].(map[string]any)["size"].(float64) != 5100 || h[1].(map[string]any)["size"].(float64) != 12100 {
@@ -233,6 +317,34 @@ func TestPreferences(t *testing.T) {
 	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"colour": "red"}), 400, "")
 }
 
+// The accent colour is a free #rrggbb that ends up in a CSS custom property, so only that shape is stored, and in lower case.
+func TestAccentPreference(t *testing.T) {
+	e := newAuthEnv(t, nil)
+	admin, _, _ := e.setupAdmin()
+	prefs := func() map[string]any {
+		return admin.do("GET", "/api/v1/auth/me", nil).Body["user"].(map[string]any)["prefs"].(map[string]any)
+	}
+	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"accent": "#B0213F"}), 200, "")
+	if prefs()["accent"] != "#b0213f" {
+		t.Errorf("accent = %v, want it stored in lower case", prefs()["accent"])
+	}
+	for _, bad := range []string{"red", "#fff", "#12345", "#1234567", "#gggggg", "b0213f", "#b0213f;color:red", "url(//evil)", "#b0213f ", " #b0213f", "#b0213f\n"} {
+		expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"accent": bad}), 400, "")
+	}
+	if prefs()["accent"] != "#b0213f" {
+		t.Errorf("a refused value changed the stored accent: %v", prefs()["accent"])
+	}
+	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"accent": ""}), 200, "") // back to the default
+	if prefs()["accent"] != "" {
+		t.Errorf("accent = %v after reset, want empty", prefs()["accent"])
+	}
+	// One bad value refuses the whole request: nothing of it is stored.
+	expect(t, admin.do("PUT", "/api/v1/auth/prefs", map[string]string{"theme": "dark", "accent": "nope"}), 400, "")
+	if _, stored := prefs()["theme"]; stored {
+		t.Errorf("a refused request stored part of itself: %v", prefs())
+	}
+}
+
 func TestLiveStatusStream(t *testing.T) {
 	e := newAuthEnv(t, nil)
 	e.startWorker()
@@ -306,5 +418,88 @@ func TestLiveStatusStream(t *testing.T) {
 	}
 	if !sawJob || !sawProgress || !sawDone {
 		t.Errorf("job event seen=%v, progress seen=%v, completion event seen=%v", sawJob, sawProgress, sawDone)
+	}
+}
+
+// fakeGitHubFor answers like GitHub does for /releases/latest: a redirect to the tag page.
+func fakeGitHubFor(t *testing.T, tag string, hits *atomic.Int32) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Location", "/"+updates.DefaultRepo+"/releases/tag/"+tag)
+		w.WriteHeader(http.StatusFound)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// The update check tells the administrator, and only the administrator; it announces and does nothing else.
+func TestUpdateCheckIsForTheAdministratorOnly(t *testing.T) {
+	var hits atomic.Int32
+	gh := fakeGitHubFor(t, "v0.9.0", &hits)
+	checker := updates.New("0.1.0", true, nil)
+	checker.BaseURL = gh.URL
+	e := newAuthEnv(t, func(o *api.Options) { o.Updates = checker })
+
+	// Nobody signed in: refused, and GitHub was not asked.
+	anon := e.client()
+	expect(t, anon.do("GET", "/api/v1/system/update", nil), 401, "unauthenticated")
+	expect(t, anon.do("POST", "/api/v1/system/update/check", nil), 401, "unauthenticated")
+
+	admin, _, _ := e.setupAdmin()
+	v, _ := e.newUser(admin, "viewer1", "viewer")
+	expect(t, v.do("GET", "/api/v1/system/update", nil), 403, "forbidden")
+	expect(t, v.do("POST", "/api/v1/system/update/check", nil), 403, "forbidden")
+	if hits.Load() != 0 {
+		t.Fatalf("a refused request made GitHub get asked %d times", hits.Load())
+	}
+
+	// The administrator gets the status (the client also validates every answer against the OpenAPI document).
+	r := admin.do("GET", "/api/v1/system/update", nil)
+	expect(t, r, 200, "")
+	if r.Body["enabled"] != true || r.Body["current"] != "0.1.0" || r.Body["latest"] != "0.9.0" || r.Body["available"] != true ||
+		r.Body["error"] != "" || r.Body["repo"] != updates.DefaultRepo || r.Body["url"] != gh.URL+"/"+updates.DefaultRepo+"/releases/tag/v0.9.0" {
+		t.Errorf("status = %s", r.Raw)
+	}
+	admin.do("GET", "/api/v1/system/update", nil)
+	if hits.Load() != 1 {
+		t.Errorf("a page view called GitHub %d times, want 1 (the answer is remembered)", hits.Load())
+	}
+	// "Check now" inside the 30 second floor answers with the remembered status instead of asking again.
+	expect(t, admin.do("POST", "/api/v1/system/update/check", nil), 200, "")
+	if hits.Load() != 1 {
+		t.Errorf("check now went through inside the floor: %d requests", hits.Load())
+	}
+	// A changing request needs the CSRF token like every other one.
+	expect(t, admin.do("POST", "/api/v1/system/update/check", nil, "X-CSRF-Token", ""), 403, "csrf")
+}
+
+// Switched off is reported as off, not as a failure, and without a single request.
+func TestUpdateCheckCanBeSwitchedOff(t *testing.T) {
+	var hits atomic.Int32
+	gh := fakeGitHubFor(t, "v0.9.0", &hits)
+	checker := updates.New("0.1.0", false, nil)
+	checker.BaseURL = gh.URL
+	e := newAuthEnv(t, func(o *api.Options) { o.Updates = checker })
+	admin, _, _ := e.setupAdmin()
+	r := admin.do("GET", "/api/v1/system/update", nil)
+	expect(t, r, 200, "")
+	if r.Body["enabled"] != false || r.Body["error"] != "" || r.Body["available"] != false || hits.Load() != 0 {
+		t.Errorf("status = %s, GitHub asked %d times", r.Raw, hits.Load())
+	}
+}
+
+// Without a checker the routes do not exist at all.
+func TestUpdateRoutesAreAbsentWithoutAChecker(t *testing.T) {
+	e := newAuthEnv(t, func(o *api.Options) { o.Updates = nil })
+	for _, path := range []string{"/api/v1/system/update", "/api/v1/system/update/check"} {
+		resp, err := http.Get(e.srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("GET %s = %d, want 404 or 405", path, resp.StatusCode)
+		}
 	}
 }

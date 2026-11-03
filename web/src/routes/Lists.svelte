@@ -2,13 +2,17 @@
   import { get, qs, type DirRow, type FileRow } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatBytes, formatDate, formatNumber, ago } from '../lib/format';
-  import { prefs } from '../lib/session.svelte';
+  import { prefs, isAdmin } from '../lib/session.svelte';
   import { route, setQuery, link } from '../lib/router.svelte';
   import { filtersFromQuery, filtersToParams, type Filters } from '../lib/filters';
   import { loadShares, sharesStore, shareById } from '../lib/shares.svelte';
   import { errMessage } from '../lib/errors';
   import FilterBar from '../components/FilterBar.svelte';
   import AtimeNotice from '../components/AtimeNotice.svelte';
+  import SelectionBar from '../components/SelectionBar.svelte';
+  import { selection } from '../lib/selection.svelte';
+  import { tickRow, tickAll, tickState, tickDir, tickAllDirs, tickDirState } from '../lib/tick';
+  import { activeFilterCount } from '../lib/filters';
 
   type Tab = 'top-files' | 'top-dirs' | 'cold-files' | 'cold-dirs';
   const tab = $derived((route.query.get('tab') ?? 'top-files') as Tab);
@@ -50,17 +54,23 @@
   const tabs: [Tab, string][] = [['top-files', 'lists.top.files'], ['top-dirs', 'lists.top.dirs'], ['cold-files', 'lists.cold.files'], ['cold-dirs', 'lists.cold.dirs']];
   const lastUsed = (r: { newest_atime: string | null; newest_mtime: string | null }) => share?.last_used_basis === 'mtime' ? r.newest_mtime : r.newest_atime;
   const folderOf = (p: string) => p.slice(0, p.lastIndexOf('/')) || '/';
+  const ticks = $derived(tickState(Number(shareId), files));
+  // A folder is deleted with everything in it, so it is only offered while what is shown of it is all of it: a filter shows a part.
+  const filtered = $derived(activeFilterCount(filters) > 0);
+  const showDirBoxes = $derived(isAdmin() && !isFiles && !filtered);
+  const dirTicks = $derived(tickDirState(Number(shareId), dirs));
 </script>
 
 <div class="page-head">
-  <div class="grow"><h1>{t('nav.lists')}</h1><p class="muted" style="margin:0">{t('lists.intro')}</p></div>
+  <h1>{t('nav.lists')}</h1>
   <div class="row">
-    <select value={shareId} onchange={(e) => setQuery({ share: e.currentTarget.value })} style="width:auto" aria-label={t('browse.share')}>
+    <select value={shareId} onchange={(e) => setQuery({ share: e.currentTarget.value })} class="auto" aria-label={t('browse.share')}>
       {#each sharesStore.items as s}<option value={String(s.id)}>{s.name}</option>{/each}
     </select>
     <a class="btn" href={csv} download data-testid="export-csv">⬇ CSV</a>
   </div>
 </div>
+<p class="muted intro">{t('lists.intro')}</p>
 
 {#if share}<AtimeNotice {share} />{/if}
 <div class="tabs" role="tablist">
@@ -73,48 +83,70 @@
 <div class="row" style="margin:12px 0">
   {#if isCold}
     <label class="field" style="flex-direction:row;align-items:center;gap:8px">{t('lists.unused')}
-      <select value={days} onchange={(e) => setQuery({ days: e.currentTarget.value })} style="width:auto" data-testid="cold-days">
+      <select value={days} onchange={(e) => setQuery({ days: e.currentTarget.value })} class="auto" data-testid="cold-days">
         {#each ['30', '90', '180', '365', '730', '1825'] as d}<option value={d}>{t('lists.days', { n: d })}</option>{/each}
       </select></label>
   {/if}
   {#if !isFiles}
     <label class="field" style="flex-direction:row;align-items:center;gap:8px">{t('lists.by')}
-      <select value={by} onchange={(e) => setQuery({ by: e.currentTarget.value })} style="width:auto">
+      <select value={by} onchange={(e) => setQuery({ by: e.currentTarget.value })} class="auto">
         <option value="total">{t('lists.by.total')}</option><option value="direct">{t('lists.by.direct')}</option></select></label>
     <span class="muted small">{by === 'direct' ? t('lists.by.direct.hint') : t('lists.by.total.hint')}</span>
   {/if}
 </div>
 
-{#if error}<div class="alert bad" role="alert">{error}</div>{/if}
-<div class="card table-wrap" style="padding:0" aria-busy={loading}>
+{#if error}<div class="notice error" role="alert">{error}</div>{/if}
+<div class="card table-wrap flush" aria-busy={loading}>
   {#if isFiles}
     <table data-testid="list-table">
-      <thead><tr><th>#</th><th>{t('col.name')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.accessed')}</th></tr></thead>
+      <thead><tr>
+        {#if isAdmin()}<th class="sel"><label class="selcell" title={t('sel.all')}>
+          <input type="checkbox" checked={ticks === 'all'} indeterminate={ticks === 'some'} disabled={!files.length} aria-label={t('sel.all')}
+            onchange={() => tickAll(Number(shareId), files)} data-testid="select-all" /></label></th>{/if}
+        <th>#</th><th>{t('col.name')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.accessed')}</th></tr></thead>
       <tbody>
         {#each files as f, i (f.id)}
-          <tr data-testid="list-row"><td class="muted">{i + 1}</td>
+          <tr data-testid="list-row">
+            {#if isAdmin()}<td class="sel"><label class="selcell">
+              <input type="checkbox" checked={selection.share === Number(shareId) && selection.has(f.id)} aria-label={t('sel.row', { name: f.name })}
+                onchange={() => tickRow(Number(shareId), f)} data-testid="select-file" /></label></td>{/if}
+            <td class="muted">{i + 1}</td>
             <td><div class="truncate" style="max-width:60ch" title={f.path}>{f.name}</div>
               <a class="small truncate" style="display:inline-block;max-width:60ch" href="/browse/{shareId}/{f.dir_id}?view=files" use:link>{folderOf(f.path)}</a></td>
-            <td class="right nowrap">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
+            <td class="right actions">{formatBytes(f.size, prefs.units, i18n.lang)}</td>
             <td class="right hide-sm nowrap">{formatDate(f.mtime, i18n.lang)}</td>
             <td class="right hide-sm nowrap" title={formatDate(f.atime, i18n.lang)}>{ago(f.atime, i18n.lang)}</td></tr>
-        {:else}<tr><td colspan="5" class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
+        {:else}<tr><td colspan={isAdmin() ? 6 : 5} class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
       </tbody>
     </table>
   {:else}
     <table data-testid="list-table">
-      <thead><tr><th>#</th><th>{t('col.folder')}</th><th class="right">{t('col.size')}</th><th class="right">{t('col.files')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.used')}</th></tr></thead>
+      <thead><tr>
+        {#if showDirBoxes}<th class="sel"><label class="selcell" title={t('sel.dir.all')}>
+          <input type="checkbox" checked={dirTicks === 'all'} indeterminate={dirTicks === 'some'} disabled={!dirs.length} aria-label={t('sel.dir.all')}
+            onchange={() => tickAllDirs(Number(shareId), dirs)} data-testid="select-all-dirs" /></label></th>{/if}
+        <th>#</th><th>{t('col.folder')}</th><th class="right">{t('col.size')}</th><th class="right">{t('col.files')}</th><th class="right hide-sm">{t('col.modified')}</th><th class="right hide-sm">{t('col.used')}</th></tr></thead>
       <tbody>
         {#each dirs as d, i (d.id)}
-          <tr data-testid="list-row"><td class="muted">{i + 1}</td>
+          <tr data-testid="list-row">
+            {#if showDirBoxes}<td class="sel"><label class="selcell">
+              <input type="checkbox" checked={selection.share === Number(shareId) && selection.hasDir(d.id)} aria-label={t('sel.dir.row', { name: d.name || d.path })}
+                onchange={() => tickDir(Number(shareId), d)} data-testid="select-dir" /></label></td>{/if}
+            <td class="muted">{i + 1}</td>
             <td><a class="truncate" style="display:inline-block;max-width:60ch" href="/browse/{shareId}/{d.id}" use:link title={d.path}>📁 {d.path || '/'}</a></td>
-            <td class="right nowrap">{formatBytes(by === 'direct' ? d.size_direct : d.size, prefs.units, i18n.lang)}</td>
-            <td class="right nowrap">{formatNumber(by === 'direct' ? d.files_direct : d.files, i18n.lang)}</td>
+            <td class="right actions">{formatBytes(by === 'direct' ? d.size_direct : d.size, prefs.units, i18n.lang)}</td>
+            <td class="right actions">{formatNumber(by === 'direct' ? d.files_direct : d.files, i18n.lang)}</td>
             <td class="right hide-sm nowrap">{formatDate(d.newest_mtime, i18n.lang)}</td>
             <td class="right hide-sm nowrap" title={formatDate(lastUsed(d), i18n.lang)}>{ago(lastUsed(d), i18n.lang)}</td></tr>
-        {:else}<tr><td colspan="6" class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
+        {:else}<tr><td colspan={showDirBoxes ? 7 : 6} class="muted">{loading ? t('common.loading') : t('lists.empty')}</td></tr>{/each}
       </tbody>
     </table>
   {/if}
 </div>
-{#if cursor}<div class="row" style="margin-top:10px"><button onclick={() => load(true)}>{t('common.more')}</button></div>{/if}
+{#if cursor}<div class="row" style="margin-top:10px"><button class="btn" onclick={() => load(true)}>{t('common.more')}</button></div>{/if}
+{#if isAdmin()}
+  {#if isFiles}<p class="muted small" style="margin-bottom:0">{t('sel.hint')}</p>
+  {:else if filtered}<p class="muted small" style="margin-bottom:0" data-testid="sel-dirs-filtered">{t('sel.dirs.filtered')}</p>
+  {:else}<p class="muted small" style="margin-bottom:0">{t('sel.hint.dirs')}</p>{/if}
+  <SelectionBar {share} />
+{/if}

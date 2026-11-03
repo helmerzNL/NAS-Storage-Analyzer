@@ -61,6 +61,9 @@ type ErrRec struct {
 	Kind ErrKind
 	Msg  string
 	At   time.Time
+	// Dir is true when Path is a folder that could not be opened or listed, false when it is a file in a folder that
+	// could be listed (its stat failed). The audit log groups the second kind by the folder they are in.
+	Dir bool
 }
 
 // Sink receives walk results. Implementations must be safe for concurrent use

@@ -23,11 +23,11 @@ import (
 
 func runWorker(args []string) error {
 	fs := flag.NewFlagSet("worker", flag.ExitOnError)
-	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN, or NASA_DB_HOST/PORT/NAME/USER/PASSWORD)")
-	parallel := fs.Int("parallel", atoi(env("NASA_WORKER_PARALLEL", "2")), "scans that may run at the same time")
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASSA_DB_DSN, or NASSA_DB_HOST/PORT/NAME/USER/PASSWORD)")
+	parallel := fs.Int("parallel", atoi(env("NASSA_WORKER_PARALLEL", "2")), "scans that may run at the same time")
 	fs.Parse(args)
 	if *dsn == "" {
-		return errors.New("no database: set NASA_DB_DSN or NASA_DB_HOST/NASA_DB_PASSWORD")
+		return errors.New("no database: set NASSA_DB_DSN or NASSA_DB_HOST/NASSA_DB_PASSWORD")
 	}
 	box, err := secrets.FromEnv()
 	if err != nil {
@@ -38,6 +38,10 @@ func runWorker(args []string) error {
 		return err
 	}
 	log := newLogger()
+	if w := dataPathWarning(os.Getenv("DATA_PATH")); w != "" {
+		log.Warn(w)
+	}
+	log.Info("worker starting", "version", version, "commit", commit, "channel", buildInfo().Channel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -49,16 +53,16 @@ func runWorker(args []string) error {
 	if err := st.Migrate(ctx); err != nil { // safe next to the app: serialised by an advisory lock
 		return err
 	}
-	id := env("NASA_WORKER_ID", "")
+	id := env("NASSA_WORKER_ID", "")
 	if id == "" {
 		host, _ := os.Hostname()
 		id = host + "-" + strconv.Itoa(os.Getpid())
 	}
 	w := worker.New(st,
-		shares.NewService(st.Pool, box, shares.Options{SharesRoot: env("NASA_SHARES_ROOT", "/mnt/shares")}, loc),
-		mounts.New(env("NASA_MOUNT_DIR", "/mnt/managed")),
+		shares.NewService(st.Pool, box, shares.Options{SharesRoot: env("NASSA_SHARES_ROOT", "/mnt/shares")}, loc),
+		mounts.New(env("NASSA_MOUNT_DIR", "/mnt/managed")),
 		worker.Config{ID: id, Parallel: *parallel, Loc: loc}, log)
-	if addr := env("NASA_WORKER_HEALTH_LISTEN", "127.0.0.1:8081"); addr != "" {
+	if addr := env("NASSA_WORKER_HEALTH_LISTEN", "127.0.0.1:8081"); addr != "" {
 		go serveHealth(ctx, addr, w.Healthy, log)
 	}
 	w.Run(ctx)

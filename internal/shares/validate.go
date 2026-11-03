@@ -10,6 +10,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/helmerznl/nas-storage-analyzer/internal/delscript"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanner"
 )
@@ -37,6 +38,11 @@ type Input struct {
 	Password     *string `json:"password,omitempty"`      // smb; write-only, stored encrypted
 	Version      string  `json:"version,omitempty"`       // nfs: 3, 4, 4.1, 4.2; smb: 2.0 ... 3.1.1
 	MountOptions string  `json:"mount_options,omitempty"` // extra options from an allow-list; "ro" is always added
+
+	// Where a person's own machines see this share, for the scripts that delete files: \\nas\media or Z:\ on Windows,
+	// /mnt/user/media on Linux and macOS. Empty means "not set". The app never opens these paths.
+	ClientWindows string `json:"client_windows,omitempty"`
+	ClientPosix   string `json:"client_posix,omitempty"`
 
 	Excludes       []string `json:"excludes"`
 	Workers        int      `json:"workers"`
@@ -79,7 +85,8 @@ var (
 // Options configure validation.
 type Options struct {
 	// SharesRoot is the directory below which bind shares must lie
-	// ("/mnt/shares" in the container). Empty disables the check (tests).
+	// (NASSA_SHARES_MOUNT, "/mnt/shares" by default, in the container).
+	// Empty disables the check (tests).
 	SharesRoot string
 }
 
@@ -137,6 +144,10 @@ func Validate(in *Input, opt Options) error {
 		return bad("kind", "a bind share has only a path")
 	}
 
+	if err := validateClientRoots(in); err != nil {
+		return err
+	}
+
 	if len(in.Excludes) > 100 {
 		return bad("excludes", "at most 100 patterns")
 	}
@@ -178,14 +189,43 @@ func Validate(in *Input, opt Options) error {
 	return nil
 }
 
+// validateClientRoots checks and normalises the base paths of the delete scripts as hard as the script generator will:
+// a path that is stored here is a path that is later written into a script. The Windows path is checked for cmd,
+// the stricter of the two Windows scripts, because one stored path serves both.
+func validateClientRoots(in *Input) error {
+	for _, c := range []struct {
+		field  string
+		v      *string
+		target delscript.Target
+	}{
+		{"client_windows", &in.ClientWindows, delscript.TargetCmd},
+		{"client_posix", &in.ClientPosix, delscript.TargetSh},
+	} {
+		if strings.TrimSpace(*c.v) == "" {
+			*c.v = ""
+			continue
+		}
+		norm, err := delscript.NormalizeRoot(c.target, *c.v)
+		if err != nil {
+			return bad(c.field, "%s", err.Error())
+		}
+		*c.v = norm
+	}
+	return nil
+}
+
 func validateBindPath(in *Input, opt Options) error {
 	if in.Path == "" || !path.IsAbs(in.Path) || strings.ContainsRune(in.Path, 0) {
-		return bad("path", "enter an absolute path inside the container, for example /mnt/shares/media")
+		example := "/mnt/shares"
+		if opt.SharesRoot != "" {
+			example = opt.SharesRoot
+		}
+		return bad("path", "enter an absolute path inside the container, for example %s", path.Join(example, "media"))
 	}
 	in.Path = path.Clean(in.Path)
 	if opt.SharesRoot != "" {
 		root := path.Clean(opt.SharesRoot)
-		if in.Path != root && !strings.HasPrefix(in.Path, root+"/") {
+		if !inside(root, in.Path) {
 			return bad("path", "must be inside %s (mount your share there, see the README)", root)
 		}
 	}

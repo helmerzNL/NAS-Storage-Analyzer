@@ -21,18 +21,18 @@ import (
 
 var dbCounter atomic.Int64
 
-// NewStore creates a throwaway database on the server named by NASA_TEST_DSN,
-// migrates it and drops it again when the test ends. Without NASA_TEST_DSN the
-// test is skipped, unless NASA_REQUIRE_DB=1 turns that into a failure so CI
-// cannot silently skip the integration tests.
-func NewStore(t *testing.T) *store.Store {
+// NewEmptyDB creates a throwaway database on the server named by NASSA_TEST_DSN and
+// returns its connection string. It is dropped again when the test ends. Without
+// NASSA_TEST_DSN the test is skipped, unless NASSA_REQUIRE_DB=1 turns that into a failure
+// so CI cannot silently skip the integration tests.
+func NewEmptyDB(t *testing.T) string {
 	t.Helper()
-	dsn := os.Getenv("NASA_TEST_DSN")
+	dsn := os.Getenv("NASSA_TEST_DSN")
 	if dsn == "" {
-		if os.Getenv("NASA_REQUIRE_DB") == "1" {
-			t.Fatal("NASA_TEST_DSN is required when NASA_REQUIRE_DB=1")
+		if os.Getenv("NASSA_REQUIRE_DB") == "1" {
+			t.Fatal("NASSA_TEST_DSN is required when NASSA_REQUIRE_DB=1")
 		}
-		t.Skip("set NASA_TEST_DSN to run database integration tests")
+		t.Skip("set NASSA_TEST_DSN to run database integration tests")
 	}
 	ctx := context.Background()
 	admin, err := pgx.Connect(ctx, dsn)
@@ -48,18 +48,25 @@ func NewStore(t *testing.T) *store.Store {
 		t.Fatal(err)
 	}
 	u.Path = "/" + name
-	st, err := store.Open(ctx, u.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := st.Migrate(ctx); err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
-		st.Close()
 		admin.Exec(ctx, `DROP DATABASE `+name+` WITH (FORCE)`)
 		admin.Close(ctx)
 	})
+	return u.String()
+}
+
+// NewStore creates a throwaway database (see NewEmptyDB) and migrates it.
+func NewStore(t *testing.T) *store.Store {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, NewEmptyDB(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(st.Close) // runs before the database is dropped: cleanups run last to first
+	if err := st.Migrate(ctx); err != nil {
+		t.Fatal(err)
+	}
 	return st
 }
 

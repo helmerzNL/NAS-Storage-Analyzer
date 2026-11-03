@@ -7,8 +7,11 @@ import (
 	"os"
 )
 
-// version is set at build time (-ldflags "-X main.version=...").
-var version = "dev"
+// version and commit are set at build time (-ldflags "-X main.version=... -X main.commit=...").
+var (
+	version = "dev"
+	commit  = ""
+)
 
 const usage = `nasa - NAS Storage Analyzer
 
@@ -18,7 +21,7 @@ Usage:
 Commands:
   serve     run the web interface and REST API
   worker    run queued scans (mounts NFS/SMB shares when needed)
-  genkey    print a new encryption key for NASA_ENCRYPTION_KEY
+  genkey    print a new encryption key for NASSA_ENCRYPTION_KEY
   version   print the version
   healthcheck   exit 0 when a URL answers 2xx (the container HEALTHCHECK)
   migrate   apply database migrations and seed default categories
@@ -32,6 +35,12 @@ func main() {
 	if len(os.Args) < 2 {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
+	}
+	if takesSettings(os.Args[1]) {
+		if err := checkOldEnv(os.Environ()); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(2)
+		}
 	}
 	var err error
 	switch os.Args[1] {
@@ -50,7 +59,7 @@ func main() {
 	case "recategorize":
 		err = runRecategorize(os.Args[2:])
 	case "version", "-version", "--version":
-		fmt.Println("nasa", version)
+		fmt.Println(versionLine())
 		return
 	case "-h", "--help", "help":
 		fmt.Print(usage)

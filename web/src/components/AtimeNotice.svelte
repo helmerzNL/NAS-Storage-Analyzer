@@ -8,7 +8,7 @@
 </script>
 
 {#if show && q}
-  <div class="alert warn" role="note">
+  <div class="notice warn" role="note">
     <b>{q.verdict === 'unreliable' ? t('atime.unreliable') : t('atime.doubtful')}</b>
     {t('atime.explain')}
     {#if q.reasons?.length}<span class="small">({q.reasons.map((r) => t('atime.reason.' + r)).join(' · ')})</span>{/if}

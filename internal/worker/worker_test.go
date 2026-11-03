@@ -2,9 +2,11 @@ package worker_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -312,5 +314,192 @@ func TestHealthyWhileThePollLoopReachesTheQueue(t *testing.T) {
 	clock.Add(int64(2 * time.Minute))
 	if err := e.w.Healthy(); err == nil {
 		t.Fatal("a worker that stopped polling must report unhealthy")
+	}
+}
+
+// auditRow is one entry of the audit log as the interface shows it.
+type auditRow struct {
+	Action, Target, Username string
+	Detail                   map[string]any
+}
+
+func (e *env) audit(t *testing.T) []auditRow {
+	t.Helper()
+	rows, err := e.st.Pool.Query(ctx, `SELECT action, target, username, detail FROM audit_log ORDER BY id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []auditRow
+	for rows.Next() {
+		var r auditRow
+		var raw []byte
+		if err := rows.Scan(&r.Action, &r.Target, &r.Username, &raw); err != nil {
+			t.Fatal(err)
+		}
+		json.Unmarshal(raw, &r.Detail)
+		out = append(out, r)
+	}
+	return out
+}
+
+func (e *env) scan(t *testing.T, id int64, mode, trigger string) jobs.Job {
+	t.Helper()
+	j, err := e.q.Enqueue(ctx, jobs.KindScan, id, mode, trigger, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e.waitJob(t, j.ID, jobs.StateDone, jobs.StateFailed)
+}
+
+func only(t *testing.T, rows []auditRow, action string) auditRow {
+	t.Helper()
+	var got []auditRow
+	for _, r := range rows {
+		if r.Action == action {
+			got = append(got, r)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("want exactly one %q entry in the audit log, got %d: %+v", action, len(got), rows)
+	}
+	return got[0]
+}
+
+// The outcome of every scan, including the ones nobody started by hand, is in the audit log.
+func TestAScanThatFindsNothingIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	id := e.share(t, t.TempDir(), nil) // an empty folder: a wrong NASSA_SHARES_DIR looks exactly like this
+	if j := e.scan(t, id, "auto", "schedule"); j.State != jobs.StateDone {
+		t.Fatalf("job = %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.empty")
+	if r.Target != "media" || r.Username != "worker" || r.Detail["trigger"] != "schedule" || r.Detail["files"] != float64(0) {
+		t.Errorf("entry = %+v", r)
+	}
+	if hint, _ := r.Detail["hint"].(string); !strings.Contains(hint, "mounted") {
+		t.Errorf("the entry must say what to check: %+v", r.Detail)
+	}
+}
+
+func TestAScanThatSucceedsIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	root := t.TempDir()
+	ts.Write(t, root+"/video/a.mkv", 5000)
+	ts.Write(t, root+"/docs/b.pdf", 100)
+	id := e.share(t, root, nil)
+	e.scan(t, id, "auto", "manual")
+	rows := e.audit(t)
+	r := only(t, rows, "scan.finished")
+	if r.Detail["files"] != float64(2) || r.Detail["bytes"] != float64(5100) || r.Detail["errors"] != float64(0) || r.Detail["trigger"] != "manual" || r.Detail["requested_by"] != "alice" {
+		t.Errorf("entry = %+v", r)
+	}
+	if len(rows) != 1 {
+		t.Errorf("a good scan writes one entry, got %+v", rows)
+	}
+}
+
+// A folder the app is not allowed to read is named in the audit entry of the scan, not only counted: a permission is fixed per
+// folder, and "3 folders or files could not be read" says nothing about which.
+func TestAScanThatCannotReadAFolderNamesItInTheAuditLog(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses permission checks; internal/scanner checks the same report with a filesystem that injects the errors")
+	}
+	e := newEnv(t, nil, nil)
+	root := t.TempDir()
+	ts.Write(t, root+"/ok/a.txt", 100)
+	ts.Write(t, root+"/private/secret.txt", 10)
+	ts.Write(t, root+"/private/inner/more.txt", 10)
+	ts.Write(t, root+"/shared/listed/b.txt", 20)
+	// A folder that can be listed but not searched: its files can be seen, and none can be examined.
+	ts.Write(t, root+"/shared/noexec/c.txt", 10)
+	ts.Write(t, root+"/shared/noexec/d.txt", 10)
+	for _, p := range []string{"/private", "/shared/noexec"} {
+		mode := os.FileMode(0)
+		if p == "/shared/noexec" {
+			mode = 0o444 // r--: listable, not searchable
+		}
+		if err := os.Chmod(root+p, mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(root+p, 0o755) })
+	}
+	id := e.share(t, root, nil)
+	if j := e.scan(t, id, "auto", "manual"); j.State != jobs.StateDone {
+		t.Fatalf("a scan that cannot read everything still finishes: %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.errors")
+	if r.Detail["files"] != float64(2) {
+		t.Errorf("the scan is published without what it could not read: %+v", r.Detail)
+	}
+	list, _ := r.Detail["unreadable"].([]any)
+	got := map[string]map[string]any{}
+	for _, f := range list {
+		m := f.(map[string]any)
+		got[m["path"].(string)] = m
+	}
+	if p := got["/private"]; p == nil || p["kind"] != "permission" || p["self"] != true || p["items"] != nil {
+		t.Errorf("/private could not be opened: %+v", list)
+	}
+	if p := got["/shared/noexec"]; p == nil || p["kind"] != "permission" || p["items"] != float64(2) || p["self"] != nil {
+		t.Errorf("/shared/noexec could be listed but not examined: %+v", list)
+	}
+	if len(list) != 2 || r.Detail["unreadable_folders"] != float64(2) {
+		t.Errorf("only the folders with a problem are named, not the ones below them: %+v", r.Detail)
+	}
+	if got["/private/inner"] != nil {
+		t.Errorf("a folder below one that could not be opened was never seen: %+v", list)
+	}
+	for _, e := range []string{"secret.txt", "c.txt", "d.txt"} {
+		if strings.Contains(fmt.Sprint(r.Detail), e) {
+			t.Errorf("file names are not in the entry: %s", e)
+		}
+	}
+}
+
+func TestAFailedScanIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	id := e.share(t, "/nonexistent/path", nil)
+	j := e.scan(t, id, "auto", "manual")
+	if j.State != jobs.StateFailed {
+		t.Fatalf("job = %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.failed")
+	if msg, _ := r.Detail["error"].(string); r.Target != "media" || !strings.Contains(msg, "mounted into the container") {
+		t.Errorf("entry = %+v", r)
+	}
+	// The folder could not be opened, so no scan was begun: there is nothing for the entry to name.
+	if _, has := r.Detail["scan_id"]; has {
+		t.Errorf("an entry of a failure before the scan began names a scan: %+v", r.Detail)
+	}
+}
+
+// A share that held files and is suddenly empty (an unmounted NAS) is refused, and that must show.
+func TestARefusedEmptyScanIsInTheAuditLog(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	root := t.TempDir()
+	for i := 0; i < 120; i++ {
+		ts.Write(t, fmt.Sprintf("%s/d/f%03d.txt", root, i), 10)
+	}
+	id := e.share(t, root, nil)
+	e.scan(t, id, "auto", "manual")
+	if err := os.RemoveAll(root + "/d"); err != nil {
+		t.Fatal(err)
+	}
+	j := e.scan(t, id, "full", "schedule")
+	if j.State != jobs.StateFailed {
+		t.Fatalf("an emptied share must be refused: %+v", j)
+	}
+	r := only(t, e.audit(t), "scan.failed")
+	if msg, _ := r.Detail["error"].(string); !strings.Contains(msg, "still mounted") || r.Detail["trigger"] != "schedule" {
+		t.Errorf("entry = %+v", r)
+	}
+	// The scan that failed is named in the entry, which is how the error on the dashboard leads to it.
+	var failed int64
+	if err := e.st.Pool.QueryRow(ctx, `SELECT id FROM scans WHERE status = 'failed'`).Scan(&failed); err != nil {
+		t.Fatal(err)
+	}
+	if r.Detail["scan_id"] != float64(failed) {
+		t.Errorf("the entry names scan %v, the scan that failed is %d", r.Detail["scan_id"], failed)
 	}
 }

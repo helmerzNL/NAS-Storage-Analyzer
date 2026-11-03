@@ -37,8 +37,8 @@
 {:else}
   <svg viewBox="0 0 {W} {height}" width="100%" role="img" preserveAspectRatio="none" style:height="{height}px">
     {#each ticks as tk}
-      <line x1={padL} x2={W - padR} y1={sy(tk)} y2={sy(tk)} stroke="var(--border)" />
-      <text x={padL - 6} y={sy(tk) + 4} text-anchor="end" font-size="11" fill="var(--muted)">{formatBytes(tk, prefs.units, i18n.lang)}</text>
+      <line x1={padL} x2={W - padR} y1={sy(tk)} y2={sy(tk)} stroke="var(--lijn-strong)" />
+      <text x={padL - 6} y={sy(tk) + 4} text-anchor="end" font-size="11" fill="var(--text-muted)">{formatBytes(tk, prefs.units, i18n.lang)}</text>
     {/each}
     {#each layers as l}
       {#if stacked}
@@ -48,7 +48,7 @@
         {#each l.points as p, i}<circle cx={sx(p.x)} cy={sy(l.top[i])} r="2.6" fill={l.color} />{/each}
       {/if}
     {/each}
-    <text x={padL} y={height - 6} font-size="11" fill="var(--muted)">{formatDate(new Date(xmin).toISOString(), i18n.lang)}</text>
-    <text x={W - padR} y={height - 6} text-anchor="end" font-size="11" fill="var(--muted)">{formatDate(new Date(xmax).toISOString(), i18n.lang)}</text>
+    <text x={padL} y={height - 6} font-size="11" fill="var(--text-muted)">{formatDate(new Date(xmin).toISOString(), i18n.lang)}</text>
+    <text x={W - padR} y={height - 6} text-anchor="end" font-size="11" fill="var(--text-muted)">{formatDate(new Date(xmax).toISOString(), i18n.lang)}</text>
   </svg>
 {/if}

@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base32"
 	"errors"
 	"flag"
 	"fmt"
@@ -16,10 +14,13 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
+	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
 	"github.com/helmerznl/nas-storage-analyzer/internal/webui"
 )
 
@@ -43,15 +44,15 @@ func envBool(name string) bool {
 }
 
 // location returns the time zone for cron schedules and the day/night limit
-// (NASA_TZ, else TZ, else UTC).
+// (NASSA_TZ, else TZ, else UTC).
 func location() (*time.Location, error) {
-	name := env("NASA_TZ", os.Getenv("TZ"))
+	name := env("NASSA_TZ", os.Getenv("TZ"))
 	if name == "" {
 		return time.UTC, nil
 	}
 	loc, err := time.LoadLocation(name)
 	if err != nil {
-		return nil, fmt.Errorf("unknown time zone %q (NASA_TZ): %w", name, err)
+		return nil, fmt.Errorf("unknown time zone %q (NASSA_TZ): %w", name, err)
 	}
 	return loc, nil
 }
@@ -61,18 +62,10 @@ func runGenKey(args []string) error {
 	return nil
 }
 
-func randomToken() string {
-	b := make([]byte, 15)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b)
-}
-
 func runServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	listen := fs.String("listen", env("NASA_LISTEN", ":8080"), "address to listen on (env NASA_LISTEN)")
-	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN, or NASA_DB_HOST/PORT/NAME/USER/PASSWORD)")
+	listen := fs.String("listen", env("NASSA_LISTEN", ":8080"), "address to listen on (env NASSA_LISTEN)")
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASSA_DB_DSN, or NASSA_DB_HOST/PORT/NAME/USER/PASSWORD)")
 	migrate := fs.Bool("migrate", true, "apply database migrations before serving")
 	stmtTimeout := fs.Duration("statement-timeout", 10*time.Second, "abort any database statement that runs longer")
 	maxConns := fs.Int("max-conns", 20, "maximum database connections for queries")
@@ -80,17 +73,20 @@ func runServe(args []string) error {
 	fs.Parse(args)
 
 	if *dsn == "" {
-		return errors.New("no database: set NASA_DB_DSN or NASA_DB_HOST/NASA_DB_PASSWORD")
+		return errors.New("no database: set NASSA_DB_DSN or NASSA_DB_HOST/NASSA_DB_PASSWORD")
 	}
 	box, err := secrets.FromEnv()
 	if err != nil {
 		return err
 	}
-	proxies, err := api.ParseTrustedProxies(env("NASA_TRUSTED_PROXIES", ""))
+	proxies, err := api.ParseTrustedProxies(env("NASSA_TRUSTED_PROXIES", ""))
 	if err != nil {
 		return err
 	}
 	log := newLogger()
+	if w := dataPathWarning(os.Getenv("DATA_PATH")); w != "" {
+		log.Warn(w)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -114,38 +110,49 @@ func runServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	sharesRoot := env("NASA_SHARES_ROOT", "/mnt/shares")
+	sharesRoot := env("NASSA_SHARES_ROOT", "/mnt/shares")
 	queue := jobs.NewQueue(rw.Pool)
 	svc := auth.NewService(rw.Pool, box, auth.DefaultConfig())
-	opts := api.Options{
-		Auth:           svc,
-		Shares:         shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc),
-		Queue:          queue,
-		SharesRoot:     sharesRoot,
-		Static:         webui.Handler(),
-		TrustedProxies: proxies,
-		SetupToken:     env("NASA_SETUP_TOKEN", ""),
-		MetricsToken:   env("NASA_METRICS_TOKEN", ""),
-		RequireHTTPS:   envBool("NASA_REQUIRE_HTTPS"),
+	// The update check (docs/deploy.md): on by default, NASSA_UPDATE_CHECK=false (also 0, no, off) switches it off.
+	checker := updates.New(version, updateCheckEnabled(env("NASSA_UPDATE_CHECK", "")), log)
+	if base := env("NASSA_UPDATE_BASE_URL", ""); base != "" {
+		checker.BaseURL = base // a mirror, or a test double
 	}
-	if id := env("NASA_RP_ID", ""); id != "" {
-		opts.RP = auth.RelyingParty{ID: id, Name: env("NASA_RP_NAME", "NAS Storage Analyzer")}
-		for _, o := range strings.Split(env("NASA_RP_ORIGINS", ""), ",") {
+	sharesSvc := shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc)
+	opts := api.Options{
+		Backup:          backup.New(rw.Pool, sharesSvc, svc, queue, log, version),
+		Updates:         checker,
+		PublicURL:       env("NASSA_PUBLIC_URL", ""),
+		Auth:            svc,
+		Shares:          sharesSvc,
+		Queue:           queue,
+		SharesRoot:      sharesRoot,
+		Static:          webui.Handler(),
+		TrustedProxies:  proxies,
+		SetupToken:      env("NASSA_SETUP_TOKEN", ""),
+		SetupTokenFixed: env("NASSA_SETUP_TOKEN", "") != "",
+		Reset:           reset.New(rw.Pool, log),
+		MetricsToken:    env("NASSA_METRICS_TOKEN", ""),
+		RequireHTTPS:    envBool("NASSA_REQUIRE_HTTPS"),
+	}
+	if id := env("NASSA_RP_ID", ""); id != "" {
+		opts.RP = auth.RelyingParty{ID: id, Name: env("NASSA_RP_NAME", "NAS Storage Analyzer")}
+		for _, o := range strings.Split(env("NASSA_RP_ORIGINS", ""), ",") {
 			if o = strings.TrimSpace(o); o != "" {
 				opts.RP.Origins = append(opts.RP.Origins, o)
 			}
 		}
 		if len(opts.RP.Origins) == 0 {
-			return errors.New("NASA_RP_ID is set but NASA_RP_ORIGINS is empty (for example https://nas.example.com)")
+			return errors.New("NASSA_RP_ID is set but NASSA_RP_ORIGINS is empty (for example https://nas.example.com)")
 		}
 	} else {
-		log.Warn("NASA_RP_ID is not set: passkeys are bound to the address used in the browser. Set NASA_RP_ID and NASA_RP_ORIGINS in production.")
+		log.Warn("NASSA_RP_ID is not set: passkeys are bound to the address used in the browser. Set NASSA_RP_ID and NASSA_RP_ORIGINS in production.")
 	}
 	if n, err := svc.UserCount(ctx); err != nil {
 		return err
 	} else if n == 0 {
 		if opts.SetupToken == "" {
-			opts.SetupToken = randomToken()
+			opts.SetupToken = auth.NewSetupToken()
 		}
 		log.Warn("no account exists yet: open the web interface and create the first administrator",
 			"setup_token", opts.SetupToken)
@@ -172,7 +179,7 @@ func runServe(args []string) error {
 
 	srv := &http.Server{
 		Addr:              *listen,
-		Handler:           api.New(ro, log, api.Config{CSVMaxRows: *csvRows}, opts),
+		Handler:           api.New(ro, log, api.Config{CSVMaxRows: *csvRows, Build: buildInfo()}, opts),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       2 * time.Minute,
@@ -180,7 +187,7 @@ func runServe(args []string) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
-	log.Info("listening", "version", version, "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
+	log.Info("listening", "version", version, "commit", commit, "channel", buildInfo().Channel, "addr", *listen, "trusted_proxies", len(proxies), "require_https", opts.RequireHTTPS)
 	select {
 	case err := <-errc:
 		return err

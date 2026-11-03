@@ -1,0 +1,21 @@
+name: app-engineering
+
+on:
+  pull_request:
+    branches:
+      - beta
+      - main
+
+jobs:
+  # `app-engineering-conformance` has its own job so that its name can be found on the pull request:
+  # baseline section 18 cites it as `[Control: app-engineering-conformance]`.
+  app-engineering-conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The checker's own tests first: if the script fails, you want to know whether the script
+      # is broken or the declaration.
+      - name: Test the conformance checker
+        run: python -m unittest discover -s scripts -p "test_check_app_engineering.py" -v
+      - name: Every engineering topic is answered
+        run: python scripts/check_app_engineering.py

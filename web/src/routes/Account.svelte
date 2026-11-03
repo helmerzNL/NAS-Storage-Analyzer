@@ -3,12 +3,13 @@
   import { get, post, put, del, patch, type Passkey, type SessionResponse } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatDateTime, ago } from '../lib/format';
-  import { session, prefs, setPref, refreshSession } from '../lib/session.svelte';
+  import { session, refreshSession } from '../lib/session.svelte';
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
   import Enroll from '../components/Enroll.svelte';
   import RecoveryCodes from '../components/RecoveryCodes.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import FoldHead from '../components/FoldHead.svelte';
 
   let passkeys = $state<Passkey[]>([]);
   let cur = $state(''), next = $state(''), again = $state(''), pwErr = $state('');
@@ -51,28 +52,16 @@
   }
 </script>
 
-<div class="page-head"><div class="grow"><h1>{t('nav.account')}</h1>
-  <p class="muted" style="margin:0">{user?.username} · {t('role.' + user?.role)} · {t('account.lastlogin', { when: formatDateTime(user?.last_login_at, i18n.lang) })}</p></div></div>
-
-<div class="grid cols-2">
-  <section class="card stack">
-    <h2>{t('account.prefs')}</h2>
-    <label class="field">{t('pref.units')}
-      <select value={prefs.units} onchange={(e) => setPref('units', e.currentTarget.value)}><option value="binary">{t('pref.units.binary.long')}</option><option value="decimal">{t('pref.units.decimal.long')}</option></select></label>
-    <label class="field">{t('pref.language')}
-      <select value={i18n.lang} onchange={(e) => setPref('language', e.currentTarget.value)}><option value="nl">Nederlands</option><option value="en">English</option></select></label>
-    <label class="field">{t('pref.theme')}
-      <select value={prefs.theme} onchange={(e) => setPref('theme', e.currentTarget.value)}><option value="system">{t('pref.theme.system')}</option><option value="light">{t('pref.theme.light')}</option><option value="dark">{t('pref.theme.dark')}</option></select></label>
-  </section>
+<div class="page-head"><h1>{t('settings.security')}</h1></div>
 
   <section class="card stack">
     <h2>{t('account.password')}</h2>
     <form class="stack" onsubmit={changePw}>
-      {#if pwErr}<div class="alert bad" role="alert">{pwErr}</div>{/if}
+      {#if pwErr}<div class="notice error" role="alert">{pwErr}</div>{/if}
       <label class="field">{t('account.pw.current')}<input type="password" bind:value={cur} autocomplete="current-password" required data-testid="pw-current" /></label>
       <label class="field">{t('account.pw.new')}<input type="password" bind:value={next} autocomplete="new-password" minlength={session.minPassword} required data-testid="pw-new" /><span class="hint">{t('auth.pw.hint', { n: session.minPassword })}</span></label>
       <label class="field">{t('auth.confirm')}<input type="password" bind:value={again} autocomplete="new-password" required /></label>
-      <button class="primary" type="submit" data-testid="pw-save">{t('account.pw.change')}</button>
+      <button class="btn primary" type="submit" data-testid="pw-save">{t('account.pw.change')}</button>
       <span class="muted small">{t('account.pw.note')}</span>
     </form>
   </section>
@@ -81,53 +70,52 @@
     <h2>{t('account.totp')}</h2>
     {#if user?.totp_enabled}
       <div><span class="badge ok">{t('account.enabled')}</span></div>
-      <div><button class="danger" onclick={() => reauth('totp')} disabled={!user.passkeys} title={!user.passkeys ? t('account.lastfactor') : ''} data-testid="totp-remove">{t('account.totp.remove')}</button></div>
+      <div><button class="btn danger" onclick={() => reauth('totp')} disabled={!user.passkeys} title={!user.passkeys ? t('account.lastfactor') : ''} data-testid="totp-remove">{t('account.totp.remove')}</button></div>
     {:else if adding === 'totp'}
       <Enroll onDone={enrolled} canPasskey={false} />
-      <button class="ghost small" onclick={() => (adding = '')}>{t('common.cancel')}</button>
+      <button class="btn ghost small" onclick={() => (adding = '')}>{t('common.cancel')}</button>
     {:else}
       <div><span class="badge">{t('account.notset')}</span></div>
-      <div><button onclick={() => (adding = 'totp')} data-testid="totp-add">{t('enroll.totp')}</button></div>
+      <div><button class="btn" onclick={() => (adding = 'totp')} data-testid="totp-add">{t('enroll.totp')}</button></div>
     {/if}
   </section>
 
   <section class="card stack">
     <h2>{t('account.passkeys')}</h2>
-    <div class="stack" style="gap:6px" data-testid="passkey-list">
+    <div class="stack tight" data-testid="passkey-list">
       {#each passkeys as p (p.id)}
-        <div class="row between" style="border:1px solid var(--border);border-radius:8px;padding:8px 10px">
+        <div class="row between list-item">
           <div><b>{p.name}</b> {#if p.synced}<span class="badge info" title={t('account.passkey.synced.hint')}>{t('account.passkey.synced')}</span>{/if}
             <div class="muted small">{t('account.passkey.added', { when: formatDateTime(p.created_at, i18n.lang) })} · {p.last_used_at ? t('account.passkey.used', { when: ago(p.last_used_at, i18n.lang) }) : t('account.passkey.unused')}</div></div>
-          <div class="row"><button class="small" onclick={() => rename(p)}>{t('common.edit')}</button>
-            <button class="small danger" onclick={() => remove(p)} disabled={passkeys.length === 1 && !user?.totp_enabled}>{t('common.delete')}</button></div>
+          <div class="row"><button class="btn small" onclick={() => rename(p)}>{t('common.edit')}</button>
+            <button class="btn small danger" onclick={() => remove(p)} disabled={passkeys.length === 1 && !user?.totp_enabled}>{t('common.delete')}</button></div>
         </div>
       {:else}<span class="muted">{t('account.notset')}</span>{/each}
     </div>
     {#if adding === 'passkey'}
       <Enroll onDone={enrolled} canTotp={false} />
-      <button class="ghost small" onclick={() => (adding = '')}>{t('common.cancel')}</button>
+      <button class="btn ghost small" onclick={() => (adding = '')}>{t('common.cancel')}</button>
     {:else}
-      <div><button onclick={() => (adding = 'passkey')} data-testid="passkey-add">{t('enroll.passkey.add')}</button></div>
+      <div><button class="btn" onclick={() => (adding = 'passkey')} data-testid="passkey-add">{t('enroll.passkey.add')}</button></div>
     {/if}
   </section>
 
   <section class="card stack">
-    <h2>{t('account.recovery')}</h2>
+    <FoldHead id="recovery" title={t('account.recovery')} open={false} />
     <p class="muted">{t('account.recovery.left', { n: user?.recovery_codes_left ?? 0 })}</p>
-    <div><button onclick={() => reauth('codes')} data-testid="codes-regenerate">{t('account.recovery.new')}</button></div>
+    <div><button class="btn" onclick={() => reauth('codes')} data-testid="codes-regenerate">{t('account.recovery.new')}</button></div>
   </section>
-</div>
 
 <Dialog bind:open={reauthOpen} title={t('account.reauth')}>
   <form id="reauth" class="stack" onsubmit={doReauth}>
     <p>{reauthFor === 'totp' ? t('account.totp.remove.body') : t('account.recovery.new.body')}</p>
-    {#if reauthErr}<div class="alert bad" role="alert">{reauthErr}</div>{/if}
+    {#if reauthErr}<div class="notice error" role="alert">{reauthErr}</div>{/if}
     <label class="field">{t('auth.password')}<input type="password" bind:value={reauthPw} autocomplete="current-password" required data-testid="reauth-pw" /></label>
   </form>
-  {#snippet footer()}<button onclick={() => (reauthOpen = false)}>{t('common.cancel')}</button><button class="primary" type="submit" form="reauth" data-testid="reauth-ok">{t('common.continue')}</button>{/snippet}
+  {#snippet footer()}<button class="btn" onclick={() => (reauthOpen = false)}>{t('common.cancel')}</button><button class="btn primary" type="submit" form="reauth" data-testid="reauth-ok">{t('common.continue')}</button>{/snippet}
 </Dialog>
 
 <Dialog bind:open={codesOpen} title={t('codes.title')}>
   <RecoveryCodes {codes} />
-  {#snippet footer()}<button class="primary" onclick={() => (codesOpen = false)}>{t('common.close')}</button>{/snippet}
+  {#snippet footer()}<button class="btn primary" onclick={() => (codesOpen = false)}>{t('common.close')}</button>{/snippet}
 </Dialog>

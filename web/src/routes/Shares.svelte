@@ -8,20 +8,22 @@
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
   import Dialog from '../components/Dialog.svelte';
+  import FolderPicker from '../components/FolderPicker.svelte';
 
   interface Form {
     id?: number; name: string; kind: 'bind' | 'nfs' | 'smb'; path: string; server: string; export: string; share: string; username: string;
     domain: string; version: string; mount_options: string; password: string; clearPassword: boolean; hasPassword: boolean;
+    client_windows: string; client_posix: string;
     excludes: string; workers: number; max_ops_per_sec: number; max_ops_day: number; day_start_hour: number; day_end_hour: number;
     cron: string; last_used_basis: string; full_scan_every: number; retention_scans: number; retention_days: number; snapshot_depth: number;
   }
   let sharesRoot = $state('/mnt/shares');
   let open = $state(false), f = $state<Form>(blank()), busy = $state(false), error = $state(''), fieldErr = $state<Record<string, string>>({});
-  let confirmDelete = $state<ShareInfo | null>(null), delOpen = $state(false);
+  let confirmDelete = $state<ShareInfo | null>(null), delOpen = $state(false), pickOpen = $state(false);
 
   function blank(): Form {
     return { name: '', kind: 'bind', path: '/mnt/shares/', server: '', export: '', share: '', username: '', domain: '', version: '', mount_options: '', password: '',
-      clearPassword: false, hasPassword: false, excludes: '.snapshot\n@eaDir\n#recycle\n.Trash-*', workers: 16, max_ops_per_sec: 0, max_ops_day: 0,
+      clearPassword: false, hasPassword: false, client_windows: '', client_posix: '', excludes: '.snapshot\n@eaDir\n#recycle\n.Trash-*', workers: 16, max_ops_per_sec: 0, max_ops_day: 0,
       day_start_hour: 8, day_end_hour: 22, cron: '0 3 * * *', last_used_basis: 'atime', full_scan_every: 7, retention_scans: 104, retention_days: 0, snapshot_depth: 4 };
   }
   onMount(async () => {
@@ -35,6 +37,7 @@
     const c = s.config;
     f = { id: s.id, name: s.name, kind: s.kind, path: c.path ?? '', server: c.server ?? '', export: c.export ?? '', share: c.share ?? '', username: c.username ?? '',
       domain: c.domain ?? '', version: c.version ?? '', mount_options: c.mount_options ?? '', password: '', clearPassword: false, hasPassword: s.has_password,
+      client_windows: c.client_windows ?? '', client_posix: c.client_posix ?? '',
       excludes: s.excludes.join('\n'), workers: s.workers, max_ops_per_sec: s.max_ops_per_sec, max_ops_day: s.max_ops_day, day_start_hour: s.day_start_hour,
       day_end_hour: s.day_end_hour, cron: s.cron, last_used_basis: s.last_used_basis, full_scan_every: s.full_scan_every, retention_scans: s.retention_scans,
       retention_days: s.retention_days, snapshot_depth: s.snapshot_depth };
@@ -49,6 +52,7 @@
       cron: f.cron.trim(), last_used_basis: f.last_used_basis, full_scan_every: Number(f.full_scan_every), retention_scans: Number(f.retention_scans),
       retention_days: Number(f.retention_days), snapshot_depth: Number(f.snapshot_depth),
       path: '', server: '', export: '', share: '', username: '', domain: '', version: '', mount_options: '',
+      client_windows: f.client_windows.trim(), client_posix: f.client_posix.trim(),
     };
     if (f.kind === 'bind') body.path = f.path.trim();
     else {
@@ -85,10 +89,11 @@
 
 {#snippet err(name: string)}{#if fieldErr[name]}<span class="field-error" role="alert">{fieldErr[name]}</span>{/if}{/snippet}
 
-<div class="page-head"><div class="grow"><h1>{t('nav.shares')}</h1><p class="muted" style="margin:0">{t('shares.intro')}</p></div>
-  <button class="primary" onclick={() => edit()} data-testid="add-share">{t('shares.add')}</button></div>
+<div class="page-head"><h1>{t('nav.shares')}</h1>
+  <button class="btn primary" onclick={() => edit()} data-testid="add-share">{t('shares.add')}</button></div>
+<p class="muted intro">{t('shares.intro')}</p>
 
-<div class="card table-wrap" style="padding:0">
+<div class="card table-wrap flush">
   <table data-testid="share-table">
     <thead><tr><th>{t('col.name')}</th><th>{t('shares.target')}</th><th class="hide-sm">{t('shares.schedule')}</th><th class="hide-sm">{t('dash.lastscan')}</th><th></th></tr></thead>
     <tbody>
@@ -97,10 +102,10 @@
           <td class="mono small truncate" style="max-width:34ch" title={target(s)}>{target(s)}</td>
           <td class="hide-sm small">{#if s.cron}<span class="mono">{s.cron}</span><div class="muted">{t('shares.next', { when: formatDateTime(s.next_run_at, i18n.lang) })}</div>{:else}<span class="muted">{t('cron.none')}</span>{/if}</td>
           <td class="hide-sm small">{s.last_scan ? ago(s.last_scan.finished_at, i18n.lang) : '–'}</td>
-          <td class="right nowrap">
-            <button class="small" onclick={() => scan(s, 'auto')} disabled={!!s.active_job}>{t('scan.now')}</button>
-            <button class="small" onclick={() => edit(s)} data-testid={'edit-' + s.name}>{t('common.edit')}</button>
-            <button class="small danger" onclick={() => { confirmDelete = s; delOpen = true; }}>{t('common.delete')}</button></td></tr>
+          <td class="right actions">
+            <button class="btn small" onclick={() => scan(s, 'auto')} disabled={!!s.active_job}>{t('scan.now')}</button>
+            <button class="btn small" onclick={() => edit(s)} data-testid={'edit-' + s.name}>{t('common.edit')}</button>
+            <button class="btn small danger" onclick={() => { confirmDelete = s; delOpen = true; }}>{t('common.delete')}</button></td></tr>
       {:else}<tr><td colspan="5" class="muted">{t('shares.none')}</td></tr>{/each}
     </tbody>
   </table>
@@ -108,7 +113,7 @@
 
 <Dialog bind:open title={f.id ? t('shares.edit', { name: f.name }) : t('shares.add')} wide>
   <form id="share-form" class="stack" onsubmit={save}>
-    {#if error}<div class="alert bad" role="alert">{error}</div>{/if}
+    {#if error}<div class="notice error" role="alert">{error}</div>{/if}
     <div class="form-grid">
       <label class="field">{t('shares.name')}<input bind:value={f.name} required data-testid="f-name" />{@render err('name')}</label>
       <label class="field">{t('shares.kind')}
@@ -116,9 +121,16 @@
     </div>
 
     {#if f.kind === 'bind'}
-      <label class="field">{t('shares.path')}<input bind:value={f.path} required class="mono" data-testid="f-path" /><span class="hint">{t('shares.path.hint', { root: sharesRoot })}</span>{@render err('path')}</label>
+      <div class="field">
+        <label for="f-path">{t('shares.path')}</label>
+        <div class="input-row">
+          <input id="f-path" bind:value={f.path} required class="mono" data-testid="f-path" />
+          <button class="btn" type="button" onclick={() => (pickOpen = true)} data-testid="f-browse">{t('shares.browse')}</button>
+        </div>
+        <span class="hint">{t('shares.path.hint', { root: sharesRoot })}</span>{@render err('path')}
+      </div>
     {:else}
-      <div class="alert info small">{t('shares.mount.note')}</div>
+      <div class="notice info small">{t('shares.mount.note')}</div>
       <div class="form-grid">
         <label class="field">{t('shares.server')}<input bind:value={f.server} required placeholder="nas.lan" />{@render err('server')}</label>
         {#if f.kind === 'nfs'}
@@ -135,6 +147,15 @@
         <label class="field">{t('shares.mountopts')}<input bind:value={f.mount_options} class="mono" placeholder="soft,timeo=30" /><span class="hint">{t('shares.mountopts.hint')}</span>{@render err('mount_options')}</label>
       </div>
     {/if}
+
+    <h3>{t('shares.scripts')}</h3>
+    <p class="hint" style="margin-top:-6px">{t('shares.scripts.hint')}</p>
+    <div class="form-grid">
+      <label class="field">{t('shares.client.windows')}<input bind:value={f.client_windows} class="mono" autocomplete="off" spellcheck="false" placeholder="\\nas\media" data-testid="f-client-windows" />
+        <span class="hint">{t('shares.client.windows.hint')}</span>{@render err('client_windows')}</label>
+      <label class="field">{t('shares.client.posix')}<input bind:value={f.client_posix} class="mono" autocomplete="off" spellcheck="false" placeholder="/mnt/user/media" data-testid="f-client-posix" />
+        <span class="hint">{t('shares.client.posix.hint')}</span>{@render err('client_posix')}</label>
+    </div>
 
     <h3>{t('shares.scanning')}</h3>
     <label class="field">{t('shares.excludes')}<textarea bind:value={f.excludes} rows="4" class="mono"></textarea><span class="hint">{t('shares.excludes.hint')}</span>{@render err('excludes')}</label>
@@ -168,15 +189,17 @@
     </div>
   </form>
   {#snippet footer()}
-    <button type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
-    <button class="primary" type="submit" form="share-form" disabled={busy} data-testid="f-save">{t('common.save')}</button>
+    <button class="btn" type="button" onclick={() => (open = false)}>{t('common.cancel')}</button>
+    <button class="btn primary" type="submit" form="share-form" disabled={busy} data-testid="f-save">{t('common.save')}</button>
   {/snippet}
 </Dialog>
+
+<FolderPicker bind:open={pickOpen} start={f.path} onpick={(p) => (f.path = p)} />
 
 <Dialog bind:open={delOpen} title={t('shares.delete.title')}>
   <p>{t('shares.delete.body', { name: confirmDelete?.name ?? '' })}</p>
   {#snippet footer()}
-    <button onclick={() => (delOpen = false)}>{t('common.cancel')}</button>
-    <button class="danger" onclick={remove} data-testid="confirm-delete">{t('common.delete')}</button>
+    <button class="btn" onclick={() => (delOpen = false)}>{t('common.cancel')}</button>
+    <button class="btn danger" onclick={remove} data-testid="confirm-delete">{t('common.delete')}</button>
   {/snippet}
 </Dialog>

@@ -67,12 +67,12 @@
 </script>
 
 <div class="page-head">
-  <div class="grow"><h1>{t('nav.dashboard')}</h1>
-    {#if shares.length}<div class="muted">{t('dash.total', { size: formatBytes(total.bytes, prefs.units, i18n.lang), files: formatNumber(total.files, i18n.lang), n: shares.length })}</div>{/if}</div>
+  <h1>{t('nav.dashboard')}</h1>
   {#if isAdmin()}<a class="btn" href="/admin/shares" use:link>{t('nav.shares')}</a>{/if}
 </div>
+{#if shares.length}<p class="muted intro">{t('dash.total', { size: formatBytes(total.bytes, prefs.units, i18n.lang), files: formatNumber(total.files, i18n.lang), n: shares.length })}</p>{/if}
 
-{#if error}<div class="alert bad" role="alert">{error}</div>{/if}
+{#if error}<div class="notice error" role="alert">{error}</div>{/if}
 {#if loaded && shares.length === 0}
   <div class="card" data-testid="no-shares"><h2>{t('dash.empty.title')}</h2><p class="muted">{isAdmin() ? t('dash.empty.admin') : t('dash.empty.viewer')}</p>
     {#if isAdmin()}<a class="btn primary" href="/admin/shares" use:link>{t('shares.add')}</a>{/if}</div>
@@ -87,15 +87,19 @@
       <div class="row">
         <h2 style="margin:0">{s.name}</h2><span class="badge">{t('kind.' + s.kind)}</span>
         <span class="badge {badge.cls}" data-testid="scan-badge">{badge.text}</span>
-        {#if l?.error_count}<span class="badge warn" title={t('scan.errors.hint')}>{l.error_count} {t('scan.errors')}</span>{/if}
+        <!-- The errors of the last scan: for an administrator a way to the entry of the audit log that says which folders and why. -->
+        {#if l?.error_count}
+          {#if isAdmin()}<a class="badge warn" href="/admin/audit?scan={l.id}" use:link title="{t('scan.errors.hint')} {t('scan.see.audit')}" data-testid="scan-errors-link">{l.error_count} {t('scan.errors')}</a>
+          {:else}<span class="badge warn" title={t('scan.errors.hint')}>{l.error_count} {t('scan.errors')}</span>{/if}
+        {/if}
       </div>
       <div class="row">
         {#if l}<a class="btn small primary" href="/browse/{s.id}" use:link>{t('dash.browse')}</a>{/if}
         {#if isAdmin()}
-          {#if job}<button class="small danger" onclick={() => cancel(s)} data-testid="cancel-scan">{t('scan.cancel')}</button>
+          {#if job}<button class="btn small danger" onclick={() => cancel(s)} data-testid="cancel-scan">{t('scan.cancel')}</button>
           {:else}
-            <button class="small" onclick={() => scan(s, 'auto')} data-testid="scan-now">{t('scan.now')}</button>
-            <button class="small" onclick={() => scan(s, 'full')} title={t('scan.full.hint')}>{t('scan.full')}</button>
+            <button class="btn small" onclick={() => scan(s, 'auto')} data-testid="scan-now">{t('scan.now')}</button>
+            <button class="btn small" onclick={() => scan(s, 'full')} title={t('scan.full.hint')}>{t('scan.full')}</button>
           {/if}
         {/if}
       </div>
@@ -104,7 +108,11 @@
     {#if job}<ScanStatus share={s} {job} />{/if}
     <AtimeNotice share={s} />
     {#if s.latest_scan && s.latest_scan.status !== 'running' && s.latest_scan.status !== 'succeeded' && s.latest_scan.error}
-      <div class="alert bad">{s.latest_scan.error}</div>
+      <div class="notice error" data-testid="scan-error">
+        {#if isAdmin() && s.latest_scan.status === 'failed'}
+          <a class="notice-link" href="/admin/audit?scan={s.latest_scan.id}" use:link data-testid="scan-error-link"><span>{s.latest_scan.error}</span> <b>{t('scan.see.audit')} →</b></a>
+        {:else}{s.latest_scan.error}{/if}
+      </div>
     {/if}
 
     {#if l}

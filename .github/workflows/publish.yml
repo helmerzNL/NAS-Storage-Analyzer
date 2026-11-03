@@ -1,0 +1,117 @@
+# Rules: project-baseline.md §1 (pipeline-bump model), §5 (a version tag is written once), §20 (channels, multi-arch).
+# docs/adr/0001-pipeline-bump-versioning.md, docs/adr/0002-beta-main-promotion.md.
+#
+# Runs when a promotion (beta -> main) lands. It does three things in this order, in one job so the image is
+# built from the commit that carries the new number:
+#   1. raises VERSION. Pull requests never change it (two that did would conflict every time); the part comes from a
+#      label on the promotion pull request: `version:major`, `version:minor`, otherwise patch. A push of documentation
+#      only keeps the number. The commit is pushed with GITHUB_TOKEN and so starts no workflow of its own; the
+#      repository must let github-actions push to main (a ruleset bypass if main is protected). Without that the bump
+#      fails here, loudly, before anything is published.
+#   2. publishes the stable image for linux/amd64 and linux/arm64: `latest` is a channel and moves on every build;
+#      `X.Y.Z` names one artifact, so it is only pushed while the git tag vX.Y.Z does not exist yet. That tag is made
+#      by the release workflow (release.yml), which needs reviewed notes: cut the release right after a promotion.
+#   3. brings beta level with main, so the next pull request into beta starts from the new VERSION.
+#
+# The channel `beta` is published by publish-beta.yml on every push to beta. A release is not published from here:
+# a tag or GitHub Release is only ever created by release.yml, and no workflow here runs on a tag.
+name: publish
+
+on:
+  push:
+    branches:
+      - main
+
+# One run at a time: each one raises the number that the previous one left.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main                    # the tip, not the pushed commit: an earlier run may have raised the version since
+          fetch-depth: 0
+      - name: Raise the version for this push
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          part=patch
+          labels="$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[].labels[].name' 2>/dev/null || true)"
+          if grep -qx 'version:major' <<<"$labels"; then part=major
+          elif grep -qx 'version:minor' <<<"$labels"; then part=minor; fi
+          python scripts/bump_version.py --before "${{ github.event.before }}" --after "$GITHUB_SHA" --part "$part"
+          if ! git diff --quiet VERSION; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit -m "Release $(tr -d '[:space:]' < VERSION)" VERSION
+            pushed=false
+            for attempt in 1 2 3; do
+              if git push origin HEAD:main; then pushed=true; break; fi
+              git pull --rebase origin main            # something landed meanwhile; VERSION is only ever changed here
+            done
+            if [ "$pushed" != true ]; then
+              echo "::error::Could not push the version bump to main. Let github-actions push to main (ruleset bypass), or bump VERSION by hand."
+              exit 1
+            fi
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Read the version and check whether its tag exists
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          # A version image tag is an identifier, not a pointer: never write it twice.
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-qemu-action@v3             # to build the arm64 half of the image on this amd64 runner
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64    # one tag, one manifest list: every host pulls the half that fits
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            GIT_COMMIT=${{ steps.bump.outputs.sha }}
+          tags: |
+            ${{ steps.image.outputs.name }}:latest
+            ${{ steps.version.outputs.new == 'true' && format('{0}:{1}', steps.image.outputs.name, steps.version.outputs.version) || '' }}
+      # beta is where pull requests land and main only receives promotions from it, so beta has to carry the
+      # VERSION bump main just made. Best effort: a failure here never undoes the publish.
+      - name: Bring beta level with main
+        continue-on-error: true
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin beta
+          git checkout -B beta origin/beta
+          if git merge --no-edit "${{ steps.bump.outputs.sha }}" && git push origin beta; then
+            echo "beta is level with main."
+          else
+            git merge --abort 2>/dev/null || true
+            echo "::warning::Could not bring beta level with main. Merge main into beta by hand."
+            exit 1
+          fi

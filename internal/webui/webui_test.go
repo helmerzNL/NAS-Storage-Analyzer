@@ -43,6 +43,43 @@ func TestServesFilesAndFallsBackToIndex(t *testing.T) {
 	}
 }
 
+// The cache contract is what makes an update reach the browser: the page and everything that is not named after its content is asked for again on
+// every load, the content-hashed files are kept for good, and a missing file is never kept. A change to any of this changes what people see after
+// a release, so each part is pinned.
+func TestCacheContract(t *testing.T) {
+	h := handler(fstest.MapFS{
+		"index.html":           {Data: []byte(`<html><script type="module" src="/assets/index-AAAA.js"></script></html>`)},
+		"appearance-boot.js":   {Data: []byte("boot()")},
+		"favicon.svg":          {Data: []byte("<svg/>")},
+		"assets/index-AAAA.js": {Data: []byte("app()")},
+	})
+	const forever = "public, max-age=31536000, immutable"
+	for _, c := range []struct{ method, url, cache string }{
+		{"GET", "/", "no-cache"},
+		{"HEAD", "/", "no-cache"},
+		{"GET", "/about", "no-cache"}, // a deep link is the page too
+		{"GET", "/browse/3/42", "no-cache"},
+		{"GET", "/?_=1761955200000", "no-cache"},   // the page's own question whether it is still current (web/src/lib/build.svelte.ts)
+		{"GET", "/appearance-boot.js", "no-cache"}, // not named after its content, so it must be asked for again
+		{"GET", "/favicon.svg", "no-cache"},
+		{"GET", "/assets/index-AAAA.js", forever},
+		{"GET", "/assets/index-GONE.js", "no-store"}, // a missing file is not kept by anything
+		{"GET", "/gone.css", "no-store"},
+	} {
+		r := serve(h, c.method, c.url)
+		if got := r.Header().Get("Cache-Control"); got != c.cache {
+			t.Errorf("%s %s: Cache-Control = %q, want %q (status %d)", c.method, c.url, got, c.cache, r.Code)
+		}
+		if got := r.Header().Get("Cache-Control"); got == forever && !strings.HasPrefix(c.url, "/assets/") {
+			t.Errorf("%s: a file that is not content-hashed must never be kept for good", c.url)
+		}
+	}
+	// The question with a query string gets the same page as the plain address, so the answer is the current build whatever the query says.
+	if a, b := serve(h, "GET", "/"), serve(h, "GET", "/?_=1"); a.Body.String() != b.Body.String() || !strings.Contains(b.Body.String(), "index-AAAA.js") {
+		t.Errorf("the page with a query string differs from the page: %q vs %q", a.Body, b.Body)
+	}
+}
+
 func TestSecurityHeaders(t *testing.T) {
 	r := serve(handler(fstest.MapFS{"index.html": {Data: []byte("x")}}), "GET", "/")
 	csp := r.Header().Get("Content-Security-Policy")

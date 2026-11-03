@@ -7,8 +7,8 @@ Doel is een self-hosted Docker Compose-stack die NFS/SMB-shares read-only scant 
 bestandstype inzichtelijk maakt, met UI-weergaven < 500 ms bij 10 mln bestanden.
 
 Dit voorstel dekt stap 1 van de werkwijze (stack, schema, scanner, auth). Er wordt pas gebouwd na akkoord.
-De `CLAUDE.md`/`AGENTS.md`-conventies in `/home/user/App-Guidance` horen bij een ander repo (Flux76); ik pas ze
-hier niet toe tenzij je dat wilt.
+De conventies van `Flux76HQ/App-Guidance` golden bij het eerste voorstel nog niet voor dit repo. Dat is veranderd: vanaf
+de procesbasis (zie [`AGENTS.md`](../AGENTS.md)) volgt dit repo die guidelines.
 
 Beslissingen al genomen: UI/README in NL + EN via i18n (NL standaard); passkey-only login toegestaan;
 PostgreSQL als enige database, doel < 500 ms met ≤ 2 s geaccepteerd voor vrije filtercombinaties op share-niveau
@@ -57,6 +57,9 @@ DuckDB + SQLite (zie prestatiebeslissing: extra export-stap, CGO, single writer)
   SMB-credentials gaan via een `0600` credentials-file in tmpfs, nooit op de command line.
 - Beveiliging scanner: de code opent alleen met `O_RDONLY`, `fstatat(AT_SYMLINK_NOFOLLOW)`; er bestaat geen
   schrijf-, rename- of unlink-codepad. Een test bewaakt dat (grep op verboden syscalls + read-only fixture).
+  De applicatie schrijft wel de *tekst* van een verwijderscript (`internal/delscript`, [ADR 0006](adr/0006-delete-scripts.md); naast het geavanceerde script
+  ook een eenvoudig `.txt` met één opdracht per bestand of map, [ADR 0011](adr/0011-simple-delete-scripts.md)); dat pakket kan
+  geen `os`, `os/exec` of `syscall` importeren, en wie het script draait is de beheerder, op zijn eigen machine.
 
 ## 3. Databaseschema (kern)
 
@@ -64,7 +67,7 @@ Alle id's `bigint`. Per share-gebonden tabellen zijn `LIST`-gepartitioneerd op `
 leegmaken/verwijderen van een share).
 
 **App-data:** `users`, `user_credentials` (passkeys), `totp_secrets` (versleuteld), `recovery_codes` (gehasht),
-`sessions` (token-hash), `login_attempts`, `audit_log`, `settings`, `user_prefs` (binair/decimaal, taal, thema).
+`sessions` (token-hash), `login_attempts`, `audit_log`, `settings`, `user_prefs` (binair/decimaal, taal, thema, accentkleur, soort verwijderscript).
 
 **Domein:**
 
@@ -125,7 +128,7 @@ Ontwerpkeuzes:
 ## 5. Auth-flow
 
 - **Eerste start:** zolang `users` leeg is, is alleen `/setup` bereikbaar. Om een race met een willekeurige
-  bezoeker te voorkomen toont de app bij opstart een eenmalige setup-token in de logs (of leest `NASA_SETUP_TOKEN`).
+  bezoeker te voorkomen toont de app bij opstart een eenmalige setup-token in de logs (of leest `NASSA_SETUP_TOKEN`).
   De wizard maakt de admin aan en dwingt inschrijving van een tweede factor af (TOTP of passkey) + 10
   recovery codes (eenmalig getoond, gehasht opgeslagen). Geen standaardwachtwoord.
 - **Login:** (a) gebruikersnaam + wachtwoord (Argon2id) → tussentoestand `mfa_pending` → TOTP, recovery code of
@@ -138,13 +141,16 @@ Ontwerpkeuzes:
   `POST/PUT/PATCH/DELETE`.
 - **Brute force:** rate limit per IP én per gebruikersnaam, lockout met oplopende wachttijd, persistent in
   `login_attempts`; gelijke foutmelding en vergelijkbare responstijd bij onbekende gebruiker.
-- **Proxy:** `X-Forwarded-For/Proto/Host` alleen vertrouwd van `NASA_TRUSTED_PROXIES` (CIDR-lijst).
-  WebAuthn `NASA_RP_ID` en `NASA_RP_ORIGINS` configureerbaar.
-- **Rollen:** `admin` (shares, schema's, gebruikers, extensiemapping) en `viewer` (alleen lezen); autorisatie in
+- **Proxy:** `X-Forwarded-For/Proto/Host` alleen vertrouwd van `NASSA_TRUSTED_PROXIES` (CIDR-lijst).
+  WebAuthn `NASSA_RP_ID` en `NASSA_RP_ORIGINS` configureerbaar.
+- **Rollen:** `admin` (shares, schema's, gebruikers, extensiemapping, verwijderscripts) en `viewer` (alleen lezen); autorisatie in
   middleware per route, in de OpenAPI-spec per operatie gemarkeerd.
 - **Audit log:** logins (ook mislukt), MFA-wijzigingen, scanstart/-annulering, share- en configuratiewijzigingen,
-  gebruikersbeheer; append-only tabel, doorzoekbaar in de UI voor admins.
-- **Geheimen:** `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
+  gebruikersbeheer, elk verwijderscript dat is uitgegeven (`script.generate`: soort, stijl, aantallen, scan, padbasis en een SHA-256 van het script,
+  nooit een bestandsnaam), en de uitkomst van elke scan (door de worker, ook bij een schema: `scan.finished`, `scan.empty` voor een
+  scan zonder bestanden, `scan.errors` bij onleesbare mappen, met een overzicht van die mappen, `scan.failed` met de reden); append-only tabel, doorzoekbaar
+  in de UI voor admins.
+- **Geheimen:** `NASSA_DB_PASSWORD`, `NASSA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
   TOTP-secrets worden met AES-256-GCM versleuteld (key-id in het ciphertext-formaat voor latere rotatie).
 - **OIDC later:** `users.auth_source` + `external_subject` en een `IdentityProvider`-interface in `internal/auth`;
   de lokale login is de eerste implementatie. Geen OIDC-code in v1.

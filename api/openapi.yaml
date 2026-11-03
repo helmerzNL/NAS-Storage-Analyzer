@@ -66,6 +66,20 @@ paths:
       summary: This document
       responses:
         "200": {description: "The OpenAPI document.", content: {application/yaml: {schema: {type: string}}}}
+  /api/v1/version:
+    get:
+      tags: [operations]
+      operationId: getVersion
+      summary: Which version and release channel is running (public)
+      description: |
+        The channel comes from `NASSA_TAG`, the variable that also picks the image in `docker-compose.yml`:
+        a tag that contains `beta` is a `beta` build, anything else (`latest`, a version number, unset) is `stable`.
+        The web interface shows a **beta** label next to its name on a beta build.
+      security: []
+      responses:
+        "200":
+          description: The running build.
+          content: {application/json: {schema: {$ref: "#/components/schemas/Version"}}}
 
   /api/v1/shares:
     post:
@@ -150,6 +164,74 @@ paths:
       parameters: [{$ref: "#/components/parameters/Share"}]
       responses:
         "202": {description: "Queued.", content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/delete-script:
+    post:
+      tags: [admin]
+      operationId: createDeleteScript
+      summary: Write a script that deletes the selected files and folders (admin)
+      description: |
+        Returns the text of a script for `cmd`, PowerShell or `sh`, to download and run by the person on their own machine.
+        **The application deletes nothing**: it only writes text, and the share stays mounted read-only. The script shows a
+        summary, needs `DELETE <count>` to be typed, and then deletes exactly the listed files, keeping any whose size (and,
+        outside `cmd`, modification time) differs from the last scan. Files that cannot be addressed safely are left out and
+        named in the script (names with control or replacement characters, what Windows cannot address, a name that differs
+        only in upper or lower case from another, an id that is no longer in the index).
+
+        **A folder in `dir_ids` is deleted with everything in it**, subfolders and files at any depth. The number to type is then
+        the number of items: the files, the folders and everything the last scan found in the selected folders. The script
+        checks a folder when it runs and keeps it, whole, when it now holds a link or a special file or more files or folders than
+        the scan found, so what was added since is never taken. A folder inside another selected folder, and a file inside one,
+        go with it and are not listed twice. The share's own folder is never put in a script. `cmd` cannot check a folder and takes
+        none: use PowerShell or `sh`.
+
+        **`style: simple`** asks for the other kind of script: a plain text file (`.txt`) with a few comment lines and then one
+        command per file or folder (`rm`, `Remove-Item`, `del` and `rd`), to read, cut down and paste into a terminal, for example
+        over SSH on the NAS. It asks nothing and checks nothing, keeps no data block and takes at most 200 files and folders; see
+        ADR-0011. A name that cannot be quoted for certain (in `cmd`, one with `%` or `!`) is left out and listed in the comment
+        lines, as everything else the advanced script leaves out.
+
+        `client_root` is where the machine that runs the script sees the share (`\\nas\media`, `Z:\`, `/mnt/user/media`);
+        empty uses the share's `client_windows` or `client_posix` setting. Ids of another share are treated as files that are
+        gone. The audit log records the script type, the counts and a SHA-256 of the script, never a file name.
+      parameters: [{$ref: "#/components/parameters/Share"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [script]
+              properties:
+                ids:
+                  type: array
+                  maxItems: 2000
+                  items: {type: integer, format: int64, minimum: 1}
+                  description: "File ids from the file lists. At least one id in `ids` or `dir_ids`, at most 2000 in all."
+                dir_ids:
+                  type: array
+                  maxItems: 2000
+                  items: {type: integer, format: int64, minimum: 1}
+                  description: "Folder ids from the folder lists: each folder is deleted with everything in it. Counts toward the same limit of 2000 as `ids`."
+                script: {type: string, enum: [cmd, powershell, sh], description: "`cmd` and `powershell` address Windows paths; `sh` addresses Linux and macOS paths."}
+                client_root: {type: string, description: "Base path on the machine that runs the script. Empty uses the share's own."}
+                lang: {type: string, enum: [en, nl], default: en, description: "Language of what the script prints."}
+                style: {type: string, enum: [advanced, simple], default: advanced, description: "`advanced` is the script with a summary, a typed confirmation and a check of every file and folder. `simple` is a `.txt` with one command per file or folder and no checks; at most 200 files and folders."}
+      responses:
+        "200":
+          description: The script, with CRLF line ends for `cmd` and PowerShell (UTF-8, with a byte-order mark for PowerShell) and LF for `sh`.
+          headers:
+            Content-Disposition: {schema: {type: string}, description: "`attachment` with a file name that ends in `.cmd`, `.ps1` or `.sh`, or in `.txt` for a simple script."}
+            X-Files: {schema: {type: integer}, description: "Files in the script that were selected one by one."}
+            X-Folders: {schema: {type: integer}, description: "Folders in the script, each deleted with everything in it."}
+            X-Items: {schema: {type: integer}, description: "The number to type to confirm: the files, the folders and what the scan found in them. For a simple script, which asks nothing, the number of commands."}
+            X-Skipped: {schema: {type: integer}, description: "Files left out; the script lists them."}
+            X-Bytes: {schema: {type: integer, format: int64}, description: "Total size of the files in the script and of what the scan found in the folders, an upper bound when files have several hard links."}
+          content:
+            text/plain: {schema: {type: string}}
+        "400": {description: "Invalid request: `field` is `ids` (none, too many, or none of the files or folders can be put in a script), `script`, `lang`, `style` or `client_root`.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "404": {description: "No such share.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
+        "409": {description: "The share has not been scanned yet (`no_data`), or a scan was published while the script was made (`scan_changed`): ask again.", content: {application/problem+json: {schema: {$ref: "#/components/schemas/Problem"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/scans:
     get:
@@ -492,7 +574,7 @@ paths:
       tags: [auth]
       operationId: authSetup
       summary: Create the first administrator (public, only while no account exists)
-      description: Needs the one-time setup token printed in the application log (or set as `NASA_SETUP_TOKEN`). The new session must enrol a second factor before it can do anything else.
+      description: Needs the one-time setup token printed in the application log (or set as `NASSA_SETUP_TOKEN`). The new session must enrol a second factor before it can do anything else.
       security: []
       requestBody:
         required: true
@@ -708,6 +790,8 @@ paths:
                 units: {type: string, enum: [binary, decimal]}
                 language: {type: string, enum: [nl, en]}
                 theme: {type: string, enum: [system, light, dark]}
+                accent: {type: string, pattern: '^(#[0-9a-fA-F]{6})?$', description: "The accent colour of the interface as #rrggbb (stored in lower case); empty means the default. Anything else is refused: the value ends up in a CSS custom property."}
+                delete_scripts: {type: string, enum: [advanced, simple], description: "Which delete script the interface asks for: the advanced one (summary, typed confirmation, checks) or the simple one (a .txt with one command per file or folder). Set under Settings, Delete."}
       responses:
         "200": {description: "The merged preferences.", content: {application/json: {schema: {type: object, required: [prefs], properties: {prefs: {type: object, additionalProperties: {type: string}}}}}}}
         default: {$ref: "#/components/responses/Problem"}
@@ -719,26 +803,6 @@ paths:
       summary: All users (admin)
       responses:
         "200": {description: "Users.", content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/User"}}}}}}}
-        default: {$ref: "#/components/responses/Problem"}
-    post:
-      tags: [admin]
-      operationId: createUser
-      summary: Create a user (admin)
-      description: The user must enrol a second factor at the first sign-in.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [username, password, role]
-              properties:
-                username: {type: string, pattern: '^[A-Za-z0-9._@-]{3,64}$'}
-                display_name: {type: string}
-                password: {type: string, minLength: 12}
-                role: {type: string, enum: [admin, viewer]}
-      responses:
-        "201": {description: "Created.", content: {application/json: {schema: {$ref: "#/components/schemas/User"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/users/{id}:
     parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
@@ -776,15 +840,115 @@ paths:
       responses:
         "204": {description: Reset; the user enrols again at the next sign-in.}
         default: {$ref: "#/components/responses/Problem"}
-  /api/v1/users/{id}/password:
+  /api/v1/users/{id}/reset:
     post:
       tags: [admin]
-      operationId: setUserPassword
-      summary: Set a user's password (admin)
+      operationId: resetUser
+      summary: Make a login link that brings a user back (admin)
+      description: |
+        For a user who can no longer sign in (a lost phone, a forgotten password). It makes a `reset` invitation: a link the user opens to choose a new
+        password or passkey. **Nothing about the user changes until they have finished**: the old password, passkeys, second factor and recovery codes are
+        replaced, and every session of that user ended, in the same transaction that stores the new credential. There is one reset invitation per user; making
+        a new one replaces the old. You cannot make one for yourself (change your password instead) or for a disabled user.
+        The answer carries the link **once**; it is stored only as a hash.
       parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
-      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [password], properties: {password: {type: string, minLength: 12}}}}}}
       responses:
-        "204": {description: Set; the user's sessions end.}
+        "201": {description: "The link.", content: {application/json: {schema: {$ref: "#/components/schemas/InvitationCreated"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations:
+    get:
+      tags: [admin]
+      operationId: listInvitations
+      summary: Open invitations (admin)
+      responses:
+        "200": {description: "Open (unused, unexpired) invitations, oldest first. The links are not here: they are shown once, when they are made.", content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Invitation"}}}}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [admin]
+      operationId: createInvitation
+      summary: Invite someone (admin)
+      description: |
+        Makes a link for a new account. The guest opens it and chooses their own password or passkey, so the administrator never learns a credential.
+        The token is 32 random bytes and only its SHA-256 is stored; the link is in this answer **once**. It works once and for seven days.
+        The role is decided here, by the administrator, and cannot be changed by the guest. `username` is optional: a name to suggest and to reserve
+        meanwhile (the guest may change it). At most 50 users (pending invitations count as users) and 50 open invitations.
+        `url` is built from `NASSA_PUBLIC_URL` (or the first passkey origin); empty means the interface builds it from the address you are using.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username: {type: string, pattern: '^[A-Za-z0-9._@-]{3,64}$'}
+                role: {type: string, enum: [admin, viewer], default: viewer}
+      responses:
+        "201": {description: "The link.", content: {application/json: {schema: {$ref: "#/components/schemas/InvitationCreated"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/{id}:
+    delete:
+      tags: [admin]
+      operationId: revokeInvitation
+      summary: Revoke an invitation (admin)
+      description: A lost link is revoked and made again, never looked up.
+      parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+      responses:
+        "204": {description: "Revoked: the link stops working at once."}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/info:
+    get:
+      tags: [auth]
+      operationId: invitationInfo
+      summary: What the guest sees of an invitation (public)
+      description: |
+        Public: the token is the credential, sent in the `X-Invite-Token` header so that it stays out of access logs. Unknown, expired, used, revoked and
+        malformed tokens all answer the same `404`, so this cannot be used to ask which tokens exist; an address that keeps presenting bad ones is locked out
+        like a failing sign-in.
+      security: []
+      parameters: [{name: X-Invite-Token, in: header, required: true, schema: {type: string}}]
+      responses:
+        "200": {description: "The invitation.", content: {application/json: {schema: {$ref: "#/components/schemas/InviteInfo"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/password:
+    post:
+      tags: [auth]
+      operationId: invitationPassword
+      summary: Finish an invitation with a password (public)
+      description: |
+        Creates the account (or, for a reset, replaces the credentials of the user), deletes the invitation and signs the guest in. The guest must then
+        enrol a second factor like every account (`enroll_required`). For a reset the name in the request is ignored: the user's own name is used.
+      security: []
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/InvitationPasswordRequest"}}}}
+      responses:
+        "200": {description: "Signed in, second factor still to enrol.", content: {application/json: {schema: {$ref: "#/components/schemas/SessionResponse"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/passkey/begin:
+    post:
+      tags: [auth]
+      operationId: invitationPasskeyBegin
+      summary: Start choosing a passkey for an invitation (public)
+      description: The normal passkey registration ceremony for the user the invitation is for. A taken name is refused here, before a passkey is made.
+      security: []
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/InvitationPasskeyRequest"}}}}
+      responses:
+        "200": {description: "WebAuthn creation options.", content: {application/json: {schema: {type: object, required: [options, ceremony], properties: {options: {type: object}, ceremony: {type: string}}}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/invitations/passkey/finish:
+    post:
+      tags: [auth]
+      operationId: invitationPasskeyFinish
+      summary: Finish an invitation with a passkey (public)
+      description: |
+        Verifies the authenticator and, in one transaction, creates the account (or replaces the credentials), stores the passkey and deletes the
+        invitation. A passkey verifies the user, so the guest is signed in completely.
+      security: []
+      parameters:
+        - {name: X-Invite-Token, in: header, required: true, schema: {type: string}}
+        - {name: ceremony, in: query, required: true, schema: {type: string}}
+        - {name: name, in: query, description: "A label for the passkey.", schema: {type: string, maxLength: 60}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "200": {description: "Signed in.", content: {application/json: {schema: {$ref: "#/components/schemas/SessionResponse"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/audit:
     get:
@@ -795,6 +959,7 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {name: before, in: query, description: "Only entries with a smaller id (paging).", schema: {type: integer, format: int64}}
         - {name: action, in: query, description: "Prefix of the action, for example `login.` or `share.`.", schema: {type: string}}
+        - {name: scan_id, in: query, description: "Instead of a page: the entry that says how this scan ended (`scan.finished`, `scan.errors`, `scan.empty` or `scan.failed`), as a list of at most one entry, and `next_before` null. The other parameters are then ignored. An empty list means no entry exists for that scan (a cancelled scan has none).", schema: {type: integer, format: int64, minimum: 1}}
       responses:
         "200":
           description: Entries, newest first.
@@ -808,6 +973,165 @@ paths:
                   next_before: {type: integer, format: int64, nullable: true}
         default: {$ref: "#/components/responses/Problem"}
 
+  /api/v1/system/update:
+    get:
+      tags: [admin]
+      operationId: getUpdateStatus
+      summary: Is a newer release available? (administrator)
+      description: |
+        The app asks GitHub for the latest published, non-prerelease release of its own repository and compares it with the version it runs. A prerelease
+        is never announced. The request carries a fixed `User-Agent` and nothing else: no version, no instance id, no user data. The answer is remembered
+        (six hours after a success, ten minutes after a failure), so a page view never calls GitHub. A failure keeps the last good answer and adds `error`.
+        The check can be switched off with `NASSA_UPDATE_CHECK=false`; that is reported as `enabled: false`, not as an error. It only announces: nothing is
+        updated, restarted or downloaded.
+      responses:
+        "200":
+          description: The remembered answer.
+          content: {application/json: {schema: {$ref: "#/components/schemas/UpdateStatus"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/system/update/check:
+    post:
+      tags: [admin]
+      operationId: checkForUpdate
+      summary: Ask GitHub again now (administrator)
+      description: Bypasses the remembered answer but not a floor of 30 seconds between two real requests, so it cannot be used to hammer GitHub. Answers with the status either way.
+      responses:
+        "200":
+          description: The answer after the check.
+          content: {application/json: {schema: {$ref: "#/components/schemas/UpdateStatus"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup:
+    get:
+      tags: [admin]
+      operationId: downloadBackup
+      summary: Download everything you entered as one file (administrator)
+      description: |
+        The owner's own copy of what *they* entered: the shares (and their settings), the file-type map and each person's interface preferences. It **never**
+        holds a password, passkey, authenticator secret, recovery code, session, invitation, account or role, so a file that is mailed or kept in a cloud
+        drive cannot open the application on another server. The one exception is the SMB password of a share, and only as the ciphertext the database
+        already holds, sealed with `NASSA_ENCRYPTION_KEY`, which is never in the file. Scan results are not in it either: they come back by scanning again.
+        It is not a replacement for a database dump (docs/deploy.md).
+      responses:
+        "200":
+          description: The backup, as a JSON download.
+          headers:
+            Content-Disposition: {schema: {type: string}, description: 'attachment; filename="nas-storage-analyzer-backup-YYYY-MM-DD.json"'}
+            Content-Length: {schema: {type: integer}, description: "Known before the body starts, so the screen can show how far the download is."}
+            Cache-Control: {schema: {type: string}, description: "no-store"}
+          content: {application/json: {schema: {$ref: "#/components/schemas/BackupFile"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/stage:
+    post:
+      tags: [admin]
+      operationId: stageBackup
+      summary: Upload a backup and have it checked (administrator)
+      description: |
+        The body is the file itself, at most 8 MB (whatever runs in front of the application has to allow that much). It is **fully checked** with the same
+        rules as typing the data in by hand, and **nothing changes**: the answer says what a restore would do, and a token to start it with. A refused file is
+        not kept. A person has one staged file at a time, and one that is not used is removed after an hour.
+        Refusals: `backup_not_backup`, `backup_newer` (the version that wrote it is in `params`), `backup_invalid` (with the `field` in the file),
+        `backup_too_many`, and 413 `backup_too_big`.
+      requestBody:
+        required: true
+        content:
+          application/json: {schema: {type: object}}
+      responses:
+        "200":
+          description: The file is acceptable. Nothing has been changed yet.
+          content: {application/json: {schema: {$ref: "#/components/schemas/StagedBackup"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/stage/{token}:
+    delete:
+      tags: [admin]
+      operationId: unstageBackup
+      summary: Remove a staged backup the person changed their mind about (administrator)
+      parameters: [{name: token, in: path, required: true, schema: {type: string}}]
+      responses:
+        "204": {description: "Removed, or already gone."}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/jobs:
+    post:
+      tags: [admin]
+      operationId: startRestore
+      summary: Start the restore of a staged backup (administrator)
+      description: |
+        Answers at once and restores on the server: leaving the page, reloading or closing the browser stops nothing. The restore checks the file once more and
+        replaces everything in **one transaction**, so a failure changes nothing. It is refused with `409 already_running` while another restore runs, and with
+        `409 busy` while scans are queued or running; in both cases the staged file is **kept**, so the same token can be used again a moment later. (A scan
+        queued in the instant between this answer and the swap makes the job fail with the reason `busy`; nothing is changed then either.) The token works
+        once it has been accepted. Follow it with `GET /api/v1/backup/jobs/latest`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [token], properties: {token: {type: string, description: "The token of the staged file."}}}
+      responses:
+        "202":
+          description: Started.
+          content: {application/json: {schema: {$ref: "#/components/schemas/BackupJob"}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/jobs/latest:
+    get:
+      tags: [admin]
+      operationId: latestRestore
+      summary: The running restore, or the last finished one that has not been dismissed (administrator)
+      description: The screen asks once a second while it is open. A running restore that has not moved for 15 minutes is given up as interrupted; nothing was changed then.
+      responses:
+        "200":
+          description: The job, or null when there is none.
+          content:
+            application/json:
+              schema: {type: object, required: [job], properties: {job: {allOf: [{$ref: "#/components/schemas/BackupJob"}], nullable: true}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/backup/jobs/{id}:
+    delete:
+      tags: [admin]
+      operationId: dismissRestore
+      summary: Dismiss a finished restore once its outcome has been shown (administrator)
+      parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64, minimum: 1}}]
+      responses:
+        "204": {description: Dismissed.}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/system/reset:
+    get:
+      tags: [admin]
+      operationId: factoryResetInfo
+      summary: What the factory-reset form needs (administrator)
+      description: The word the administrator has to type (defined here, in one place) and which fresh proofs this person can give, so the form shows only the fields that apply. Changes nothing.
+      responses:
+        "200": {description: The word and the proofs., content: {application/json: {schema: {$ref: "#/components/schemas/ResetInfo"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [admin]
+      operationId: factoryReset
+      summary: Wipe the whole installation (administrator, with a fresh proof)
+      description: |
+        Deletes **everything the installation keeps in its database**: every account (the caller's too, who is signed out), every password, passkey and second factor, every
+        share with its scan data and history, the file types that were edited (the defaults come back), the audit log, work in progress and waiting backups. Afterwards the
+        application is a new installation and the setup wizard starts again. What stays lives outside the database: the environment variables (including
+        `NASSA_ENCRYPTION_KEY`), the image, the host folder `DATA_PATH` itself, and the files on the NAS, which are only ever read.
+
+        A session is **not enough**. The body carries the word (`phrase`) and a fresh proof of who is asking: either the `password` with a `code` of the authenticator app (or a
+        `recovery_code`), or a `passkey` (the answer to the challenge of `POST /api/v1/system/reset/passkey`, with its `ceremony`). A wrong word wipes nothing and is not a failed
+        attempt; a wrong password, code or passkey counts toward the same lockout as signing in. It is refused with `409 busy` while a scan is queued or running. Everything is
+        one transaction: if anything fails, nothing is wiped. The audit log goes with the database, so the only record is one warning in the process log with the numbers of rows removed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ResetRequest"}
+      responses:
+        "200": {description: Wiped., content: {application/json: {schema: {$ref: "#/components/schemas/ResetResult"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/system/reset/passkey:
+    post:
+      tags: [admin]
+      operationId: factoryResetPasskeyChallenge
+      summary: A one-time challenge for confirming a factory reset with a passkey (administrator)
+      description: The challenge is stored for this person and works once. A challenge that was not issued to the person who answers, one that has been used, and the passkey of somebody else are refused.
+      responses:
+        "200": {description: "WebAuthn request options for `navigator.credentials.get`.", content: {application/json: {schema: {$ref: "#/components/schemas/WebAuthnChallenge"}}}}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/history:
     get:
       tags: [lists]
@@ -862,6 +1186,44 @@ paths:
                   version: {type: string}
                   server_time: {type: string, format: date-time}
                   mount_supported: {type: boolean}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/fs/dirs:
+    get:
+      tags: [admin]
+      operationId: browseFolders
+      summary: List the sub-folders of a folder below the shares root (admin)
+      description: >-
+        For the folder picker of the share form. Lists folders only (never files) and never leaves the shares root:
+        a link is shown only when it points to a folder inside the root. A folder with more entries than the limits
+        (20,000 read, 1,000 returned) is cut off and `truncated` is true.
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: Absolute path inside the container, at or below `shares_root`. Default is the root itself.
+          schema: {type: string}
+      responses:
+        "200":
+          description: The folder and its sub-folders, sorted by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [root, path, dirs, truncated]
+                properties:
+                  root: {type: string, description: The shares root; the picker cannot go above it.}
+                  path: {type: string, description: The folder that was listed.}
+                  parent: {type: string, description: The folder above this one. Absent at the root.}
+                  dirs:
+                    type: array
+                    items:
+                      type: object
+                      required: [name, path]
+                      properties:
+                        name: {type: string}
+                        path: {type: string, description: "Full path inside the container, usable as the path of a share."}
+                        symlink: {type: boolean, description: A link to a folder inside the root.}
+                  truncated: {type: boolean}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/events:
     get:
@@ -935,8 +1297,9 @@ components:
         title: {type: string}
         status: {type: integer}
         detail: {type: string}
-        code: {type: string, description: "Stable reason, for example unauthenticated, mfa_required, enroll_required, forbidden, csrf, locked, invalid_request, conflict, already_active, busy, no_data."}
-        field: {type: string, description: "The form field a validation error is about."}
+        code: {type: string, description: "Stable reason, for example unauthenticated, mfa_required, enroll_required, forbidden, csrf, locked, invalid_request, conflict, already_active, busy, no_data, no_stage, already_running, backup_not_backup, backup_newer, backup_invalid, backup_too_many, backup_too_big, reset_phrase, reauth_required."}
+        field: {type: string, description: "The form field a validation error is about; for a backup file, where in the file (for example `shares[2].cron`)."}
+        params: {type: object, additionalProperties: {type: string}, description: "Values a message needs (a version, a limit), for the screen to put in a sentence in the reader's language."}
         request_id: {type: string}
     Totals:
       type: object
@@ -986,7 +1349,7 @@ components:
       type: object
       required: [id, name, kind, last_used_basis, excludes, workers, max_ops_per_sec, created_at, root_dir_id, config, has_password, cron, next_run_at, last_run_at, full_scan_every, max_ops_day, day_start_hour, day_end_hour, retention_scans, retention_days, snapshot_depth, last_scan, latest_scan, active_job]
       properties:
-        config: {type: object, additionalProperties: {type: string}, description: "Kind-specific settings without secrets (path, server, export, share, username, domain, version, mount_options)."}
+        config: {type: object, additionalProperties: {type: string}, description: "Kind-specific settings without secrets (path, server, export, share, username, domain, version, mount_options) and the base paths of the delete scripts (client_windows, client_posix)."}
         has_password: {type: boolean}
         cron: {type: string}
         next_run_at: {type: string, format: date-time, nullable: true}
@@ -1193,6 +1556,165 @@ components:
         size: {type: integer, format: int64}
         mtime: {type: string, format: date-time, nullable: true}
 
+    Version:
+      type: object
+      required: [version, commit, channel]
+      properties:
+        version: {type: string, description: "MAJOR.MINOR.PATCH the image was built for, `dev` for a build from a checkout.", example: "0.1.0"}
+        commit: {type: string, description: "The git commit the image was built from; empty when unknown.", example: "5d74b70"}
+        channel: {type: string, enum: [stable, beta]}
+    UpdateStatus:
+      type: object
+      required: [enabled, current, latest, available, url, checked_at, error, error_detail, repo]
+      properties:
+        enabled: {type: boolean, description: "False when the check is switched off (NASSA_UPDATE_CHECK=false)."}
+        current: {type: string, description: "The version this installation runs; `dev` for a build from a checkout.", example: "0.1.0"}
+        latest: {type: string, description: "The newest published release without the v; empty when there is none.", example: "0.2.0"}
+        available: {type: boolean, description: "Latest is a higher version than current. Never true for a version that does not parse (`dev`)."}
+        url: {type: string, description: "The release page, built from the repository and the version, never taken from GitHub's answer."}
+        checked_at: {type: string, format: date-time, nullable: true, description: "When GitHub last answered; null when it has not yet."}
+        error: {type: string, description: "The cause in words an administrator can act on, for example `HTTP 403 (rate limit)`; empty when the last attempt worked."}
+        error_detail: {type: string, description: "The raw reason, also in the log."}
+        repo: {type: string, example: "helmerzNL/NAS-Storage-Analyzer"}
+    BackupFile:
+      type: object
+      description: |
+        The backup file. A section that is absent is left as it is by a restore; one that is present but empty replaces what is there with nothing.
+        A file of an older `format_version` still restores; a newer one is refused with the version that wrote it.
+      required: [format, format_version, app_version, created_at, includes_files, shares, file_types, preferences]
+      properties:
+        format: {type: string, enum: [nas-storage-analyzer-backup]}
+        format_version: {type: integer, minimum: 1, example: 1}
+        app_version: {type: string, example: "0.1.0"}
+        created_at: {type: string, format: date-time}
+        includes_files: {type: boolean, description: "Always false: the application has no uploaded files, so a backup is one JSON file and never an archive."}
+        shares: {type: array, items: {$ref: "#/components/schemas/BackupShare"}}
+        file_types:
+          type: array
+          items:
+            type: object
+            required: [ext, category]
+            properties:
+              ext: {type: string, example: mkv}
+              category: {type: string, description: "The category key (video, audio, images, documents, archives, code, disk_images, other).", example: video}
+        preferences:
+          type: array
+          description: What each person chose for the interface, by user name. Nothing else about a person.
+          items:
+            type: object
+            required: [username, prefs]
+            properties:
+              username: {type: string}
+              prefs: {type: object, additionalProperties: {type: string}}
+    BackupShare:
+      type: object
+      required: [name, kind, excludes, workers, max_ops_per_sec, max_ops_day, day_start_hour, day_end_hour, cron, last_used_basis, full_scan_every, retention_scans, retention_days, snapshot_depth]
+      properties:
+        name: {type: string}
+        kind: {type: string, enum: [bind, nfs, smb]}
+        path: {type: string}
+        server: {type: string}
+        export: {type: string}
+        share: {type: string}
+        username: {type: string}
+        domain: {type: string}
+        version: {type: string}
+        mount_options: {type: string}
+        client_windows: {type: string}
+        client_posix: {type: string}
+        excludes: {type: array, items: {type: string}}
+        workers: {type: integer}
+        max_ops_per_sec: {type: integer}
+        max_ops_day: {type: integer}
+        day_start_hour: {type: integer}
+        day_end_hour: {type: integer}
+        cron: {type: string}
+        last_used_basis: {type: string, enum: [atime, mtime, max]}
+        full_scan_every: {type: integer}
+        retention_scans: {type: integer}
+        retention_days: {type: integer}
+        snapshot_depth: {type: integer}
+        secret: {type: string, format: byte, description: "The SMB password as the ciphertext the database holds (base64), sealed with the key in the environment. Never the password itself: a file that carries a `password` is refused."}
+    BackupChanges:
+      type: object
+      description: What a restore does to what is there now, or did.
+      required: [shares_added, shares_updated, shares_removed, file_types_changed, preferences_applied, preferences_skipped, passwords_unreadable, recategorize_shares]
+      properties:
+        shares_added: {type: array, items: {type: string}}
+        shares_updated: {type: array, items: {type: string}, description: "Shares that are in the file and whose settings differ from what is stored; the others are left alone, so a restore that changes nothing does not even move a schedule."}
+        shares_removed: {type: array, items: {type: string}, description: "Shares the file does not have: they go, **with all of their scan data**."}
+        file_types_changed: {type: integer, description: "Extensions added, moved to another category or removed."}
+        preferences_applied: {type: integer, description: "People whose preferences differ and are set; people who already have them are not counted."}
+        preferences_skipped: {type: array, items: {type: string}, description: "People the file names who have no account here."}
+        passwords_unreadable: {type: array, items: {type: string}, description: "Shares restored without their SMB password, because this installation's encryption key cannot open the one in the file."}
+        recategorize_shares: {type: integer, description: "How many shares are categorised again in the background because the file-type map changed."}
+    BackupSummary:
+      type: object
+      required: [format_version, app_version, created_at, counts, missing, changes, scans_active]
+      properties:
+        format_version: {type: integer}
+        app_version: {type: string}
+        created_at: {type: string, format: date-time}
+        counts:
+          type: object
+          required: [shares, file_types, preferences]
+          properties: {shares: {type: integer}, file_types: {type: integer}, preferences: {type: integer}}
+        missing: {type: array, items: {type: string, enum: [shares, file_types, preferences]}, description: "Sections the file does not have: a restore leaves them as they are."}
+        changes: {$ref: "#/components/schemas/BackupChanges"}
+        scans_active: {type: boolean, description: "Scans are queued or running: the restore is refused until they are done or cancelled."}
+    StagedBackup:
+      type: object
+      required: [token, summary]
+      properties:
+        token: {type: string, description: "32 hexadecimal characters; works once, for the person who staged the file."}
+        summary: {$ref: "#/components/schemas/BackupSummary"}
+    BackupJob:
+      type: object
+      required: [id, status, phase, step, steps, error_key, error_params, summary, checking_ms, replacing_ms, started_by, started_at, finished_at]
+      properties:
+        id: {type: integer, format: int64}
+        status: {type: string, enum: [running, done, failed]}
+        phase: {type: string, enum: [checking, replacing]}
+        step: {type: integer}
+        steps: {type: integer, description: "0 means it cannot be counted."}
+        error_key: {type: string, description: "Why it failed, as a key the screen words in the reader's language: invalid, busy, locked, interrupted or failed. `failed` always means nothing was changed.", example: ""}
+        error_params: {type: object, additionalProperties: {type: string}}
+        summary: {allOf: [{$ref: "#/components/schemas/BackupChanges"}], nullable: true}
+        checking_ms: {type: integer, nullable: true}
+        replacing_ms: {type: integer, nullable: true}
+        started_by: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time, nullable: true}
+    ResetInfo:
+      type: object
+      required: [phrase, methods, scans_active]
+      properties:
+        phrase: {type: string, description: "The word to type.", example: RESET}
+        methods:
+          type: object
+          required: [password_and_code, recovery, passkey]
+          properties:
+            password_and_code: {type: boolean, description: "The password and a code of the authenticator app. A password alone is never enough."}
+            recovery: {type: boolean, description: "Unused recovery codes are left, so the code can be one of those."}
+            passkey: {type: boolean, description: "A passkey proves it alone."}
+        scans_active: {type: boolean, description: "A scan is queued or running: a reset is refused until it is done or cancelled."}
+    ResetRequest:
+      type: object
+      required: [phrase]
+      properties:
+        phrase: {type: string, description: "The word from `GET /api/v1/system/reset`, typed by the administrator."}
+        password: {type: string}
+        code: {type: string, description: "A code of the authenticator app."}
+        recovery_code: {type: string}
+        ceremony: {type: string, description: "The `ceremony` of the passkey challenge."}
+        passkey: {type: object, description: "The JSON form of the PublicKeyCredential that answers the challenge."}
+    ResetResult:
+      type: object
+      required: [reset, restarting, setup_token_configured]
+      properties:
+        reset: {type: boolean}
+        restarting: {type: boolean, description: "Always false: everything this installation keeps is in the database, and the running process picks the empty one up by itself. Nothing needs a restart policy."}
+        setup_token_configured: {type: boolean, description: "True when `NASSA_SETUP_TOKEN` is set, which then stays the token of the setup wizard. False: a new token was made and written to the application log."}
     AuthStatus:
       type: object
       required: [setup_required, authenticated, min_password_length, https_required]
@@ -1214,6 +1736,49 @@ components:
         user: {$ref: "#/components/schemas/User"}
         methods: {type: array, items: {type: string, enum: [totp, passkey, recovery]}}
         recovery_codes: {type: array, items: {type: string}, description: Shown once.}
+    Invitation:
+      type: object
+      required: [id, kind, user_id, username, role, created_by, created_at, expires_at]
+      properties:
+        id: {type: integer, format: int64}
+        kind: {type: string, enum: [new, reset]}
+        user_id: {type: integer, format: int64, nullable: true, description: "The user a reset is for; null for a new account."}
+        username: {type: string, description: "A new account: the name reserved for the guest (may be empty). A reset: the user's own name."}
+        role: {type: string, enum: [admin, viewer]}
+        created_by: {type: string, description: "The administrator who made it (empty when that account is gone)."}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+    InvitationCreated:
+      description: An invitation with its link, which is shown this once.
+      allOf:
+        - $ref: "#/components/schemas/Invitation"
+        - type: object
+          required: [token, url]
+          properties:
+            token: {type: string, description: "32 random bytes, base64url. Only its SHA-256 is stored."}
+            url: {type: string, description: "The link to hand over (`<public address>/#invite=<token>`); empty when no public address is configured."}
+    InviteInfo:
+      type: object
+      required: [kind, username, role, invited_by, expires_at]
+      properties:
+        kind: {type: string, enum: [new, reset]}
+        username: {type: string, description: "The suggested name (new, may be empty) or the user's own name (reset, read-only)."}
+        role: {type: string, enum: [admin, viewer]}
+        invited_by: {type: string}
+        expires_at: {type: string, format: date-time}
+    InvitationPasswordRequest:
+      type: object
+      required: [token, password]
+      properties:
+        token: {type: string}
+        username: {type: string, description: "A new account: the name the guest chooses. Ignored for a reset."}
+        password: {type: string, minLength: 12}
+    InvitationPasskeyRequest:
+      type: object
+      required: [token]
+      properties:
+        token: {type: string}
+        username: {type: string}
     SetupRequest:
       type: object
       required: [token, username, password]
@@ -1295,6 +1860,8 @@ components:
         password: {type: string, description: "smb; write-only, stored encrypted."}
         version: {type: string, description: "nfs: 3, 4, 4.1, 4.2. smb: 2.0, 2.1, 3.0, 3.02, 3.1.1."}
         mount_options: {type: string, description: "Extra mount options from an allow-list; the mount is always read-only."}
+        client_windows: {type: string, description: "Where a Windows PC sees this share, for the delete scripts: `\\\\nas\\media` or `Z:\\`. Empty means not set. The application never opens this path."}
+        client_posix: {type: string, description: "Where Linux or macOS sees this share, for the delete scripts: an absolute path such as `/mnt/user/media`. Empty means not set."}
         excludes: {type: array, items: {type: string}, description: "Name patterns such as .snapshot or @eaDir, matched at any depth; a pattern with a slash matches the path from the share root."}
         workers: {type: integer, minimum: 1, maximum: 256}
         max_ops_per_sec: {type: integer, minimum: 0, description: "Metadata operations per second; 0 is unlimited."}

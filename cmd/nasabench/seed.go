@@ -26,7 +26,7 @@ const extPick = `(VALUES
 
 func runSeed(args []string) error {
 	fs := flag.NewFlagSet("seed", flag.ExitOnError)
-	dsn := fs.String("db", os.Getenv("NASA_DB_DSN"), "PostgreSQL connection string")
+	dsn := fs.String("db", os.Getenv("NASSA_DB_DSN"), "PostgreSQL connection string")
 	name := fs.String("share", "bench", "share name to (re)create")
 	files := fs.Int64("files", 10_000_000, "number of files")
 	dirs := fs.Int64("dirs", 200_000, "number of directories")
@@ -34,7 +34,7 @@ func runSeed(args []string) error {
 	chunk := fs.Int64("chunk", 1_000_000, "files per insert statement")
 	fs.Parse(args)
 	if *dsn == "" {
-		return errors.New("pass -db or set NASA_DB_DSN")
+		return errors.New("pass -db or set NASSA_DB_DSN")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
