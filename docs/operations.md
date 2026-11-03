@@ -19,7 +19,7 @@ docker compose down                  # remove the containers, keeping the data (
 ```
 
 Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the administrator and set up a second factor. For
-development without Docker, see "Ontwikkelen en testen" in the [README](../README.md#ontwikkelen-en-testen).
+development without Docker, see "Development and testing" in the [README](../README.en.md#development-and-testing) (Dutch: [README](../README.md#ontwikkelen-en-testen)).
 
 ## 2. Health-check endpoints
 
@@ -70,7 +70,7 @@ database on an administrator's request (the word and a fresh proof; refused whil
 | `db` (PostgreSQL 16) | file index, precomputed aggregates, history, accounts, job queue | the host folder `DATA_PATH/postgres` (`DATA_PATH` is absolute and required; baseline §21) |
 | the NAS share | the thing being measured | never written to |
 
-A diagram and the reasoning are in the [README](../README.md#architectuur) and [`ontwerp.md`](ontwerp.md). Secrets live in `.env`
+A diagram and the reasoning are in the [README](../README.en.md#architecture) (Dutch: [README](../README.md#architectuur)) and [`ontwerp.md`](ontwerp.md). Secrets live in `.env`
 (or Docker secrets): the database password and `NASSA_ENCRYPTION_KEY`.
 
 ## 6. Limits that live outside the repository
