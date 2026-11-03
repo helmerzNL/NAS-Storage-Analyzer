@@ -1,6 +1,6 @@
 # Installeren en beheren / Deploying and operating
 
-Dit document hoort bij de [README](../README.md). Nederlands eerst; de Engelse samenvatting staat onderaan.
+Dit document hoort bij de [README](../README.md) ([English](../README.en.md)). Nederlands eerst; de Engelse samenvatting staat onderaan.
 
 ## Inhoud
 

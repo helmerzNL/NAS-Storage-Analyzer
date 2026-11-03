@@ -1,120 +1,157 @@
-# NAS Storage Analyzer
+<div align="center">
 
-Self-hosted tool die NFS/SMB-shares **read-only** scant en laat zien hoeveel ruimte data inneemt: per share,
-per map en per bestandstype. Gebouwd voor shares met miljoenen bestanden en tientallen terabytes: de scanner leest
-alleen metadata, schrijft grote batches naar PostgreSQL en houdt voorberekende totalen bij, zodat elke weergave
-snel blijft.
+<img src="web/public/favicon.svg" alt="" width="88" height="88">
 
-* **Scanner**: parallelle workers, alleen metadata (`stat` en directory-listings, nooit bestandsinhoud),
-  incrementeel (onveranderde mappen worden hergebruikt), uitsluitpatronen, symlinks niet gevolgd, hardlinks één keer
-  geteld, werkelijke grootte (`st_blocks*512`) naast logische grootte, IO-begrenzing, annuleren, live voortgang.
-* **Weergave**: dashboard met donut en groeigrafiek, mappenbrowser met percentages en sorteren, treemap, combineerbare
-  filters (categorie, extensie, grootte, gewijzigd, laatst gebruikt, naam), grootste en koudste bestanden en mappen,
-  zoeken, CSV-export.
-* **Verwijderscripts** (alleen beheerders): vink bestanden aan in de bestandslijsten en krijg één script (`.ps1`, `.cmd` of `.sh`)
-  dat precies die bestanden verwijdert, op je pc via SMB of op de NAS zelf. **De applicatie verwijdert zelf niets**: zij schrijft de
-  tekst, jij draait het script. Het script toont eerst een samenvatting, vraagt `DELETE <aantal>` te typen en laat een bestand staan
-  dat sinds de scan is veranderd. Hoogstens 2.000 bestanden per script; de padbasis (hoe jouw machine de share ziet) stel je per share
-  in. Wat het script niet veilig kan aanspreken laat het weg en noemt het (zie [ADR 0006](docs/adr/0006-delete-scripts.md)).
-  **Mappen** kunnen ook worden aangevinkt (bij *Mappen* en in de lijsten van de grootste en koudste mappen, zolang er geen filter aanstaat): een
-  map gaat dan **met alles erin**, submappen en bestanden op elk niveau. Het getal dat je typt telt ook wat de scan in die mappen vond. Het script
-  laat een map staan, en zegt dat, als hij nu meer bevat dan bij de scan of een koppeling, en de share zelf wordt nooit verwijderd. `cmd` neemt
-  geen mappen (zie [ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)).
-  Onder *Instellingen → Verwijderen* kies je tussen het **geavanceerde** script (zoals hierboven) en een **eenvoudig** script: een `.txt` met
-  één opdracht per bestand of map (`rm`, `Remove-Item` of `del` en `rd`), voor een klein aantal (tot 200) om te lezen, in te korten en in een terminal
-  te plakken, bijvoorbeeld via SSH op de NAS. Het eenvoudige script vraagt en controleert niets (zie [ADR 0011](docs/adr/0011-simple-delete-scripts.md)).
-* **Bestandstypes** in acht categorieën (Video, Audio, Afbeeldingen, Documenten, Archieven, Code, Disk images, Overig)
-  met een aanpasbare extensietabel; een wijziging werkt direct door in alle cijfers, zonder opnieuw te scannen.
-* **Historie**: per scan een momentopname, met instelbare bewaartermijn; groei per categorie in de tijd.
-* **Beveiliging**: lokale accounts met Argon2id, **verplichte tweede factor** (authenticator-app of passkey, ook
-  wachtwoordloos met alleen een passkey), herstelcodes, lockout, CSRF-bescherming, rollen Admin en Viewer, auditlog,
-  setup-wizard zonder standaardwachtwoorden.
-* **Beheer**: scheduler met cron per share (persistente jobstatus), OpenAPI-REST-API, Prometheus-`/metrics`, JSON-logs,
-  health checks. Interface in Nederlands en Engels, binaire of decimale eenheden, licht, donker of volgens het systeem, en een accentkleur die elke gebruiker zelf kiest (naam rechtsboven → Weergave en taal).
+# NASSA - NAS Storage Analyzer
+
+**Zie waar je opslagruimte blijft.**
+Scant je NFS- en SMB-shares alleen-lezen en laat per share, map en bestandstype zien wat de ruimte inneemt, ook bij miljoenen bestanden en tientallen terabytes. Je ruimt zelf op, met een script dat jij leest en draait.
+
+**Nederlands** · [English](README.en.md)
+
+<img src="docs/screenshots/nl/dashboard.png" alt="NASSA op een computer en een telefoon: het dashboard met per share de grootte, het aantal bestanden, een donut per bestandstype en de groei in de tijd" width="900">
+
+</div>
+
+## Inhoud
+
+- [Wat kan het?](#wat-kan-het)
+- [Hoe ziet het eruit?](#hoe-ziet-het-eruit)
+- [Snel starten](#snel-starten)
+- [Eerste start](#eerste-start)
+- [Shares beschikbaar maken](#shares-beschikbaar-maken)
+- [Gebruik](#gebruik)
+- [Beveiliging](#beveiliging)
+- [Gebruikers en uitnodigingen](#gebruikers-en-uitnodigingen)
+- [Configuratie](#configuratie)
+- [Gegevens en back-ups](#gegevens-en-back-ups)
+- [Bijwerken](#bijwerken)
+- [Stabiel en beta](#stabiel-en-beta)
+- [Problemen oplossen](#problemen-oplossen)
+- [Architectuur](#architectuur)
+- [Bekende beperkingen](#bekende-beperkingen)
+- [Ontwikkelen en testen](#ontwikkelen-en-testen)
+- [Onderdelen](#onderdelen)
+
+## Wat kan het?
+
+- **Alleen lezen.** NASSA leest van je NAS alleen metadata (`stat` en mapinhoud, nooit de inhoud van een bestand) en schrijft niets terug. De aanbevolen opzet mount je shares read-only in de container.
+- **Gebouwd voor veel bestanden.** Parallelle workers, grote batches naar PostgreSQL en voorberekende totalen per map, per categorie en per extensie. Op 10 miljoen bestanden blijven de weergaven onder een halve seconde, behalve twee brede leeftijdsfilters over een héle share (2,0 tot 2,6 s); de metingen staan in [`docs/bench-phase2.md`](docs/bench-phase2.md).
+- **Slim scannen.** Onveranderde mappen worden hergebruikt, dus een volgende scan is veel sneller. Uitsluitpatronen, symlinks worden niet gevolgd, een hardlink telt één keer, de werkelijke grootte (`st_blocks`) staat naast de logische, de IO is te begrenzen, en je ziet de voortgang live en kunt annuleren. Een scan die niets vindt terwijl de vorige meer dan 100 bestanden zag (een share die niet meer gemount is) wordt geweigerd en laat je oude gegevens staan.
+- **Dashboard.** Per share de grootte, het aantal bestanden, hoeveel van de schijf vol is, een donut per bestandstype en de groei per categorie in de tijd.
+- **Mappen en kaart.** Bladeren met percentages en sorteren, een treemap om in één oogopslag de grote blokken te zien, en filters die je combineert: categorie, extensie, grootte, gewijzigd, laatst gebruikt en naam. CSV-export van elk overzicht.
+- **Grootste en koudste.** Lijsten met de grootste en de langst niet gebruikte bestanden en mappen, per share, plus zoeken op naam.
+- **Verwijderscripts.** Vink bestanden en mappen aan en je krijgt één script (`.ps1`, `.cmd`, `.sh` of een eenvoudige `.txt`) dat precies die dingen verwijdert. **NASSA verwijdert zelf nooit iets**: het schrijft de tekst, jij draait hem. Zie [Verwijderen](#verwijderen).
+- **Bestandstypes.** Acht categorieën (Video, Audio, Afbeeldingen, Documenten, Archieven, Code, Disk images, Overig) met een extensietabel die je aanpast; een wijziging werkt direct door in alle cijfers, zonder opnieuw te scannen.
+- **Historie.** Elke scan is een momentopname, met een instelbare bewaartermijn, en de groei per categorie in de tijd.
+- **Scheduler.** Een cron-schema per share, met een jobstatus die een herstart overleeft.
+- **Veilig inloggen.** Lokale accounts met Argon2id, een **verplichte tweede factor** (authenticator-app of passkey, ook wachtwoordloos met alleen een passkey), herstelcodes, lockout, CSRF-bescherming, de rollen Admin en Viewer en een auditlog. Geen standaardwachtwoorden.
+- **Meerdere gebruikers.** Een beheerder nodigt anderen uit met een eenmalige link; niemand kiest het wachtwoord van een ander.
+- **Instellingen per persoon.** Nederlands of Engels, binaire of decimale eenheden, licht, donker of volgens je systeem, en een eigen accentkleur.
+- **Voor beheerders.** Een OpenAPI-REST-API, Prometheus-`/metrics`, JSON-logs, health checks, een back-up van wat je zelf invoerde en een fabrieksreset.
+- **Jij houdt de controle.** Alles draait in je eigen containers. De update-check vraagt alleen aan GitHub of er een nieuwere release is en stuurt niets over jouw installatie mee; je zet hem uit met `NASSA_UPDATE_CHECK=false`.
+
+## Hoe ziet het eruit?
+
+Elke afbeelding toont dezelfde pagina op een computer en op een telefoon. De shares, mappen en bestanden zijn voorbeeldgegevens, met speciaal aangemaakte (sparse) bestanden die er veel groter uitzien dan ze zijn. De afbeeldingen komen uit [`web/e2e/screenshots.cjs`](web/e2e/screenshots.cjs) en zijn dus altijd van de echte applicatie.
+
+### Dashboard
+
+Eén kaart per share: hoeveel ruimte de bestanden innemen (en hoeveel er werkelijk is toegewezen), hoeveel van de schijf nog vrij is, wat de grootste bestandstypes zijn en hoe dat per categorie groeit. Een mislukte scan, of een scan die niet alles kon lezen, staat erbij; als beheerder klik je erop en kom je bij het bijbehorende item in het auditlog.
+
+<img src="docs/screenshots/nl/dashboard.png" alt="Het dashboard met de share Media: 1,27 TB in 452 bestanden, een balk met de vrije schijfruimte, een donut per bestandstype en de groei per categorie" width="900">
+
+### Mappen en kaart
+
+De mappen van een share met hun grootte, aandeel, aantal bestanden en datums. Klik een map open, sorteer op een kolom, of filter op categorie, extensie, grootte of leeftijd. De treemap laat de verhoudingen in één blik zien; klik op een vlak om in die map te kijken.
+
+<img src="docs/screenshots/nl/browse.png" alt="De mappenbrowser: Films, Series, Downloads, Muziek en Documenten met grootte, aandeel, aantal bestanden, gewijzigd en laatst gebruikt, en een vinkje per map" width="900">
+
+<img src="docs/screenshots/nl/treemap.png" alt="De treemap van de share Media: Films en Series als grote vlakken, met de afzonderlijke series erbinnen" width="900">
+
+### Lijsten
+
+De grootste en de langst niet gebruikte bestanden (en mappen) van een share, bijvoorbeeld alles wat een jaar niet is geopend. Elke lijst is te exporteren als CSV.
+
+<img src="docs/screenshots/nl/lists.png" alt="De lijst met bestanden die 365 dagen niet zijn gebruikt, de grootste eerst, met grootte, wijzigingsdatum en laatste gebruik" width="900">
+
+### Verwijderscripts
+
+Vink in een lijst of bij Mappen aan wat weg mag. Onderaan zie je hoeveel je aanvinkte en hoeveel ruimte dat hoogstens oplevert; **Script maken…** geeft het script. Dit is alleen voor beheerders.
+
+<img src="docs/screenshots/nl/select.png" alt="Vier bestanden aangevinkt in de lijst, met onderaan de balk '4 geselecteerd · hooguit 122 GB' en de knoppen Selectie wissen en Script maken" width="900">
+
+Het **eenvoudige** script is een `.txt` met één opdracht per bestand of map, om te lezen, in te korten en in een SSH-sessie op de NAS te plakken. Het **geavanceerde** script (`.ps1`, `.cmd` of `.sh`) toont eerst een samenvatting, vraagt je `DELETE <aantal>` te typen en laat een bestand staan dat sinds de scan is veranderd. Onder *Instellingen → Verwijderen* kies je welke de lijsten maken.
+
+<img src="docs/screenshots/nl/script.png" alt="Het dialoogvenster met het eenvoudige script: een paar commentaarregels en vier rm-opdrachten, met de knoppen Alles kopiëren en Opnieuw downloaden" width="900">
+
+<img src="docs/screenshots/nl/delete-settings.png" alt="Instellingen, Verwijderen: de keuze tussen het geavanceerde en het eenvoudige script, met een waarschuwing dat het eenvoudige script niets vraagt en niets controleert" width="900">
+
+### Auditlog en back-up
+
+Aanmeldingen, wijzigingen aan de configuratie en de uitkomst van elke scan (gelukt, mislukt of niets gevonden) staan in het auditlog. Onder *Instellingen → Back-up* neem je wat je zelf invoerde mee in één klein bestand en zet je het terug.
+
+<img src="docs/screenshots/nl/audit.png" alt="Het auditlog, gefilterd op scan.*: per scan een regel met het aantal bestanden en mappen, de fouten en wie de scan startte" width="900">
+
+<img src="docs/screenshots/nl/backup.png" alt="Instellingen, Back-up: een back-up downloaden en een back-up terugzetten" width="900">
+
+### Donker thema
+
+De knop naast de taalkeuze wisselt tussen donker, licht en wat je apparaat zelf doet. Elke gebruiker kiest ook een eigen accentkleur.
+
+<img src="docs/screenshots/nl/dark.png" alt="Het dashboard in het donkere thema" width="900">
 
 ## Snel starten
 
-Vereist: Docker met Compose v2.
+Je hebt Docker met Compose v2 nodig, op de NAS zelf of op een machine die je shares kan zien.
 
 ```bash
 git clone https://github.com/helmerzNL/NAS-Storage-Analyzer.git
 cd NAS-Storage-Analyzer
-./scripts/init-env.sh              # maakt .env: de mappen (zie onder) en willekeurige geheimen (database-wachtwoord, encryptiesleutel, setup-token)
+./scripts/init-env.sh --data-path /srv/nas-storage-analyzer --shares-dir /srv/nas
 docker compose up -d
 ```
 
-De stack haalt de image op van `ghcr.io/helmerznl/nas-storage-analyzer`; er wordt op de server niets gebouwd. `NASSA_TAG` in `.env`
-kiest welke: `latest` (stabiel, standaard), `beta` (de build waar elke wijziging eerst in landt; de interface toont dan een
-**beta**-label, gebruik een aparte `DATA_PATH`) of een versienummer om vast te zetten. Zolang er nog geen promotie naar `main` is geweest
-bestaat `latest` nog niet: zet dan `NASSA_TAG=beta`, of bouw de image uit deze map met
-`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
+`init-env.sh` maakt `.env` met willekeurige geheimen (database-wachtwoord, encryptiesleutel, setup-token) en de twee mappen. Het overschrijft nooit iets en weigert een relatief pad. Zonder opties kiest het `/mnt/user/appdata/nas-storage-analyzer` en `/mnt/user` op Unraid en anders `/srv/nas-storage-analyzer` en `/srv/shares`; controleer wat het koos.
 
-**Waar de data staat.** Alles wat niet verloren mag gaan (de database: `DATA_PATH/postgres`) staat in één **absolute** map op de
-host, `DATA_PATH` in `.env`. Het zijn gewone mappen, geen Docker-volumes, dus `docker compose down -v`, een prune of een
-herbouw raakt ze niet. Een relatief pad (`./data`) is niet toegestaan: dat wordt opgelost door de tool die de stack start (Dockhand op
-Unraid loste zo'n pad bij een andere Flux76-app op naar het RAM-schijfgeheugen; baseline §21). Op Unraid bijvoorbeeld `/mnt/cache/appdata/nas-storage-analyzer`, elders
-`/srv/nas-storage-analyzer`. `init-env.sh` weigert een relatief pad (`--data-path`, `--shares-dir`).
-**Heb je een installatie van vóór deze instelling** (database in het volume `db-data`)? Dan verplaats je die eenmalig, vóór je de
-nieuwe versie uitrolt: [`docs/deploy.md` §8](docs/deploy.md#8-bijwerken).
+De stack haalt de image op van `ghcr.io/helmerznl/nas-storage-analyzer` (voor `linux/amd64` en `linux/arm64`); op de server wordt niets gebouwd. Wil je hem toch uit deze map bouwen: `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
 
-Open <http://127.0.0.1:8080>, voer de setup-token uit `.env` in, maak het beheerdersaccount aan en stel de tweede
-factor in. Voeg daarna een share toe (**Shares → Share toevoegen**) en klik op **Scan nu** op het dashboard.
+**Waar de data staat.** Alles wat niet verloren mag gaan (de database, in `DATA_PATH/postgres`) staat in één **absolute** map op de host: `DATA_PATH` in `.env`. Het zijn gewone mappen, geen Docker-volumes, dus `docker compose down -v`, een prune of een herbouw raakt ze niet. Een relatief pad is niet toegestaan: dat wordt opgelost door de tool die de stack start, en dat is niet altijd de host (Dockhand op Unraid loste zo'n pad bij een andere app op naar de RAM-schijf).
 
-Zet in `.env` `NASSA_SHARES_DIR` (verplicht, een absoluut pad) op de map op de Docker-host waar je NAS-shares gemount zijn; die verschijnt
-read-only als `/mnt/shares` in de containers (of op een pad naar keuze, zie `NASSA_SHARES_MOUNT`). Draait de stack op
-de NAS zelf, bijvoorbeeld Unraid, dan hoef je niets te mounten. Zie [Shares beschikbaar maken](#shares-beschikbaar-maken).
+Open daarna <http://127.0.0.1:8080>. De app luistert standaard alleen op die machine zelf; zet je hem op een NAS en wil je erbij vanaf een ander apparaat, dan zet je `NASSA_HTTP_BIND=0.0.0.0` (en liefst een [reverse proxy](#reverse-proxy-en-https) met https ervoor).
 
-## Architectuur
+> **Heb je NASSA al, van vóór v0.2.0?** Dan heten alle omgevingsvariabelen nu `NASSA_*` in plaats van `NASA_*` en wordt een oude `.env` geweigerd. Eén commando lost het op, zie [Bijwerken](#bijwerken).
 
-```mermaid
-flowchart LR
-  Browser -- https --> Proxy["reverse proxy (optioneel)"]
-  Proxy --> App
-  subgraph Docker Compose
-    App["app<br/>web interface, REST API, scheduler"]
-    Worker["worker<br/>voert scans uit"]
-    DB[("PostgreSQL 16<br/>aggregaten, historie,<br/>jobwachtrij")]
-    App -- "queries (read-only pool)<br/>jobs en beheer (schrijven)" --> DB
-    Worker -- "jobs claimen, bulk COPY,<br/>aggregaten publiceren" --> DB
-  end
-  Worker -- "stat / readdir, read-only" --> NAS[("NAS<br/>NFS / SMB")]
-```
+## Eerste start
 
-* **`app`** serveert de interface (in de binary ingebakken), de REST API en de scheduler. Hij scant niet en draait
-  zonder rechten. Alleen voor de mapkiezer in het share-formulier leest hij (read-only, alleen voor beheerders) de
-  namen van mappen onder de share-map; bestanden worden niet getoond of geopend.
-* **`worker`** haalt scanjobs uit de wachtrij in de database (`FOR UPDATE SKIP LOCKED`), scant, en publiceert het
-  resultaat in één transactie; een geannuleerde of mislukte scan laat de eerdere gegevens ongemoeid. Alleen de
-  worker scant de NAS, en alleen in de aanbevolen opzet via een read-only bind-mount.
-* **PostgreSQL** bewaart de bestandsindex (per share een eigen partitie, mappen als `ltree`) en de voorberekende
-  totalen per map, per map en categorie, en per extensie. Daardoor lezen de meeste weergaven een paar duizend
-  rijen in plaats van alle bestanden. Metingen op 10 miljoen bestanden: [`docs/bench-phase2.md`](docs/bench-phase2.md).
+Een nieuwe installatie opent een setup-wizard; een bestaande installatie ziet hem niet.
 
-Het volledige ontwerp en de afwegingen staan in [`docs/ontwerp.md`](docs/ontwerp.md).
+1. **Setup-token.** Voer de `NASSA_SETUP_TOKEN` uit `.env` in. Staat er geen, dan staat een willekeurige token in het log: `docker compose logs app | grep setup_token`.
+2. **Beheerder.** Kies een naam en een wachtwoord. Er zijn geen standaardwachtwoorden.
+3. **Tweede factor.** Stel een authenticator-app in (je krijgt herstelcodes, één keer in beeld) of een passkey. Dat is verplicht, voor elk account.
+4. **Eerste share.** Kies **Shares → Share toevoegen**, klik op **Bladeren…** en kies de map (of typ het pad), en klik op **Scan nu** op het dashboard.
+
+Passkeys zijn aan een hostnaam gebonden en werken alleen via https of op `localhost`. Zet in productie `NASSA_RP_ID` en `NASSA_RP_ORIGINS`, zie [Reverse proxy en https](#reverse-proxy-en-https).
 
 ## Shares beschikbaar maken
 
-Aanbevolen (**route b**): mount de NFS- of SMB-share op de Docker-host, read-only, en geef die map door:
+NASSA leest een gewone map. Hoe die map bij de container komt, bepaal je met `NASSA_SHARES_DIR` (verplicht, een absoluut pad op de host); die verschijnt **read-only** als `/mnt/shares` in `app` en `worker`.
+
+**Route b (aanbevolen): mount op de host.** Mount de NFS- of SMB-share read-only op de Docker-host en geef de map door. De containers hebben dan geen speciale rechten nodig en kunnen niets op de NAS wijzigen.
 
 ```bash
 # /etc/fstab op de host
 nas.lan:/volume1/media  /srv/nas/media  nfs  ro,vers=4.1,_netdev,x-systemd.automount,noatime  0 0
 ```
+
 ```bash
 # .env
 NASSA_SHARES_DIR=/srv/nas
 ```
 
-Voeg de share in de interface toe als type *Gemount pad*: klik op **Bladeren…** en kies de map, of typ het pad
-(`/mnt/shares/media`). De containers kunnen dan niets op de NAS wijzigen en hebben geen speciale rechten nodig.
+Voeg de share in de interface toe als type *Gemount pad*: klik op **Bladeren…** en kies `/mnt/shares/media`.
 
-Gebruik voor `NASSA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
-`./shares` is een lege map in de stackmap. Zie
-[Unraid, Portainer, Dockge](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers).
-
-Draait de stack **op de NAS zelf** (route c)? Dan is er niets te mounten: de shares zijn gewone mappen. Geef die map
-door en zet `NASSA_SHARES_MOUNT` op hetzelfde pad. In de interface typ je dan het pad dat je van de NAS kent. Voorbeeld
-voor Unraid:
+**Route c: de stack draait op de NAS zelf** (bijvoorbeeld Unraid). Dan is er niets te mounten: de shares zijn gewone mappen. Geef die map door en zet `NASSA_SHARES_MOUNT` op hetzelfde pad, dan zijn de paden in de interface dezelfde als die je van de NAS kent.
 
 ```bash
 # .env
@@ -122,57 +159,48 @@ NASSA_SHARES_DIR=/mnt/user
 NASSA_SHARES_MOUNT=/mnt/user
 ```
 
-Voeg elke share apart toe (**Bladeren…**, of typ bijvoorbeeld `/mnt/user/media`). Alleen wat je toevoegt wordt gescand.
-Meldt de kiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan
-`NASSA_SHARES_GID=100`, zie [Leesrechten](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers). Losse Unraid-schijven
-in plaats van de (tragere) FUSE-laag `/mnt/user`, Exclusive shares en andere NAS-systemen:
-[`docs/deploy.md`](docs/deploy.md#route-c-de-stack-draait-op-de-nas-zelf).
+Melden de mapkiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan `NASSA_SHARES_GID=100`.
 
-Alternatief (**route a**): de worker mount zelf, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`.
-Dat geeft alleen de worker root en `CAP_SYS_ADMIN`. Je vult dan in de interface server, export of share, versie en
-eventueel SMB-inloggegevens in (versleuteld opgeslagen). Details, SMB-voorbeelden, AppArmor en late mounts:
-[`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
+**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root en `CAP_SYS_ADMIN`; je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
 
-> Route a is in de ontwikkelomgeving getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet
-> tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu* en lees zo nodig de melding op het dashboard.
+Alleen wat je als share toevoegt wordt gescand. Een share die niet (meer) gemount is laat een lege map achter; een scan die dan niets vindt terwijl de vorige meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan. Details, SMB-voorbeelden, AppArmor, losse Unraid-schijven en Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
 
-Een share die niet (meer) gemount is, laat een lege map achter. Een scan die dan niets vindt terwijl de vorige
-meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan.
+## Gebruik
 
-**Een fout bij een scan** staat op het dashboard: de rode melding bij een mislukte scan, of de badge *N fouten* bij een scan die niet alles kon lezen.
-Als beheerder klik je erop en kom je direct bij het bijbehorende item in het auditlog (`/admin/audit?scan=<id>`): het item staat bovenaan en gemarkeerd, met de
-oorzaak, de tip en de lijst met mappen die niet gelezen konden worden. Een scan die al mislukt voordat hij begint (de map van de share is niet te openen)
-heeft geen scan en dus geen melding op het dashboard; die staat alleen in het auditlog.
+### Scannen
 
-## Configuratie
+**Scan nu** op het dashboard scant incrementeel: mappen die niet veranderden worden hergebruikt. **Volledige scan** leest alles opnieuw (standaard gebeurt dat ook elke zevende scan). Een scan loopt in de `worker`, je ziet de voortgang live en kunt hem annuleren; een geannuleerde of mislukte scan laat de eerdere gegevens ongemoeid. Per share stel je een cron-schema en uitsluitpatronen in, het aantal parallelle workers en een begrenzing van het aantal bestandsoperaties per seconde en per dag (met een eigen dag- en nachtvenster), hoeveel scans en hoeveel dagen historie bewaard blijven, en of "laatst gebruikt" de leestijd (`atime`), de wijzigingsdatum of het maximum van beide is.
 
-Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangrijkste:
+Een **fout bij een scan** staat op het dashboard: de rode melding bij een mislukte scan, of de badge *N fouten* bij een scan die niet alles kon lezen. Als beheerder klik je erop en kom je direct bij het item in het auditlog, met de oorzaak, een tip en de lijst met mappen die niet gelezen konden worden.
 
-| Variabele | Betekenis |
-|---|---|
-| `DATA_PATH` | Vereist. Absolute map op de host met alles wat bewaard moet blijven; de database staat in `DATA_PATH/postgres`. Nooit relatief, nooit een Docker-volume. |
-| `NASSA_TAG` | Welke image: `latest` (standaard), `beta` of een versienummer. Wordt ook in de container gezet; een beta-build toont een **beta**-label. |
-| `NASSA_DB_PASSWORD`, `NASSA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
-| `NASSA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
-| `NASSA_SHARES_DIR` | Vereist. Absolute map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
-| `NASSA_SHARES_GID` | Groep waar de containers lid van worden om je shares te kunnen lezen. Nodig als een share alleen voor de eigenaar en één groep leesbaar is (Unraid: `drwxrwx---` voor `nobody:users`): zet `100`. Standaard de eigen groep van de image, dus niets verandert. |
-| `NASSA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Standaard `/mnt/shares`; zet het gelijk aan `NASSA_SHARES_DIR` en de paden zijn overal hetzelfde. |
-| `NASSA_HTTP_BIND`, `NASSA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
-| `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
-| `NASSA_RP_ID`, `NASSA_RP_ORIGINS` | Passkeys zijn aan een hostnaam gebonden; zet deze in productie. |
-| `NASSA_METRICS_TOKEN` | Bearer-token voor `/metrics`; zonder token alleen vanaf loopback. |
-| `NASSA_UPDATE_CHECK` | Standaard `true`: de app vraagt github.com of er een nieuwere release is en meldt dat aan de beheerder (banner, en het scherm Over). Hij werkt niets bij en stuurt niets over jouw installatie mee (vaste `User-Agent`, geen versie, geen id). `false` zet hem uit. |
-| `NASSA_TZ` | Tijdzone voor cron-schema's en het dag/nacht-venster. |
-| `PG_*` | PostgreSQL afstellen op het beschikbare geheugen. |
+### Bladeren en zoeken
 
-Wil je het wachtwoord en de sleutel niet als omgevingsvariabele, gebruik dan Docker secrets:
-`./scripts/init-env.sh --secrets` en `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d`.
-De meeste `NASSA_*`-instellingen, waaronder het database-wachtwoord en de encryptiesleutel, accepteren ook een `_FILE`-variant (bijvoorbeeld `NASSA_DB_PASSWORD_FILE`).
+Onder **Mappen** blader je door een share met de tabbladen *Mappen*, *Kaart* (treemap) en *Bestanden*; de filters combineer je. **Lijsten** toont de grootste en de koudste bestanden en mappen, **Zoeken** zoekt op naam. Elk overzicht is te exporteren als CSV. De eenheden (binair of decimaal), de taal en het thema staan bovenin naast elkaar, en met de accentkleur ook onder je naam → *Weergave en taal*; ze gelden voor jouw account.
 
-## Reverse proxy
+De **bestandstypes** (*Instellingen → Bestandstypes*) zijn aan te passen: een extensie naar een andere categorie verplaatsen werkt direct door in alle cijfers, zonder nieuwe scan.
 
-Zet de app achter https zodra hij buiten je eigen host bereikbaar is (cookies worden dan `Secure`, en passkeys
-werken alleen via https of `localhost`). Voorbeeld met Caddy:
+### Verwijderen
+
+Beheerders vinken bestanden aan in de lijsten en onder *Mappen* en krijgen één script. **De applicatie verwijdert zelf niets.**
+
+- **Geavanceerd** (`.ps1`, `.cmd` of `.sh`): toont een samenvatting, vraagt `DELETE <aantal>` te typen, controleert grootte en tijd van elk bestand vlak voor het verwijderen en laat een bestand staan dat sinds de scan is veranderd. Voor veel bestanden tegelijk: hoogstens 2.000 per script. Wat het script niet veilig kan aanspreken (vreemde tekens, namen die Windows niet opent, namen die alleen in hoofdletters verschillen) laat het weg en noemt het.
+- **Eenvoudig** (`.txt`): één opdracht per bestand of map (`rm`, `Remove-Item`, of `del` en `rd`), voor een klein aantal (tot 200) om te lezen, in te korten en in een terminal te plakken, bijvoorbeeld via SSH op de NAS. Het vraagt en controleert **niets**.
+- **Mappen** gaan **met alles erin**. Het getal dat je typt telt ook wat de scan in die mappen vond; het script laat een map staan, en zegt dat, als hij nu meer bevat dan bij de scan of een koppeling. De share zelf wordt nooit verwijderd, en `cmd` neemt geen mappen.
+
+Waar jouw machine de share ziet (`\\nas\media`, `Z:\`, `/mnt/user/media`) stel je per share in. Zie [ADR 0006](docs/adr/0006-delete-scripts.md), [ADR 0010](docs/adr/0010-delete-scripts-take-folders.md) en [ADR 0011](docs/adr/0011-simple-delete-scripts.md).
+
+## Beveiliging
+
+- **Lokale accounts** met Argon2id, lockout na mislukte pogingen en CSRF-bescherming. Een **tweede factor is verplicht**: een authenticator-app (met herstelcodes) of een passkey, die ook wachtwoordloos inloggen kan.
+- **Rollen:** Admin en Viewer. Alleen beheerders maken verwijderscripts, beheren shares, gebruikers en bestandstypes en zien het auditlog.
+- **Auditlog** van aanmeldingen, wijzigingen en de uitkomst van elke scan (gelukt, mislukt of niets gevonden).
+- **Alleen-lezen.** De containers draaien zonder rechten (`read_only`, `cap_drop: ALL`, `no-new-privileges`) en de shares zijn read-only gemount. Alleen route a geeft de worker meer rechten.
+- **Geheimen** staan in `.env` of, liever, in Docker secrets (`./scripts/init-env.sh --secrets`). De meeste `NASSA_*`-instellingen kennen een `_FILE`-variant.
+- **De update-check** vraagt aan `github.com` of er een nieuwere release is, met alleen een vaste `User-Agent`: geen versie, geen installatie-id, geen gebruikersgegevens. Hij werkt niets bij.
+
+### Reverse proxy en https
+
+Zet NASSA achter https zodra hij buiten je eigen machine bereikbaar is: cookies worden dan `Secure` en passkeys werken alleen via https of `localhost`. Voorbeeld met Caddy:
 
 ```caddyfile
 nas.example.com {
@@ -192,47 +220,130 @@ NASSA_RP_ORIGINS=https://nas.example.com
 
 Voorbeelden voor nginx en Traefik en uitleg over `X-Forwarded-*`: [`docs/deploy.md`](docs/deploy.md#3-reverse-proxy-en-https).
 
-## Back-up en herstel
+## Gebruikers en uitnodigingen
 
-Alles staat in PostgreSQL, plus de encryptiesleutel buiten de database.
+Niemand kiest het wachtwoord van iemand anders. Een beheerder maakt onder **Instellingen → Gebruikers** een **uitnodigingslink** (de rol kies jij) en geeft hem door; de gast kiest zelf een wachtwoord of een passkey. De link staat één keer in beeld, werkt één keer, verloopt na 7 dagen en wordt nergens bewaard (alleen de hash). *Nieuwe inlog-link* haalt iemand terug die niet meer kan inloggen. `NASSA_PUBLIC_URL` is het adres waar de links naartoe wijzen. Details en grenzen: [`docs/deploy.md` §4b](docs/deploy.md#4b-gebruikers-uitnodigen).
+
+## Configuratie
+
+Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangrijkste:
+
+| Variabele | Betekenis |
+|---|---|
+| `DATA_PATH` | Vereist. Absolute map op de host met alles wat bewaard moet blijven; de database staat in `DATA_PATH/postgres`. Nooit relatief, nooit een Docker-volume. |
+| `NASSA_TAG` | Welke image: `latest` (standaard), `beta` of een versienummer. Wordt ook in de container gezet; een beta-build toont een **beta**-label. |
+| `NASSA_DB_PASSWORD`, `NASSA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
+| `NASSA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
+| `NASSA_SHARES_DIR` | Vereist. Absolute map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
+| `NASSA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Zet het gelijk aan `NASSA_SHARES_DIR` en de paden zijn overal hetzelfde. |
+| `NASSA_SHARES_GID` | Groep waar de containers lid van worden om shares te lezen die alleen voor de eigenaar en één groep leesbaar zijn (Unraid: `100`). |
+| `NASSA_HTTP_BIND`, `NASSA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
+| `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
+| `NASSA_RP_ID`, `NASSA_RP_ORIGINS`, `NASSA_PUBLIC_URL` | Passkeys zijn aan een hostnaam gebonden, en uitnodigingslinks hebben een adres nodig. |
+| `NASSA_METRICS_TOKEN` | Bearer-token voor `/metrics`; zonder token alleen vanaf loopback. |
+| `NASSA_UPDATE_CHECK` | Standaard `true`; `false` zet de update-check uit. |
+| `NASSA_TZ` | Tijdzone voor cron-schema's en het dag/nacht-venster. |
+| `PG_*` | PostgreSQL afstellen op het beschikbare geheugen. |
+
+Het commando heet nog `nasa` (`nasa serve`, `nasa scan`, …), en de standaardnaam en -gebruiker van de database ook; alleen de omgevingsvariabelen heten `NASSA_*` (zie [ADR 0012](docs/adr/0012-nassa-environment-variables.md)).
+
+## Gegevens en back-ups
+
+Alles staat in PostgreSQL, plus de encryptiesleutel buiten de database. Er zijn twee soorten back-up:
+
+- **In de app** (*Instellingen → Back-up*, beheerders): wat je zelf invoerde (shares, bestandstypes, ieders weergavevoorkeuren) als één klein JSON-bestand, terug te zetten na een controle die niets verandert voordat jij bevestigt. Er staat nooit een wachtwoord, passkey, authenticator-geheim, herstelcode, account of rol in; een SMB-wachtwoord alleen versleuteld met `NASSA_ENCRYPTION_KEY`, die niet in het bestand zit. Scanresultaten zitten er niet in (scan opnieuw na een herstel). Het vervangt geen kopie van de database.
+- **De hele database**, met `pg_dump`:
+
+  ```bash
+  docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > nassa-$(date +%F).dump
+  ```
+
+  Herstellen: `docker compose up -d db`, dan `docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < nassa-….dump`, dan `docker compose up -d`. Bewaar `NASSA_ENCRYPTION_KEY` bij de dump. Het volledige stappenplan: [`docs/deploy.md`](docs/deploy.md#5-back-up-en-herstel).
+
+*Instellingen → Systeem → Fabrieksreset* zet de installatie terug naar nieuw (alle tabellen leeg, de wizard begint opnieuw); je typt `RESET` en bewijst opnieuw wie je bent. Je bestanden op de NAS blijven onaangeroerd.
+
+## Bijwerken
 
 ```bash
-docker compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > nasa-$(date +%F).dump
+docker compose pull
+docker compose up -d
 ```
 
-Herstellen: `docker compose up -d db`, dan
-`docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < nasa-….dump`,
-dan `docker compose up -d`. Het volledige stappenplan en wat je wel en niet hoeft te bewaren:
-[`docs/deploy.md`](docs/deploy.md#5-back-up-en-herstel).
+Een stackmanager (Dockhand, Komodo, Portainer) heeft daar meestal een eigen *pull*- of *update*-actie voor. **Opnieuw uitrollen haalt een bewegende tag (`latest`, `beta`) niet vanzelf op**: pull dus eerst. Controleer wat er draait met het scherm **Over** of `curl -s http://<host>:8080/api/v1/version`. Migraties draaien bij het starten; maak vooraf een back-up. Terug naar een vorige versie: zet `NASSA_TAG` op dat versienummer en herstel de back-up van vóór de update als de [releasenotes](docs/releases/) zeggen dat het schema niet compatibel is.
+
+De beheerder krijgt een melding (een banner en het scherm *Over*) als er een nieuwere release is; de app doet zelf niets.
+
+**Eenmalig, van vóór v0.2.0: de variabelen heten `NASSA_` in plaats van `NASA_`.** Een `.env` met de oude namen wordt geweigerd (Compose en de app noemen de nieuwe naam), in plaats van stil de standaardwaarden te gebruiken. Pas het bestand eenmalig aan, en in een stackmanager de variabelen daar ook (bij Dockhand staat het in `.env.dockhand`):
+
+```bash
+sed -i 's/^NASA_/NASSA_/' .env
+```
+
+`DATA_PATH` en `PG_*` heten nog hetzelfde; het commando `nasa`, de database en de metrics veranderden niet, dus bestaande data en dashboards blijven werken. Staat je database nog in het volume `db-data` (een versie van vóór `DATA_PATH`)? Verplaats hem dan eenmalig, vóór je uitrolt: [`docs/deploy.md` §8](docs/deploy.md#8-bijwerken).
+
+## Stabiel en beta
+
+Elke wijziging komt eerst in de **beta**; alleen een bewuste promotie maakt er een stabiele versie van.
+
+| `NASSA_TAG` | Wat je krijgt |
+|---|---|
+| `latest` | De stabiele lijn. Wordt gepubliceerd als `beta` wordt gepromoveerd naar `main`. |
+| `beta` | De build waar elke wijziging eerst in landt; de interface toont een **beta**-label. Gebruik een aparte `DATA_PATH`. |
+| `0.2.0` (een versienummer) | Blijft staan tot je het wijzigt. |
+
+Wat er per versie veranderde, staat in de [releasenotes](docs/releases/), in het Nederlands en het Engels.
+
+## Problemen oplossen
+
+| Symptoom | Oorzaak en oplossing |
+|---|---|
+| `docker compose up` meldt dat `NASSA_SHARES_DIR` ontbreekt, of een variabele met `NASA_` | Een `.env` van vóór v0.2.0: `sed -i 's/^NASA_/NASSA_/' .env`. |
+| **Bladeren…** toont "Geen mappen gevonden", of de scan vindt niets | De share-map is leeg in de container: er is niets gemount, of `NASSA_SHARES_DIR` wijst naar een andere map dan je denkt (of is relatief). Het auditlog toont dan `scan.empty`. |
+| Scan mislukt met "permission denied" | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`). |
+| Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASSA_SETUP_TOKEN` in `.env`. |
+| Passkeys werken niet ("Passkeys hebben een beveiligd adres nodig") | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASSA_RP_ID` in. |
+| Een scanfout op het dashboard | Klik erop (beheerder): het auditlog toont de oorzaak en de mappen die niet te lezen waren. |
+| `/metrics` geeft 401 of 403 | Zet `NASSA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
+| `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
+
+Alle symptomen: [`docs/deploy.md`](docs/deploy.md#10-problemen-oplossen).
+
+## Architectuur
+
+```mermaid
+flowchart LR
+  Browser -- https --> Proxy["reverse proxy (optioneel)"]
+  Proxy --> App
+  subgraph Docker Compose
+    App["app<br/>web interface, REST API, scheduler"]
+    Worker["worker<br/>voert scans uit"]
+    DB[("PostgreSQL 16<br/>aggregaten, historie,<br/>jobwachtrij")]
+    App -- "queries (read-only pool)<br/>jobs en beheer (schrijven)" --> DB
+    Worker -- "jobs claimen, bulk COPY,<br/>aggregaten publiceren" --> DB
+  end
+  Worker -- "stat / readdir, read-only" --> NAS[("NAS<br/>NFS / SMB")]
+```
+
+- **`app`** serveert de interface (in de binary ingebakken), de REST API en de scheduler. Hij scant niet en draait zonder rechten. Alleen voor de mapkiezer leest hij (read-only, alleen voor beheerders) de namen van mappen onder de share-map; bestanden worden niet getoond of geopend.
+- **`worker`** haalt scanjobs uit de wachtrij in de database (`FOR UPDATE SKIP LOCKED`), scant, en publiceert het resultaat in één transactie. Alleen de worker scant de NAS, en in de aanbevolen opzet alleen via een read-only bind-mount.
+- **PostgreSQL** bewaart de bestandsindex (per share een eigen partitie, mappen als `ltree`) en de voorberekende totalen per map, per map en categorie, en per extensie. Daardoor lezen de meeste weergaven een paar duizend rijen in plaats van alle bestanden.
+
+Het volledige ontwerp en de afwegingen: [`docs/ontwerp.md`](docs/ontwerp.md). De REST API is beschreven in [`api/openapi.yaml`](api/openapi.yaml) en wordt door `app` op `/openapi.yaml` geserveerd; contracttests valideren elk antwoord tegen de specificatie.
 
 ## Bekende beperkingen
 
-* **atime is vaak onbetrouwbaar.** Veel NAS-systemen en netwerkmounts werken de leestijd niet bij. De scanner meet
-  per scan hoe betrouwbaar atime lijkt en de interface waarschuwt bij "niet gebruikt sinds"; per share kies je
-  atime, wijzigingsdatum of het maximum van beide. "Laatst gebruikt" blijft een schatting.
-* **Incrementele scans** hergebruiken een map als `mtime` en aantal entries gelijk zijn. Een bestand dat in place
-  groeit en een nieuwe hardlink in een ongewijzigde map worden pas bij de volgende volledige scan gezien
-  (standaard elke zevende; ook met één klik).
-* Twee brede leeftijdsfilters over een héle share van 10 miljoen bestanden duren 2,0–2,6 s; alle andere weergaven
-  blijven onder 500 ms.
-* Eén directory wordt in één keer gelezen; een map met miljoenen entries kost merkbaar geheugen in de worker.
-* **Verwijderscripts** zijn alleen zo goed als de index: ze controleren grootte en tijd vóór het verwijderen, maar een bestand dat
-  sinds de scan is vervangen door een ander van gelijke grootte en tijd is niet te onderscheiden. Windows kan sommige Linux-namen
-  niet aanspreken (die laat het script weg), `cmd` laat lege bestanden weg en vergelijkt alleen de grootte, en bestanden die alleen in
-  hoofdletters verschillen worden weggelaten. Zie [ADR 0006](docs/adr/0006-delete-scripts.md). Bij een **map** controleert het script geen
-  tijd en grootte per bestand maar aantallen: het laat de map staan als er nu méér bestanden of mappen in zitten dan bij de scan, of een koppeling.
-  Dat vangt wat er sindsdien bij is gekomen, niet een bestand dat is vervangen door een ander, of drie bestanden die zijn verwijderd terwijl er
-  drie nieuwe voor in de plaats kwamen ([ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)).
-* Geen OIDC; de auth-laag is zo opgezet dat een extra inlogmethode een sessie kan aanmaken, maar de koppeling is niet gebouwd.
+- **atime is vaak onbetrouwbaar.** Veel NAS-systemen en netwerkmounts werken de leestijd niet bij. De scanner meet per scan hoe betrouwbaar atime lijkt en de interface waarschuwt bij "niet gebruikt sinds"; per share kies je atime, wijzigingsdatum of het maximum van beide. "Laatst gebruikt" blijft een schatting.
+- **Incrementele scans** hergebruiken een map als `mtime` en aantal entries gelijk zijn. Een bestand dat in place groeit en een nieuwe hardlink in een ongewijzigde map worden pas bij de volgende volledige scan gezien (standaard elke zevende; ook met één klik).
+- Twee brede leeftijdsfilters over een héle share van 10 miljoen bestanden duren 2,0 tot 2,6 s; alle andere weergaven blijven onder 500 ms.
+- Eén directory wordt in één keer gelezen; een map met miljoenen entries kost merkbaar geheugen in de worker.
+- **Verwijderscripts** zijn alleen zo goed als de index. Ze controleren grootte en tijd vóór het verwijderen, maar een bestand dat sinds de scan is vervangen door een ander van gelijke grootte en tijd is niet te onderscheiden. Bij een map controleert het script aantallen, niet elk bestand. Het eenvoudige script controleert niets.
+- Geen OIDC; de auth-laag is zo opgezet dat een extra inlogmethode een sessie kan aanmaken, maar de koppeling is niet gebouwd.
 
 Alle beperkingen met toelichting: [`docs/deploy.md`](docs/deploy.md#9-bekende-beperkingen).
 
 ## Ontwikkelen en testen
 
-**Werkafspraken** (voor mensen en AI-agents): [`AGENTS.md`](AGENTS.md). Pull requests gaan naar `beta`; `main` krijgt alleen een
-promotie-PR vanuit `beta`. Pull requests wijzigen `VERSION` niet, dat doet de pipeline. Activeer na het clonen de hooks met
-`python scripts/setup_hooks.py`. Wat een operator nodig heeft (starten, health checks, limieten voor een proxy, back-up):
-[`docs/operations.md`](docs/operations.md).
+**Werkafspraken** (voor mensen en AI-agents): [`AGENTS.md`](AGENTS.md). Pull requests gaan naar `beta`; `main` krijgt alleen een promotie-PR vanuit `beta`. Pull requests wijzigen `VERSION` niet, dat doet de pipeline. Activeer na het clonen de hooks met `python scripts/setup_hooks.py`. Wat een operator nodig heeft (starten, health checks, limieten voor een proxy, back-up): [`docs/operations.md`](docs/operations.md).
 
 ```bash
 cd web && npm ci && npm run build && cd ..     # de interface wordt in de Go-binary ingebakken
@@ -245,16 +356,14 @@ NASSA_TEST_DSN='postgres://user@host/postgres' NASSA_REQUIRE_DB=1 go test -race 
 cd web && npm run check && npx vitest run      # typecontrole en unit tests van de interface
 ```
 
-De **browsertest** (`web/e2e`) start een database, `serve` en `worker` en doorloopt met een echte Chromium de hele
-applicatie: setup-wizard, authenticator-app, herstelcodes, passkeys (virtuele authenticator), share toevoegen, scannen
-door de worker, bladeren, filters, treemap, lijsten, zoeken, CSV, gebruikers en auditlog:
+De **browsertest** (`web/e2e`) start een database, `serve` en `worker` en doorloopt met een echte Chromium de hele applicatie: setup-wizard, authenticator-app, herstelcodes, passkeys (virtuele authenticator), share toevoegen, scannen door de worker, bladeren, filters, treemap, lijsten, zoeken, CSV, gebruikers en auditlog:
 
 ```bash
 npm install -g playwright && playwright install chromium     # eenmalig; de test gebruikt de globale installatie
 sh web/e2e/run.sh ./nasa postgres://user@127.0.0.1:5432      # vanuit de hoofdmap; `psql` moet beschikbaar zijn
 ```
 
-Tegen een draaiende Docker-stack (`BASE_URL`, `SETUP_TOKEN`, `SHARE_DIR` en `SHARE_APP_PATH`) staat de aanroep bovenin `web/e2e/e2e.cjs`.
+**De screenshots** in deze README maakt hetzelfde raamwerk, met voorbeeldgegevens: `NASSA_UPDATE_CHECK=false E2E_SCRIPT=screenshots.cjs sh web/e2e/run.sh ./nasa postgres://user@127.0.0.1:5432` schrijft `docs/screenshots/nl` en `docs/screenshots/en`. Pas de PNG's nooit met de hand aan: wijzig het script en draai het opnieuw. `scripts/test_readme.py` bewaakt dat beide README's dezelfde opbouw houden en dat elke link en afbeelding bestaat.
 
 De prestatiemeting op 10 miljoen bestanden:
 
@@ -264,91 +373,23 @@ NASSA_DB_DSN=postgres://user@host/bench ./nasabench seed -files 10000000 -dirs 2
 NASSA_DB_DSN=postgres://user@host/bench ./nasabench queries -runs 20 -out rapport.md
 ```
 
-Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media -exclude .snapshot` (zie `nasa scan -h`;
-`-dry-run` doet een scan zonder database).
+Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media -exclude .snapshot` (zie `nasa scan -h`; `-dry-run` scant zonder database).
 
-De REST API is beschreven in [`api/openapi.yaml`](api/openapi.yaml) en wordt door `app` op `/openapi.yaml` geserveerd;
-contracttests valideren elk antwoord tegen de specificatie.
+## Onderdelen
 
----
+NASSA is gebouwd met Go 1.24 en Svelte 5, op PostgreSQL 16. De directe afhankelijkheden:
 
-## English summary
+| Onderdeel | Waarvoor | Licentie |
+|---|---|---|
+| [pgx](https://github.com/jackc/pgx) | PostgreSQL-driver | MIT |
+| [kin-openapi](https://github.com/getkin/kin-openapi) | Elk verzoek en antwoord controleren tegen `api/openapi.yaml` | MIT |
+| [go-webauthn](https://github.com/go-webauthn/webauthn) | Passkeys | BSD-3-Clause |
+| [pquerna/otp](https://github.com/pquerna/otp) | Authenticator-codes (TOTP) | Apache-2.0 |
+| [client_golang](https://github.com/prometheus/client_golang) | Prometheus-metrics | Apache-2.0 |
+| [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto), [x/sys](https://pkg.go.dev/golang.org/x/sys), [x/time](https://pkg.go.dev/golang.org/x/time) | Argon2id, systeemaanroepen, snelheidsbegrenzing | BSD-3-Clause |
+| [Svelte](https://svelte.dev), [Vite](https://vite.dev), [TypeScript](https://www.typescriptlang.org), [Vitest](https://vitest.dev) | De interface en de tests | MIT, MIT, Apache-2.0, MIT |
+| [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | De QR-code voor de authenticator-app | MIT |
+| [Material Design Icons](https://pictogrammers.com/library/mdi/) (Pictogrammers) | De pictogrammen; ze zitten in de applicatie, er wordt niets bij een derde partij geladen | Apache-2.0 |
+| [PostgreSQL](https://www.postgresql.org) | De database (image `postgres:16-alpine`) | PostgreSQL License |
 
-NAS Storage Analyzer scans NFS/SMB shares **read-only** (metadata only, never file contents) and shows how much space
-data uses per share, folder and file type. It is built for shares with millions of files: a parallel, incremental
-scanner, bulk writes to PostgreSQL and precomputed aggregates keep every view fast (under 500 ms at 10 million
-files, except two broad age filters at 2.0-2.6 s; see [`docs/bench-phase2.md`](docs/bench-phase2.md)).
-
-**Quick start** (Docker with Compose v2):
-
-```bash
-./scripts/init-env.sh              # creates .env: the folders (see below) and random secrets
-docker compose up -d
-```
-
-The stack pulls `ghcr.io/helmerznl/nas-storage-analyzer`; nothing is built on the server. `NASSA_TAG` in `.env` picks the image:
-`latest` (stable, the default), `beta` (the build every change lands in first; the interface shows a **beta** label, use a separate
-`DATA_PATH`) or a version number to pin. Until the first promotion to `main` there is no `latest` image: use `NASSA_TAG=beta`, or
-build it from this folder with `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
-
-**Where the data lives.** Everything that must not be lost (the database, `DATA_PATH/postgres`) is in one **absolute** host folder,
-`DATA_PATH` in `.env`. They are plain folders, never Docker volumes, so `docker compose down -v`, a prune or a rebuild cannot touch
-them. A relative path is refused: it is resolved by whatever tool starts the stack (Dockhand on Unraid resolved such a path into the RAM disk in another Flux76 app; baseline §21). If
-your database is still in the Docker volume `db-data` (a version from before this setting), move it once, **before** you deploy the
-new version: [`docs/deploy.md` §8](docs/deploy.md#8-bijwerken).
-
-Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the administrator and enrol a second factor
-(authenticator app or passkey; mandatory). There are no default passwords. Then add a share and click *Scan nu*.
-
-**Mounting the NAS.** In the share form, *Browse…* lets you click through the folders below the shares folder instead of
-typing a path. Recommended: mount the share read-only on the Docker host and point `NASSA_SHARES_DIR` at the
-parent folder; it appears read-only as `/mnt/shares` in the containers, which need no special privileges. Set
-`NASSA_SHARES_MOUNT` to change that path; if it equals `NASSA_SHARES_DIR`, the paths you type in the interface are the
-host paths. When the stack runs on the NAS itself (for example Unraid) there is nothing to mount: set both variables to
-the folder that holds the shares (`/mnt/user`) and add each share by its path. Alternative:
-`docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d` lets the worker mount NFS/SMB itself, with
-root and `CAP_SYS_ADMIN` in the worker container only (verified up to the privileges; not tested against a real
-NFS/SMB server in the development sandbox). A scan that finds an empty share where the previous scan found over 100
-files is refused, so a dropped mount does not erase your history.
-
-**Users.** Nobody chooses anyone else's password: an administrator makes an **invitation link** (Instellingen → Gebruikers) that the guest opens to choose their own password or a
-passkey. The link is shown once, works once, expires after 7 days and is never stored (only its hash); *Nieuwe inlog-link* brings back a user who cannot sign in. `NASSA_PUBLIC_URL` is the address the links point at.
-Details: [`docs/deploy.md` §4b](docs/deploy.md#4b-gebruikers-uitnodigen).
-
-**Backup and restore.** *Settings → Backup* (administrators) downloads what you entered (shares, file types, everyone's display preferences) as one small JSON file and puts it back.
-It never holds a password, passkey, authenticator secret, recovery code, account or role; an SMB password is in it only encrypted with `NASSA_ENCRYPTION_KEY`, which stays outside the file.
-Scan results are not in it (scan again after a restore), and it does not replace a database dump. A restore is checked first and changes nothing until you confirm; then the server does it
-in one transaction, also if you leave the page. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
-
-**Delete scripts.** An administrator can tick files in the file lists (Folders → Files, Lists) and get one script (`.ps1`, `.cmd` or `.sh`)
-that deletes exactly those files, to run on a PC that sees the share over SMB or on the NAS itself. **The application deletes nothing**: it
-writes the text and you run it. The script prints a summary, needs `DELETE <count>` to be typed, and keeps any file whose size or time differs
-from the scan. At most 2,000 files and folders per script. **Folders** can be ticked too (Folders, and the lists of the largest and coldest folders, while
-no filter is on): a folder is deleted **with everything in it**, and the script keeps it, and says so, when it now holds more than at the scan or a link; the
-share itself is never deleted, and `cmd` takes no folders ([ADR 0010](docs/adr/0010-delete-scripts-take-folders.md)). Where your machines see the share (`\\nas\media`, `Z:\`, `/mnt/user/media`) is set per share (*Delete scripts* in
-the share form) and can be changed when the script is made. Files that cannot be addressed safely (odd characters, names Windows cannot open, names
-that differ only in case) are left out and listed in the script. See [ADR 0006](docs/adr/0006-delete-scripts.md).
-
-**Simple delete scripts.** *Settings → Delete* (administrators) chooses which script the lists make: the advanced one above, or a **simple** one. The simple
-script is a `.txt` with a few comment lines and then one command per file or folder: `rm -f -- '…'` and `rm -rf -- '…'` for `sh`, `Remove-Item -LiteralPath '…'
--Force` (and `-Recurse -Force`) for PowerShell, `del /f /q "…"` and `rd /s /q "…"` for `cmd`. It is for a small number, at most 200 files and folders: tick
-them on a Windows PC, open the `.txt` or the lines the dialog shows, and paste the ones you want into an SSH session on the NAS. **It asks nothing and
-checks nothing** (not whether a file changed since the scan, not whether a folder holds a link), and pasting runs every line at once. Names that cannot be
-quoted for certain are left out and listed (for `cmd`: a `%` or `!`). The choice is a preference of your account. See
-[ADR 0011](docs/adr/0011-simple-delete-scripts.md).
-
-**Factory reset.** *Settings → System → Factory reset* (administrators) puts the installation back to new: every table of the database is emptied (accounts, shares with their scan data, edited file types, the audit log) and the
-setup wizard starts again. A session is not enough: you type `RESET` and prove who you are again, with a passkey or with your password and a code. It is refused while a scan runs, needs no restart, and leaves the environment
-(including `NASSA_ENCRYPTION_KEY`) and the files on your NAS alone. Make a backup first if you are unsure. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
-
-**Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and the About screen with *Check now*).
-It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,
-no user data) and never updates anything; switch it off with `NASSA_UPDATE_CHECK=false`. A beta build is only told about stable releases.
-
-**Behind a reverse proxy** set `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS=true`, `NASSA_RP_ID` and `NASSA_RP_ORIGINS`,
-and disable response buffering for `/api/v1/events`. **Backup** with `pg_dump -Fc` and keep `NASSA_ENCRYPTION_KEY`
-with it. **Limits:** atime is often unreliable (the UI warns and can fall back to modification time); incremental
-scans miss in-place edits and new hardlinks in unchanged folders until the next full scan; OIDC is not implemented.
-
-Everything in more detail, in Dutch with an English summary at the end: [`docs/deploy.md`](docs/deploy.md). Design:
-[`docs/ontwerp.md`](docs/ontwerp.md). API: [`api/openapi.yaml`](api/openapi.yaml).
+De licenties zijn die van de gebruikte versies; kijk in de repository van een onderdeel voor de volledige tekst.
