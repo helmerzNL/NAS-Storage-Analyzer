@@ -884,7 +884,11 @@ const expectText = async (page, sel, re, msg) => {
       await page.selectOption('main select', 'login.');
       await page.waitForFunction(() => !document.querySelector('[data-testid=audit-focus]'));
       if (new URL(page.url()).search !== '') throw new Error('the filter leaves the scan in the address: ' + page.url());
-      const kinds = await page.locator('[data-testid=audit-table] tbody tr td:nth-child(3) .badge').allTextContents();
+      // The marker goes at once but the rows of before stay until the answer for the filter arrives (the table is busy meanwhile), so reading them now
+      // reads the unfiltered log on a slow machine. Wait for the answer; if it never comes the check below says what is on screen.
+      const badges = '[data-testid=audit-table] tbody tr td:nth-child(3) .badge';
+      await page.waitForFunction((sel) => { const b = [...document.querySelectorAll(sel)]; return b.length > 0 && b.every((x) => x.textContent.startsWith('login.')); }, badges, { timeout: 5000 }).catch(() => {});
+      const kinds = await page.locator(badges).allTextContents();
       if (!kinds.length || kinds.some((k) => !k.startsWith('login.'))) throw new Error('the filter is not applied: ' + JSON.stringify(kinds));
 
       // The badge of a scan that could read everything but a few folders leads to the entry of that scan too. Reading errors need a folder the app
