@@ -18,23 +18,23 @@ func TestDataPathWarningOnlyForARelativePath(t *testing.T) {
 	}
 }
 
-// A beta build says so: the same binary reports beta for NASA_TAG=beta and stable when it is unset.
-func TestBuildInfoFollowsNASA_TAG(t *testing.T) {
+// A beta build says so: the same binary reports beta for NASSA_TAG=beta and stable when it is unset.
+func TestBuildInfoFollowsNASSA_TAG(t *testing.T) {
 	oldVersion, oldCommit := version, commit
 	t.Cleanup(func() { version, commit = oldVersion, oldCommit })
 	version, commit = "0.1.0", "abc1234"
 
-	t.Setenv("NASA_TAG", "beta")
+	t.Setenv("NASSA_TAG", "beta")
 	if got := buildInfo().Channel; got != "beta" {
-		t.Errorf("NASA_TAG=beta: channel = %q", got)
+		t.Errorf("NASSA_TAG=beta: channel = %q", got)
 	}
-	t.Setenv("NASA_TAG", "")
+	t.Setenv("NASSA_TAG", "")
 	if got := buildInfo().Channel; got != "stable" {
-		t.Errorf("NASA_TAG unset: channel = %q", got)
+		t.Errorf("NASSA_TAG unset: channel = %q", got)
 	}
-	t.Setenv("NASA_TAG", "latest")
+	t.Setenv("NASSA_TAG", "latest")
 	if got := buildInfo().Channel; got != "stable" {
-		t.Errorf("NASA_TAG=latest: channel = %q", got)
+		t.Errorf("NASSA_TAG=latest: channel = %q", got)
 	}
 	if got := versionLine(); got != "nasa 0.1.0 (abc1234)" {
 		t.Errorf("versionLine = %q", got)
@@ -49,7 +49,7 @@ func TestUpdateCheckIsOnUnlessSwitchedOff(t *testing.T) {
 	for v, want := range map[string]bool{"": true, "true": true, "1": true, "yes": true, "on": true, "anything": true,
 		"false": false, "FALSE": false, "0": false, "no": false, "No": false, "off": false, " off ": false} {
 		if got := updateCheckEnabled(v); got != want {
-			t.Errorf("NASA_UPDATE_CHECK=%q: enabled = %v, want %v", v, got, want)
+			t.Errorf("NASSA_UPDATE_CHECK=%q: enabled = %v, want %v", v, got, want)
 		}
 	}
 }

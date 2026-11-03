@@ -41,7 +41,7 @@ func New(key []byte) (*Box, error) {
 	return &Box{aead: aead}, nil
 }
 
-// GenerateKey returns a new random key encoded for NASA_ENCRYPTION_KEY.
+// GenerateKey returns a new random key encoded for NASSA_ENCRYPTION_KEY.
 func GenerateKey() string {
 	k := make([]byte, KeySize)
 	if _, err := rand.Read(k); err != nil {
@@ -50,24 +50,24 @@ func GenerateKey() string {
 	return base64.StdEncoding.EncodeToString(k)
 }
 
-// FromEnv loads the key from NASA_ENCRYPTION_KEY (base64) or, as a Docker
-// secret, from the file named by NASA_ENCRYPTION_KEY_FILE.
+// FromEnv loads the key from NASSA_ENCRYPTION_KEY (base64) or, as a Docker
+// secret, from the file named by NASSA_ENCRYPTION_KEY_FILE.
 func FromEnv() (*Box, error) {
-	v := os.Getenv("NASA_ENCRYPTION_KEY")
-	if f := os.Getenv("NASA_ENCRYPTION_KEY_FILE"); f != "" {
+	v := os.Getenv("NASSA_ENCRYPTION_KEY")
+	if f := os.Getenv("NASSA_ENCRYPTION_KEY_FILE"); f != "" {
 		b, err := os.ReadFile(f)
 		if err != nil {
-			return nil, fmt.Errorf("read NASA_ENCRYPTION_KEY_FILE: %w", err)
+			return nil, fmt.Errorf("read NASSA_ENCRYPTION_KEY_FILE: %w", err)
 		}
 		v = string(b)
 	}
 	v = strings.TrimSpace(v)
 	if v == "" {
-		return nil, errors.New("no encryption key: set NASA_ENCRYPTION_KEY or NASA_ENCRYPTION_KEY_FILE (generate one with: nasa genkey)")
+		return nil, errors.New("no encryption key: set NASSA_ENCRYPTION_KEY or NASSA_ENCRYPTION_KEY_FILE (generate one with: nasa genkey)")
 	}
 	key, err := base64.StdEncoding.DecodeString(v)
 	if err != nil {
-		return nil, errors.New("NASA_ENCRYPTION_KEY is not valid base64")
+		return nil, errors.New("NASSA_ENCRYPTION_KEY is not valid base64")
 	}
 	return New(key)
 }

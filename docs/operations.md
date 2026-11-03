@@ -12,7 +12,7 @@ each answer is and holds the numbers.
 
 ```bash
 ./scripts/init-env.sh                # once: creates .env with the data and shares folders (absolute), a random database password, encryption key and setup token
-docker compose up -d                 # start app, worker and db (pulls the image chosen by NASA_TAG; nothing is built)
+docker compose up -d                 # start app, worker and db (pulls the image chosen by NASSA_TAG; nothing is built)
 docker compose logs -f app worker    # follow the JSON logs
 docker compose stop                  # stop, keeping the data
 docker compose down                  # remove the containers, keeping the data (it lives in the host folder DATA_PATH, which `down -v` and a prune do not touch)
@@ -27,7 +27,7 @@ development without Docker, see "Ontwikkelen en testen" in the [README](../READM
 |---|---|---|
 | `app` | `GET /healthz` | the process is up (always `ok`) |
 | `app` | `GET /readyz` | the database answers; used by the Compose health check |
-| `worker` | `GET :8081/healthz` (inside the container, `NASA_WORKER_HEALTH_LISTEN`) | the worker reaches the job queue, or every slot is busy with a scan |
+| `worker` | `GET :8081/healthz` (inside the container, `NASSA_WORKER_HEALTH_LISTEN`) | the worker reaches the job queue, or every slot is busy with a scan |
 | `db` | `pg_isready` | PostgreSQL accepts connections |
 
 `nasa healthcheck -url <url>` is the command the container health checks run; it needs no `curl` in the image.
@@ -44,18 +44,18 @@ hand, before you deploy** (`scripts/migrate_data.sh`, [`deploy.md` §8](deploy.m
 
 The app calls out to exactly one place: `https://github.com/helmerzNL/NAS-Storage-Analyzer/releases/latest`, for the update check (a banner for the administrator when
 a newer stable release exists). It is a single `GET` with a fixed `User-Agent` and nothing else, answered from a cache for six hours (ten minutes after a failure, never twice
-within 30 seconds); it announces and does nothing more. A server that must not call out sets `NASA_UPDATE_CHECK=false`, and the check reports "switched off", not an error.
+within 30 seconds); it announces and does nothing more. A server that must not call out sets `NASSA_UPDATE_CHECK=false`, and the check reports "switched off", not an error.
 
-Which image runs is one variable, `NASA_TAG` (`latest`, `beta` or a version number). A push to `beta` publishes `beta` and
+Which image runs is one variable, `NASSA_TAG` (`latest`, `beta` or a version number). A push to `beta` publishes `beta` and
 `beta-<sha>`; a promotion to `main` publishes `latest` and, while its git tag does not exist yet, the version number
-(`publish-beta.yml`, `publish.yml`; both `linux/amd64` and `linux/arm64`). To roll back, set `NASA_TAG` to the previous version
+(`publish-beta.yml`, `publish.yml`; both `linux/amd64` and `linux/arm64`). To roll back, set `NASSA_TAG` to the previous version
 number and run `docker compose pull && docker compose up -d`. Migrations run when the new version starts and are not undone by
 starting an older one, so an older version is only safe if the release notes (`docs/releases/`) say its schema is compatible;
 otherwise restore the backup you took before the update (`deploy.md` §5).
 
 ## 4. Backup and restore basics
 
-`pg_dump -Fc` of the database, plus `NASA_ENCRYPTION_KEY` kept separately; without the key the stored SMB passwords cannot be
+`pg_dump -Fc` of the database, plus `NASSA_ENCRYPTION_KEY` kept separately; without the key the stored SMB passwords cannot be
 decrypted. Commands, the restore sequence and what does not need saving (the scan index can be rebuilt with a full scan) are in
 [`deploy.md` §5](deploy.md#5-back-up-en-herstel). Besides that, *Settings → Backup* in the app takes an owner's own copy of the configuration (shares, file types, display preferences:
 no credentials, no scan results) as one JSON file and restores it on the server in one transaction; it does not replace the dump. *Settings → System → Factory reset* empties every table of the
@@ -71,7 +71,7 @@ database on an administrator's request (the word and a fresh proof; refused whil
 | the NAS share | the thing being measured | never written to |
 
 A diagram and the reasoning are in the [README](../README.md#architectuur) and [`ontwerp.md`](ontwerp.md). Secrets live in `.env`
-(or Docker secrets): the database password and `NASA_ENCRYPTION_KEY`.
+(or Docker secrets): the database password and `NASSA_ENCRYPTION_KEY`.
 
 ## 6. Limits that live outside the repository
 
@@ -90,7 +90,7 @@ inside the app. These are the app's limits as numbers; **whatever is in front mu
 | One JSON request | answered within **15 s**; one database statement at most **10 s** (`-statement-timeout`) | Proxy response timeout above 15 s. |
 | CSV export | at most **1,000,000 rows** (`-csv-max-rows`) and **30 minutes**, streamed with no write timeout | Response buffering off and a response timeout of at least **30 min** for `format=csv` requests. |
 | Live scan status (`GET /api/v1/events`, server-sent events) | stays open while a page is open; a status event on change, otherwise a `: ping` at least every **15 s** | Response buffering off; read timeout of at least **60 s**; no maximum connection lifetime (the browser reconnects by itself if it drops). |
-| Sign-in attempts | 5 failed attempts per user and 30 per client address in an hour, then a lockout | The app must see the real client address: set `NASA_TRUSTED_PROXIES` to the proxy, or all clients share the proxy's address and its 30-attempt budget. |
+| Sign-in attempts | 5 failed attempts per user and 30 per client address in an hour, then a lockout | The app must see the real client address: set `NASSA_TRUSTED_PROXIES` to the proxy, or all clients share the proxy's address and its 30-attempt budget. |
 | Session | idle after **12 h**, absolute after **7 days** | — |
 | Folder picker (`GET /api/v1/fs/dirs`) | reads at most **20,000** directory entries and returns at most **1,000** folders, within the 15 s of one JSON request; an ordinary JSON response, about 100 KB for 1,000 folders with ordinary names | Nothing beyond the JSON request row above. |
 | Delete script (`POST /api/v1/shares/{share}/delete-script`) | at most **2,000 ids of files and folders together** per request (about 25 KB of the 64 KiB body), answered within the 15 s of one JSON request; the response is a text download of about 200 bytes per file (a few MB at most with extremely long paths) | Nothing beyond the JSON request row above. |

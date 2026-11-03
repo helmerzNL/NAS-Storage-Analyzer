@@ -43,10 +43,10 @@ cd NAS-Storage-Analyzer
 docker compose up -d
 ```
 
-De stack haalt de image op van `ghcr.io/helmerznl/nas-storage-analyzer`; er wordt op de server niets gebouwd. `NASA_TAG` in `.env`
+De stack haalt de image op van `ghcr.io/helmerznl/nas-storage-analyzer`; er wordt op de server niets gebouwd. `NASSA_TAG` in `.env`
 kiest welke: `latest` (stabiel, standaard), `beta` (de build waar elke wijziging eerst in landt; de interface toont dan een
 **beta**-label, gebruik een aparte `DATA_PATH`) of een versienummer om vast te zetten. Zolang er nog geen promotie naar `main` is geweest
-bestaat `latest` nog niet: zet dan `NASA_TAG=beta`, of bouw de image uit deze map met
+bestaat `latest` nog niet: zet dan `NASSA_TAG=beta`, of bouw de image uit deze map met
 `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
 
 **Waar de data staat.** Alles wat niet verloren mag gaan (de database: `DATA_PATH/postgres`) staat in één **absolute** map op de
@@ -60,8 +60,8 @@ nieuwe versie uitrolt: [`docs/deploy.md` §8](docs/deploy.md#8-bijwerken).
 Open <http://127.0.0.1:8080>, voer de setup-token uit `.env` in, maak het beheerdersaccount aan en stel de tweede
 factor in. Voeg daarna een share toe (**Shares → Share toevoegen**) en klik op **Scan nu** op het dashboard.
 
-Zet in `.env` `NASA_SHARES_DIR` (verplicht, een absoluut pad) op de map op de Docker-host waar je NAS-shares gemount zijn; die verschijnt
-read-only als `/mnt/shares` in de containers (of op een pad naar keuze, zie `NASA_SHARES_MOUNT`). Draait de stack op
+Zet in `.env` `NASSA_SHARES_DIR` (verplicht, een absoluut pad) op de map op de Docker-host waar je NAS-shares gemount zijn; die verschijnt
+read-only als `/mnt/shares` in de containers (of op een pad naar keuze, zie `NASSA_SHARES_MOUNT`). Draait de stack op
 de NAS zelf, bijvoorbeeld Unraid, dan hoef je niets te mounten. Zie [Shares beschikbaar maken](#shares-beschikbaar-maken).
 
 ## Architectuur
@@ -102,29 +102,29 @@ nas.lan:/volume1/media  /srv/nas/media  nfs  ro,vers=4.1,_netdev,x-systemd.autom
 ```
 ```bash
 # .env
-NASA_SHARES_DIR=/srv/nas
+NASSA_SHARES_DIR=/srv/nas
 ```
 
 Voeg de share in de interface toe als type *Gemount pad*: klik op **Bladeren…** en kies de map, of typ het pad
 (`/mnt/shares/media`). De containers kunnen dan niets op de NAS wijzigen en hebben geen speciale rechten nodig.
 
-Gebruik voor `NASA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
+Gebruik voor `NASSA_SHARES_DIR` een **absoluut pad** op de host (op Unraid bijvoorbeeld `/mnt/user`): de standaard
 `./shares` is een lege map in de stackmap. Zie
 [Unraid, Portainer, Dockge](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers).
 
 Draait de stack **op de NAS zelf** (route c)? Dan is er niets te mounten: de shares zijn gewone mappen. Geef die map
-door en zet `NASA_SHARES_MOUNT` op hetzelfde pad. In de interface typ je dan het pad dat je van de NAS kent. Voorbeeld
+door en zet `NASSA_SHARES_MOUNT` op hetzelfde pad. In de interface typ je dan het pad dat je van de NAS kent. Voorbeeld
 voor Unraid:
 
 ```bash
 # .env
-NASA_SHARES_DIR=/mnt/user
-NASA_SHARES_MOUNT=/mnt/user
+NASSA_SHARES_DIR=/mnt/user
+NASSA_SHARES_MOUNT=/mnt/user
 ```
 
 Voeg elke share apart toe (**Bladeren…**, of typ bijvoorbeeld `/mnt/user/media`). Alleen wat je toevoegt wordt gescand.
 Meldt de kiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan
-`NASA_SHARES_GID=100`, zie [Leesrechten](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers). Losse Unraid-schijven
+`NASSA_SHARES_GID=100`, zie [Leesrechten](docs/deploy.md#unraid-portainer-dockge-en-andere-stack-managers). Losse Unraid-schijven
 in plaats van de (tragere) FUSE-laag `/mnt/user`, Exclusive shares en andere NAS-systemen:
 [`docs/deploy.md`](docs/deploy.md#route-c-de-stack-draait-op-de-nas-zelf).
 
@@ -151,23 +151,23 @@ Alle instellingen staan met uitleg in [`.env.example`](.env.example). De belangr
 | Variabele | Betekenis |
 |---|---|
 | `DATA_PATH` | Vereist. Absolute map op de host met alles wat bewaard moet blijven; de database staat in `DATA_PATH/postgres`. Nooit relatief, nooit een Docker-volume. |
-| `NASA_TAG` | Welke image: `latest` (standaard), `beta` of een versienummer. Wordt ook in de container gezet; een beta-build toont een **beta**-label. |
-| `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
-| `NASA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
-| `NASA_SHARES_DIR` | Vereist. Absolute map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
-| `NASA_SHARES_GID` | Groep waar de containers lid van worden om je shares te kunnen lezen. Nodig als een share alleen voor de eigenaar en één groep leesbaar is (Unraid: `drwxrwx---` voor `nobody:users`): zet `100`. Standaard de eigen groep van de image, dus niets verandert. |
-| `NASA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Standaard `/mnt/shares`; zet het gelijk aan `NASA_SHARES_DIR` en de paden zijn overal hetzelfde. |
-| `NASA_HTTP_BIND`, `NASA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
-| `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
-| `NASA_RP_ID`, `NASA_RP_ORIGINS` | Passkeys zijn aan een hostnaam gebonden; zet deze in productie. |
-| `NASA_METRICS_TOKEN` | Bearer-token voor `/metrics`; zonder token alleen vanaf loopback. |
-| `NASA_UPDATE_CHECK` | Standaard `true`: de app vraagt github.com of er een nieuwere release is en meldt dat aan de beheerder (banner, en het scherm Over). Hij werkt niets bij en stuurt niets over jouw installatie mee (vaste `User-Agent`, geen versie, geen id). `false` zet hem uit. |
-| `NASA_TZ` | Tijdzone voor cron-schema's en het dag/nacht-venster. |
+| `NASSA_TAG` | Welke image: `latest` (standaard), `beta` of een versienummer. Wordt ook in de container gezet; een beta-build toont een **beta**-label. |
+| `NASSA_DB_PASSWORD`, `NASSA_ENCRYPTION_KEY` | Vereist. Gemaakt door `scripts/init-env.sh`. De sleutel versleutelt SMB-wachtwoorden; bewaar hem bij je back-up. |
+| `NASSA_SETUP_TOKEN` | Nodig om de eerste beheerder aan te maken (anders staat een willekeurige token in het log van `app`). |
+| `NASSA_SHARES_DIR` | Vereist. Absolute map op de host met de gemounte shares (read-only, standaard als `/mnt/shares` in de containers). |
+| `NASSA_SHARES_GID` | Groep waar de containers lid van worden om je shares te kunnen lezen. Nodig als een share alleen voor de eigenaar en één groep leesbaar is (Unraid: `drwxrwx---` voor `nobody:users`): zet `100`. Standaard de eigen groep van de image, dus niets verandert. |
+| `NASSA_SHARES_MOUNT` | Waar die map in de containers komt, en dus het pad dat je in de interface typt. Standaard `/mnt/shares`; zet het gelijk aan `NASSA_SHARES_DIR` en de paden zijn overal hetzelfde. |
+| `NASSA_HTTP_BIND`, `NASSA_HTTP_PORT` | Waar `app` luistert; standaard alleen `127.0.0.1:8080`. |
+| `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS` | Achter een reverse proxy: welke proxy's `X-Forwarded-*` mogen zetten, en https afdwingen. |
+| `NASSA_RP_ID`, `NASSA_RP_ORIGINS` | Passkeys zijn aan een hostnaam gebonden; zet deze in productie. |
+| `NASSA_METRICS_TOKEN` | Bearer-token voor `/metrics`; zonder token alleen vanaf loopback. |
+| `NASSA_UPDATE_CHECK` | Standaard `true`: de app vraagt github.com of er een nieuwere release is en meldt dat aan de beheerder (banner, en het scherm Over). Hij werkt niets bij en stuurt niets over jouw installatie mee (vaste `User-Agent`, geen versie, geen id). `false` zet hem uit. |
+| `NASSA_TZ` | Tijdzone voor cron-schema's en het dag/nacht-venster. |
 | `PG_*` | PostgreSQL afstellen op het beschikbare geheugen. |
 
 Wil je het wachtwoord en de sleutel niet als omgevingsvariabele, gebruik dan Docker secrets:
 `./scripts/init-env.sh --secrets` en `docker compose -f docker-compose.yml -f docker-compose.secrets.yml up -d`.
-De meeste `NASA_*`-instellingen, waaronder het database-wachtwoord en de encryptiesleutel, accepteren ook een `_FILE`-variant (bijvoorbeeld `NASA_DB_PASSWORD_FILE`).
+De meeste `NASSA_*`-instellingen, waaronder het database-wachtwoord en de encryptiesleutel, accepteren ook een `_FILE`-variant (bijvoorbeeld `NASSA_DB_PASSWORD_FILE`).
 
 ## Reverse proxy
 
@@ -184,10 +184,10 @@ nas.example.com {
 
 ```bash
 # .env
-NASA_TRUSTED_PROXIES=127.0.0.1
-NASA_REQUIRE_HTTPS=true
-NASA_RP_ID=nas.example.com
-NASA_RP_ORIGINS=https://nas.example.com
+NASSA_TRUSTED_PROXIES=127.0.0.1
+NASSA_REQUIRE_HTTPS=true
+NASSA_RP_ID=nas.example.com
+NASSA_RP_ORIGINS=https://nas.example.com
 ```
 
 Voorbeelden voor nginx en Traefik en uitleg over `X-Forwarded-*`: [`docs/deploy.md`](docs/deploy.md#3-reverse-proxy-en-https).
@@ -241,7 +241,7 @@ go build -o nasa ./cmd/nasa                    # subcommando's: serve, worker, s
 
 ```bash
 go vet ./... && go test ./...                  # unit tests; databasetests worden overgeslagen zonder database
-NASA_TEST_DSN='postgres://user@host/postgres' NASA_REQUIRE_DB=1 go test -race ./...   # met PostgreSQL 16: elke test krijgt een eigen database
+NASSA_TEST_DSN='postgres://user@host/postgres' NASSA_REQUIRE_DB=1 go test -race ./...   # met PostgreSQL 16: elke test krijgt een eigen database
 cd web && npm run check && npx vitest run      # typecontrole en unit tests van de interface
 ```
 
@@ -260,8 +260,8 @@ De prestatiemeting op 10 miljoen bestanden:
 
 ```bash
 go build -o nasabench ./cmd/nasabench
-NASA_DB_DSN=postgres://user@host/bench ./nasabench seed -files 10000000 -dirs 200000
-NASA_DB_DSN=postgres://user@host/bench ./nasabench queries -runs 20 -out rapport.md
+NASSA_DB_DSN=postgres://user@host/bench ./nasabench seed -files 10000000 -dirs 200000
+NASSA_DB_DSN=postgres://user@host/bench ./nasabench queries -runs 20 -out rapport.md
 ```
 
 Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media -exclude .snapshot` (zie `nasa scan -h`;
@@ -286,9 +286,9 @@ files, except two broad age filters at 2.0-2.6 s; see [`docs/bench-phase2.md`](d
 docker compose up -d
 ```
 
-The stack pulls `ghcr.io/helmerznl/nas-storage-analyzer`; nothing is built on the server. `NASA_TAG` in `.env` picks the image:
+The stack pulls `ghcr.io/helmerznl/nas-storage-analyzer`; nothing is built on the server. `NASSA_TAG` in `.env` picks the image:
 `latest` (stable, the default), `beta` (the build every change lands in first; the interface shows a **beta** label, use a separate
-`DATA_PATH`) or a version number to pin. Until the first promotion to `main` there is no `latest` image: use `NASA_TAG=beta`, or
+`DATA_PATH`) or a version number to pin. Until the first promotion to `main` there is no `latest` image: use `NASSA_TAG=beta`, or
 build it from this folder with `docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`.
 
 **Where the data lives.** Everything that must not be lost (the database, `DATA_PATH/postgres`) is in one **absolute** host folder,
@@ -301,9 +301,9 @@ Open <http://127.0.0.1:8080>, enter the setup token from `.env`, create the admi
 (authenticator app or passkey; mandatory). There are no default passwords. Then add a share and click *Scan nu*.
 
 **Mounting the NAS.** In the share form, *Browse…* lets you click through the folders below the shares folder instead of
-typing a path. Recommended: mount the share read-only on the Docker host and point `NASA_SHARES_DIR` at the
+typing a path. Recommended: mount the share read-only on the Docker host and point `NASSA_SHARES_DIR` at the
 parent folder; it appears read-only as `/mnt/shares` in the containers, which need no special privileges. Set
-`NASA_SHARES_MOUNT` to change that path; if it equals `NASA_SHARES_DIR`, the paths you type in the interface are the
+`NASSA_SHARES_MOUNT` to change that path; if it equals `NASSA_SHARES_DIR`, the paths you type in the interface are the
 host paths. When the stack runs on the NAS itself (for example Unraid) there is nothing to mount: set both variables to
 the folder that holds the shares (`/mnt/user`) and add each share by its path. Alternative:
 `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d` lets the worker mount NFS/SMB itself, with
@@ -312,11 +312,11 @@ NFS/SMB server in the development sandbox). A scan that finds an empty share whe
 files is refused, so a dropped mount does not erase your history.
 
 **Users.** Nobody chooses anyone else's password: an administrator makes an **invitation link** (Instellingen → Gebruikers) that the guest opens to choose their own password or a
-passkey. The link is shown once, works once, expires after 7 days and is never stored (only its hash); *Nieuwe inlog-link* brings back a user who cannot sign in. `NASA_PUBLIC_URL` is the address the links point at.
+passkey. The link is shown once, works once, expires after 7 days and is never stored (only its hash); *Nieuwe inlog-link* brings back a user who cannot sign in. `NASSA_PUBLIC_URL` is the address the links point at.
 Details: [`docs/deploy.md` §4b](docs/deploy.md#4b-gebruikers-uitnodigen).
 
 **Backup and restore.** *Settings → Backup* (administrators) downloads what you entered (shares, file types, everyone's display preferences) as one small JSON file and puts it back.
-It never holds a password, passkey, authenticator secret, recovery code, account or role; an SMB password is in it only encrypted with `NASA_ENCRYPTION_KEY`, which stays outside the file.
+It never holds a password, passkey, authenticator secret, recovery code, account or role; an SMB password is in it only encrypted with `NASSA_ENCRYPTION_KEY`, which stays outside the file.
 Scan results are not in it (scan again after a restore), and it does not replace a database dump. A restore is checked first and changes nothing until you confirm; then the server does it
 in one transaction, also if you leave the page. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
 
@@ -339,14 +339,14 @@ quoted for certain are left out and listed (for `cmd`: a `%` or `!`). The choice
 
 **Factory reset.** *Settings → System → Factory reset* (administrators) puts the installation back to new: every table of the database is emptied (accounts, shares with their scan data, edited file types, the audit log) and the
 setup wizard starts again. A session is not enough: you type `RESET` and prove who you are again, with a passkey or with your password and a code. It is refused while a scan runs, needs no restart, and leaves the environment
-(including `NASA_ENCRYPTION_KEY`) and the files on your NAS alone. Make a backup first if you are unsure. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
+(including `NASSA_ENCRYPTION_KEY`) and the files on your NAS alone. Make a backup first if you are unsure. Details: [`docs/deploy.md` §5](docs/deploy.md#5-back-up-en-herstel).
 
 **Update check.** The administrator is told when a newer release exists (a banner, dismissible per version, and the About screen with *Check now*).
 It asks `github.com` for the latest published, non-prerelease release of this project, sends only a fixed `User-Agent` (no version, no instance id,
-no user data) and never updates anything; switch it off with `NASA_UPDATE_CHECK=false`. A beta build is only told about stable releases.
+no user data) and never updates anything; switch it off with `NASSA_UPDATE_CHECK=false`. A beta build is only told about stable releases.
 
-**Behind a reverse proxy** set `NASA_TRUSTED_PROXIES`, `NASA_REQUIRE_HTTPS=true`, `NASA_RP_ID` and `NASA_RP_ORIGINS`,
-and disable response buffering for `/api/v1/events`. **Backup** with `pg_dump -Fc` and keep `NASA_ENCRYPTION_KEY`
+**Behind a reverse proxy** set `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS=true`, `NASSA_RP_ID` and `NASSA_RP_ORIGINS`,
+and disable response buffering for `/api/v1/events`. **Backup** with `pg_dump -Fc` and keep `NASSA_ENCRYPTION_KEY`
 with it. **Limits:** atime is often unreliable (the UI warns and can fall back to modification time); incremental
 scans miss in-place edits and new hardlinks in unchanged folders until the next full scan; OIDC is not implemented.
 

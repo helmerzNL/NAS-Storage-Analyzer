@@ -2,7 +2,7 @@
 # NAS Storage Analyzer: delete script. It deletes exactly the files and folders in the data block below, after you confirm.
 # The data block is plain data: nothing in it is ever run as a command. Run this file with: sh <this file>
 data() {
-cat <<'NASA_DELSCRIPT_DATA_END'
+cat <<'NASSA_DELSCRIPT_DATA_END'
 N|3
 T|3
 R|/mnt/user/Media
@@ -24,7 +24,7 @@ I|--------
 F|1500000000|1761900000|/Movies/Action/a b.mkv
 F|42|1761900001|/Movies/it's 100%.mkv
 F|7|0|/Music/日本語.flac
-NASA_DELSCRIPT_DATA_END
+NASSA_DELSCRIPT_DATA_END
 }
 N=$(data | sed -n 's/^N|//p')
 T=$(data | sed -n 's/^T|//p')

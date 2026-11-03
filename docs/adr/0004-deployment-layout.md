@@ -14,7 +14,7 @@ prune can delete.
 
 ## Decision
 
-- **Image.** `docker-compose.yml` pulls `ghcr.io/helmerznl/nas-storage-analyzer:${NASA_TAG:-latest}` and passes `NASA_TAG` into the
+- **Image.** `docker-compose.yml` pulls `ghcr.io/helmerznl/nas-storage-analyzer:${NASSA_TAG:-latest}` and passes `NASSA_TAG` into the
   containers. `latest` is the stable image, `beta` the build every change lands in first, a version number pins. Building from a
   checkout is `docker-compose.build.yml`, an override. The app derives its channel from the tag (`internal/buildinfo`), reports
   it at `GET /api/v1/version` and shows a **beta** label.
@@ -22,7 +22,7 @@ prune can delete.
   lands: it raises `VERSION`, pushes `latest` and, only while the git tag does not exist, `X.Y.Z`, and brings `beta` level with
   `main`. Both are multi-arch (`linux/amd64`, `linux/arm64`). Tags and GitHub Releases come only from `release.yml`.
 - **Data.** Everything that must not be lost is under `DATA_PATH`, an absolute folder of the Docker host that Compose requires;
-  the database is `DATA_PATH/postgres`, mounted by the `db` service only. No Docker volumes. `NASA_SHARES_DIR` is required and
+  the database is `DATA_PATH/postgres`, mounted by the `db` service only. No Docker volumes. `NASSA_SHARES_DIR` is required and
   absolute for the same reason. The containers warn about a relative `DATA_PATH`, because a deploy tool that injects variables
   bypasses `.env.example`. `scripts/migrate_data.sh` moves a database from the old volume (or any other folder) once.
 
@@ -35,7 +35,7 @@ prune can delete.
 
 ### Negative / tradeoffs
 
-- The `latest` image exists only after the first promotion; until then `NASA_TAG=beta` or the build override is needed.
+- The `latest` image exists only after the first promotion; until then `NASSA_TAG=beta` or the build override is needed.
 - The GHCR package must be public for a host that is not logged in to pull it (an owner setting).
 - An installation that has the database in `db-data` has to run `scripts/migrate_data.sh` once, **before** it deploys the new
   Compose file. A deploy tool never runs it. If the new file is deployed first, the database starts empty next to the old volume;

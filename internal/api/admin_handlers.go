@@ -53,7 +53,7 @@ func (s *Server) adminFail(w http.ResponseWriter, r *http.Request, err error) bo
 	case errors.Is(err, shares.ErrNotFound):
 		s.problemCode(w, r, http.StatusNotFound, "not found", "", "not_found")
 	case errors.Is(err, shares.ErrNoSharesRoot):
-		s.problemCode(w, r, http.StatusConflict, "no shares folder is configured", "Set NASA_SHARES_DIR (see docs/deploy.md).", "not_configured")
+		s.problemCode(w, r, http.StatusConflict, "no shares folder is configured", "Set NASSA_SHARES_DIR (see docs/deploy.md).", "not_configured")
 	case errors.Is(err, shares.ErrConflict):
 		s.problemCode(w, r, http.StatusConflict, "a share with this name already exists", "", "conflict")
 	case errors.Is(err, shares.ErrBusy):

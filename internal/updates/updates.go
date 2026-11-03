@@ -29,7 +29,7 @@ import (
 const (
 	// DefaultRepo is the repository whose releases are announced.
 	DefaultRepo = "helmerzNL/NAS-Storage-Analyzer"
-	// DefaultBase is where releases are looked up. NASA_UPDATE_BASE_URL may point it elsewhere (a mirror, or a test double).
+	// DefaultBase is where releases are looked up. NASSA_UPDATE_BASE_URL may point it elsewhere (a mirror, or a test double).
 	DefaultBase = "https://github.com"
 
 	// UserAgent is the only thing that identifies the request, and it is the same for every installation.
@@ -46,7 +46,7 @@ const (
 
 // Status is what the interface reads (GET /api/v1/system/update).
 type Status struct {
-	// Enabled is false when the check is switched off (NASA_UPDATE_CHECK=false): reported as off, not as a failure.
+	// Enabled is false when the check is switched off (NASSA_UPDATE_CHECK=false): reported as off, not as a failure.
 	Enabled bool `json:"enabled"`
 	// Current is the version this process runs ("dev" for a build from a checkout).
 	Current string `json:"current"`

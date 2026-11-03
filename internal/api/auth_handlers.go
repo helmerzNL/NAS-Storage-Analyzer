@@ -203,7 +203,7 @@ func (s *Server) authSetup(w http.ResponseWriter, r *http.Request) error {
 	if tok := s.setupToken(); tok == "" || subtle.ConstantTimeCompare([]byte(in.Token), []byte(tok)) != 1 {
 		s.auth.RecordIPFailure(ctx, ip)
 		s.audit(r, "setup.bad_token", "", nil)
-		s.problemCode(w, r, http.StatusForbidden, "wrong setup token", "Use the token printed in the application log (or NASA_SETUP_TOKEN).", "invalid_setup_token")
+		s.problemCode(w, r, http.StatusForbidden, "wrong setup token", "Use the token printed in the application log (or NASSA_SETUP_TOKEN).", "invalid_setup_token")
 		return nil
 	}
 	u, err := s.auth.CreateFirstAdmin(ctx, in.Username, in.Password)

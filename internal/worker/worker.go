@@ -320,12 +320,12 @@ func (w *Worker) runScan(ctx context.Context, job *jobs.Job, log *slog.Logger) (
 // scanOutcome says how a published scan went, as the audit-log action it is recorded under, and for the
 // ones that need attention what to check. A scan that finds nothing is not an error for the scanner (a new,
 // empty share is legitimate), so without this it would pass without a trace: a share folder that is not
-// mounted, or a NASA_SHARES_DIR that points at the wrong folder, looks exactly like that.
+// mounted, or a NASSA_SHARES_DIR that points at the wrong folder, looks exactly like that.
 func scanOutcome(t store.ScanTotals, readErrors int64) (action, hint string) {
 	switch {
 	case t.Files == 0 && t.Dirs <= 1:
 		return "scan.empty", "The scan found no files. Is the share mounted on the host, and does the path point at the right " +
-			"folder (NASA_SHARES_DIR, NASA_SHARES_MOUNT)? Use Browse in the share form to see what the container sees."
+			"folder (NASSA_SHARES_DIR, NASSA_SHARES_MOUNT)? Use Browse in the share form to see what the container sees."
 	case readErrors > 0:
 		return "scan.errors", fmt.Sprintf("%d folders or files could not be read (permission denied, or a network share that stopped "+
 			"answering). The scan is published without them; the dashboard lists them per scan. For permission denied: %s",

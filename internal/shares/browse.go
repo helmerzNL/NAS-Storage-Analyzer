@@ -78,7 +78,7 @@ func Browse(root, p string) (*Listing, error) {
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, bad("path", "the shares root %s does not exist in the container; check NASA_SHARES_DIR and NASA_SHARES_MOUNT", root)
+			return nil, bad("path", "the shares root %s does not exist in the container; check NASSA_SHARES_DIR and NASSA_SHARES_MOUNT", root)
 		}
 		return nil, err
 	}
@@ -169,9 +169,9 @@ func mapFSError(err error) error {
 
 // PermissionHint says who the app runs as and what to do about a folder it cannot read. The usual cause is a share
 // that only its owner and one group may read (Unraid: nobody:users, mode 770) while the app runs as a user that is
-// neither; NASA_SHARES_GID adds the group.
+// neither; NASSA_SHARES_GID adds the group.
 func PermissionHint() string {
-	return fmt.Sprintf("The app runs as uid %d, gid %d. Give that user read access, or set NASA_SHARES_GID to the numeric "+
+	return fmt.Sprintf("The app runs as uid %d, gid %d. Give that user read access, or set NASSA_SHARES_GID to the numeric "+
 		"group that owns the share (Unraid: 100) and recreate the containers; see docs/deploy.md, Leesrechten.",
 		os.Getuid(), os.Getgid())
 }

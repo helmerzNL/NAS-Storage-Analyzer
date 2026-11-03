@@ -143,7 +143,7 @@ func TestBrowseErrors(t *testing.T) {
 	if _, err := shares.Browse("", ""); !errors.Is(err, shares.ErrNoSharesRoot) {
 		t.Errorf("no root configured: %v", err)
 	}
-	if _, err := shares.Browse(filepath.Join(root, "gone"), ""); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "NASA_SHARES_DIR") {
+	if _, err := shares.Browse(filepath.Join(root, "gone"), ""); !errors.As(err, &ve) || !strings.Contains(ve.Msg, "NASSA_SHARES_DIR") {
 		t.Errorf("a root that does not exist must point at the configuration: %v", err)
 	}
 }
@@ -201,7 +201,7 @@ func TestBrowseExplainsAFolderItCannotRead(t *testing.T) {
 	if !errors.As(err, &ve) || ve.Field != "path" {
 		t.Fatalf("want a path validation error, got %v", err)
 	}
-	for _, want := range []string{"permission denied", "NASA_SHARES_GID", fmt.Sprintf("uid %d", os.Getuid())} {
+	for _, want := range []string{"permission denied", "NASSA_SHARES_GID", fmt.Sprintf("uid %d", os.Getuid())} {
 		if !strings.Contains(ve.Msg, want) {
 			t.Errorf("the message must mention %q: %s", want, ve.Msg)
 		}

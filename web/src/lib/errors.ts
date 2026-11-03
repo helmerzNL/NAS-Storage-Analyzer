@@ -14,7 +14,7 @@ export function errMessage(e: unknown): string {
   }
   if (e instanceof DOMException) {
     if (e.name === 'NotAllowedError' || e.name === 'AbortError') return t('err.passkey_cancelled');
-    // The relying-party id does not fit the address: an IP address, or the wrong NASA_RP_ID.
+    // The relying-party id does not fit the address: an IP address, or the wrong NASSA_RP_ID.
     if (e.name === 'SecurityError') return t('err.passkey_domain', { host: location.hostname });
     if (e.name === 'InvalidStateError') return t('err.passkey_known');
   }

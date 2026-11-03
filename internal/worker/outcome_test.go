@@ -23,7 +23,7 @@ func TestScanOutcome(t *testing.T) {
 	}{
 		"files found":                    {store.ScanTotals{Dirs: 3, Files: 10}, 0, "scan.finished", ""},
 		"nothing at all":                 {store.ScanTotals{}, 0, "scan.empty", "mounted"},
-		"only the root folder":           {store.ScanTotals{Dirs: 1}, 0, "scan.empty", "NASA_SHARES_DIR"},
+		"only the root folder":           {store.ScanTotals{Dirs: 1}, 0, "scan.empty", "NASSA_SHARES_DIR"},
 		"empty and unreadable":           {store.ScanTotals{Dirs: 1}, 4, "scan.empty", "mounted"},
 		"folders but no files":           {store.ScanTotals{Dirs: 5}, 0, "scan.finished", ""},
 		"files, some folders unreadable": {store.ScanTotals{Dirs: 3, Files: 10}, 2, "scan.errors", "2 folders or files could not be read"},
@@ -48,7 +48,7 @@ func TestFailureHint(t *testing.T) {
 		if (got != "") != wantHint {
 			t.Errorf("%q: hint %q, want a hint: %v", msg, got, wantHint)
 		}
-		if wantHint && !strings.Contains(got, "NASA_SHARES_GID") {
+		if wantHint && !strings.Contains(got, "NASSA_SHARES_GID") {
 			t.Errorf("%q: the hint must name the setting: %s", msg, got)
 		}
 	}

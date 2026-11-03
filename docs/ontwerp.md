@@ -128,7 +128,7 @@ Ontwerpkeuzes:
 ## 5. Auth-flow
 
 - **Eerste start:** zolang `users` leeg is, is alleen `/setup` bereikbaar. Om een race met een willekeurige
-  bezoeker te voorkomen toont de app bij opstart een eenmalige setup-token in de logs (of leest `NASA_SETUP_TOKEN`).
+  bezoeker te voorkomen toont de app bij opstart een eenmalige setup-token in de logs (of leest `NASSA_SETUP_TOKEN`).
   De wizard maakt de admin aan en dwingt inschrijving van een tweede factor af (TOTP of passkey) + 10
   recovery codes (eenmalig getoond, gehasht opgeslagen). Geen standaardwachtwoord.
 - **Login:** (a) gebruikersnaam + wachtwoord (Argon2id) → tussentoestand `mfa_pending` → TOTP, recovery code of
@@ -141,8 +141,8 @@ Ontwerpkeuzes:
   `POST/PUT/PATCH/DELETE`.
 - **Brute force:** rate limit per IP én per gebruikersnaam, lockout met oplopende wachttijd, persistent in
   `login_attempts`; gelijke foutmelding en vergelijkbare responstijd bij onbekende gebruiker.
-- **Proxy:** `X-Forwarded-For/Proto/Host` alleen vertrouwd van `NASA_TRUSTED_PROXIES` (CIDR-lijst).
-  WebAuthn `NASA_RP_ID` en `NASA_RP_ORIGINS` configureerbaar.
+- **Proxy:** `X-Forwarded-For/Proto/Host` alleen vertrouwd van `NASSA_TRUSTED_PROXIES` (CIDR-lijst).
+  WebAuthn `NASSA_RP_ID` en `NASSA_RP_ORIGINS` configureerbaar.
 - **Rollen:** `admin` (shares, schema's, gebruikers, extensiemapping, verwijderscripts) en `viewer` (alleen lezen); autorisatie in
   middleware per route, in de OpenAPI-spec per operatie gemarkeerd.
 - **Audit log:** logins (ook mislukt), MFA-wijzigingen, scanstart/-annulering, share- en configuratiewijzigingen,
@@ -150,7 +150,7 @@ Ontwerpkeuzes:
   nooit een bestandsnaam), en de uitkomst van elke scan (door de worker, ook bij een schema: `scan.finished`, `scan.empty` voor een
   scan zonder bestanden, `scan.errors` bij onleesbare mappen, met een overzicht van die mappen, `scan.failed` met de reden); append-only tabel, doorzoekbaar
   in de UI voor admins.
-- **Geheimen:** `NASA_DB_PASSWORD`, `NASA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
+- **Geheimen:** `NASSA_DB_PASSWORD`, `NASSA_ENCRYPTION_KEY` via env of Docker secret (`*_FILE`). SMB-wachtwoorden en
   TOTP-secrets worden met AES-256-GCM versleuteld (key-id in het ciphertext-formaat voor latere rotatie).
 - **OIDC later:** `users.auth_source` + `external_subject` en een `IdentityProvider`-interface in `internal/auth`;
   de lokale login is de eerste implementatie. Geen OIDC-code in v1.

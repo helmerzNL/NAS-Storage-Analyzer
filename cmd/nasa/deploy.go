@@ -9,9 +9,9 @@ import (
 )
 
 // buildInfo is what this process reports as its version and release channel. The channel comes from
-// NASA_TAG, the variable docker-compose.yml uses to pick the image and passes into the container.
+// NASSA_TAG, the variable docker-compose.yml uses to pick the image and passes into the container.
 func buildInfo() buildinfo.Info {
-	return buildinfo.New(version, commit, os.Getenv("NASA_TAG"))
+	return buildinfo.New(version, commit, os.Getenv("NASSA_TAG"))
 }
 
 // versionLine is the output of `nasa version`.
@@ -42,7 +42,7 @@ func dataPathWarning(dataPath string) string {
 		"(docs/deploy.md, section 'Waar de data staat / Where the data lives').", dataPath)
 }
 
-// updateCheckEnabled reads NASA_UPDATE_CHECK: on unless it says no. "false", "0", "no" and "off" (any case) switch it off;
+// updateCheckEnabled reads NASSA_UPDATE_CHECK: on unless it says no. "false", "0", "no" and "off" (any case) switch it off;
 // anything else, including empty, leaves the default, which is on.
 func updateCheckEnabled(v string) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {

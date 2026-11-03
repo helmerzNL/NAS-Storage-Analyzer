@@ -72,7 +72,7 @@ paths:
       operationId: getVersion
       summary: Which version and release channel is running (public)
       description: |
-        The channel comes from `NASA_TAG`, the variable that also picks the image in `docker-compose.yml`:
+        The channel comes from `NASSA_TAG`, the variable that also picks the image in `docker-compose.yml`:
         a tag that contains `beta` is a `beta` build, anything else (`latest`, a version number, unset) is `stable`.
         The web interface shows a **beta** label next to its name on a beta build.
       security: []
@@ -574,7 +574,7 @@ paths:
       tags: [auth]
       operationId: authSetup
       summary: Create the first administrator (public, only while no account exists)
-      description: Needs the one-time setup token printed in the application log (or set as `NASA_SETUP_TOKEN`). The new session must enrol a second factor before it can do anything else.
+      description: Needs the one-time setup token printed in the application log (or set as `NASSA_SETUP_TOKEN`). The new session must enrol a second factor before it can do anything else.
       security: []
       requestBody:
         required: true
@@ -872,7 +872,7 @@ paths:
         The token is 32 random bytes and only its SHA-256 is stored; the link is in this answer **once**. It works once and for seven days.
         The role is decided here, by the administrator, and cannot be changed by the guest. `username` is optional: a name to suggest and to reserve
         meanwhile (the guest may change it). At most 50 users (pending invitations count as users) and 50 open invitations.
-        `url` is built from `NASA_PUBLIC_URL` (or the first passkey origin); empty means the interface builds it from the address you are using.
+        `url` is built from `NASSA_PUBLIC_URL` (or the first passkey origin); empty means the interface builds it from the address you are using.
       requestBody:
         required: true
         content:
@@ -982,7 +982,7 @@ paths:
         The app asks GitHub for the latest published, non-prerelease release of its own repository and compares it with the version it runs. A prerelease
         is never announced. The request carries a fixed `User-Agent` and nothing else: no version, no instance id, no user data. The answer is remembered
         (six hours after a success, ten minutes after a failure), so a page view never calls GitHub. A failure keeps the last good answer and adds `error`.
-        The check can be switched off with `NASA_UPDATE_CHECK=false`; that is reported as `enabled: false`, not as an error. It only announces: nothing is
+        The check can be switched off with `NASSA_UPDATE_CHECK=false`; that is reported as `enabled: false`, not as an error. It only announces: nothing is
         updated, restarted or downloaded.
       responses:
         "200":
@@ -1009,7 +1009,7 @@ paths:
         The owner's own copy of what *they* entered: the shares (and their settings), the file-type map and each person's interface preferences. It **never**
         holds a password, passkey, authenticator secret, recovery code, session, invitation, account or role, so a file that is mailed or kept in a cloud
         drive cannot open the application on another server. The one exception is the SMB password of a share, and only as the ciphertext the database
-        already holds, sealed with `NASA_ENCRYPTION_KEY`, which is never in the file. Scan results are not in it either: they come back by scanning again.
+        already holds, sealed with `NASSA_ENCRYPTION_KEY`, which is never in the file. Scan results are not in it either: they come back by scanning again.
         It is not a replacement for a database dump (docs/deploy.md).
       responses:
         "200":
@@ -1109,7 +1109,7 @@ paths:
         Deletes **everything the installation keeps in its database**: every account (the caller's too, who is signed out), every password, passkey and second factor, every
         share with its scan data and history, the file types that were edited (the defaults come back), the audit log, work in progress and waiting backups. Afterwards the
         application is a new installation and the setup wizard starts again. What stays lives outside the database: the environment variables (including
-        `NASA_ENCRYPTION_KEY`), the image, the host folder `DATA_PATH` itself, and the files on the NAS, which are only ever read.
+        `NASSA_ENCRYPTION_KEY`), the image, the host folder `DATA_PATH` itself, and the files on the NAS, which are only ever read.
 
         A session is **not enough**. The body carries the word (`phrase`) and a fresh proof of who is asking: either the `password` with a `code` of the authenticator app (or a
         `recovery_code`), or a `passkey` (the answer to the challenge of `POST /api/v1/system/reset/passkey`, with its `ceremony`). A wrong word wipes nothing and is not a failed
@@ -1567,7 +1567,7 @@ components:
       type: object
       required: [enabled, current, latest, available, url, checked_at, error, error_detail, repo]
       properties:
-        enabled: {type: boolean, description: "False when the check is switched off (NASA_UPDATE_CHECK=false)."}
+        enabled: {type: boolean, description: "False when the check is switched off (NASSA_UPDATE_CHECK=false)."}
         current: {type: string, description: "The version this installation runs; `dev` for a build from a checkout.", example: "0.1.0"}
         latest: {type: string, description: "The newest published release without the v; empty when there is none.", example: "0.2.0"}
         available: {type: boolean, description: "Latest is a higher version than current. Never true for a version that does not parse (`dev`)."}
@@ -1714,7 +1714,7 @@ components:
       properties:
         reset: {type: boolean}
         restarting: {type: boolean, description: "Always false: everything this installation keeps is in the database, and the running process picks the empty one up by itself. Nothing needs a restart policy."}
-        setup_token_configured: {type: boolean, description: "True when `NASA_SETUP_TOKEN` is set, which then stays the token of the setup wizard. False: a new token was made and written to the application log."}
+        setup_token_configured: {type: boolean, description: "True when `NASSA_SETUP_TOKEN` is set, which then stays the token of the setup wizard. False: a new token was made and written to the application log."}
     AuthStatus:
       type: object
       required: [setup_required, authenticated, min_password_length, https_required]

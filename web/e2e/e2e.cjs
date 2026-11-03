@@ -69,10 +69,10 @@ const expectText = async (page, sel, re, msg) => {
       await page.goto(BASE + '/');
       await page.waitForSelector('[data-testid=setup-token]');
       const stable = await (await ctx.request.get(BASE + '/api/v1/version')).json();
-      if (stable.channel !== 'stable' || !stable.version) throw new Error('the server reports ' + JSON.stringify(stable) + ' without NASA_TAG');
+      if (stable.channel !== 'stable' || !stable.version) throw new Error('the server reports ' + JSON.stringify(stable) + ' without NASSA_TAG');
       if (await page.locator('[data-testid=beta-badge]').count() !== 0) throw new Error('a stable build shows a beta label');
       if (await page.title() !== 'NAS Storage Analyzer') throw new Error('stable tab title is "' + await page.title() + '"');
-      // The same interface against a server that reports the beta channel (the Go tests cover the server side of NASA_TAG=beta).
+      // The same interface against a server that reports the beta channel (the Go tests cover the server side of NASSA_TAG=beta).
       const b = await browser.newContext({ locale: 'nl-NL' });
       const bp = await b.newPage();
       await bp.route('**/api/v1/version', (r) => r.fulfill({ json: { ...stable, channel: 'beta' } }));
@@ -773,7 +773,7 @@ const expectText = async (page, sel, re, msg) => {
     });
 
     await step('a scan that finds nothing is flagged in the audit log', async () => {
-      // A wrong NASA_SHARES_DIR or an unmounted share is an empty folder: the scan succeeds, and used to leave no trace.
+      // A wrong NASSA_SHARES_DIR or an unmounted share is an empty folder: the scan succeeds, and used to leave no trace.
       fs.mkdirSync(path.join(SHARE_DIR, 'leeg'), { recursive: true });
       await page.goto(BASE + '/admin/shares');
       await page.click('[data-testid=add-share]');
@@ -1362,7 +1362,7 @@ const expectText = async (page, sel, re, msg) => {
       });
       if (!order) throw new Error('the warning does not come before the first field');
       const warning = await page.textContent('[data-testid=reset-warning]');
-      for (const must of [/niet ongedaan/, /die van jou ook/, /Je wordt uitgelogd/, /NASA_ENCRYPTION_KEY/, /Een herstart is niet nodig/]) if (!must.test(warning)) throw new Error('the warning does not say ' + must);
+      for (const must of [/niet ongedaan/, /die van jou ook/, /Je wordt uitgelogd/, /NASSA_ENCRYPTION_KEY/, /Een herstart is niet nodig/]) if (!must.test(warning)) throw new Error('the warning does not say ' + must);
       if (!(await page.$('a[href="/admin/backup"]'))) throw new Error('no way to a backup first');
       // The word comes from the server, and only the fields that apply to this person are shown (a password with a code, and a passkey).
       if (!/RESET/.test(await page.textContent('[data-testid=system-reset] label'))) throw new Error('the word is not shown');

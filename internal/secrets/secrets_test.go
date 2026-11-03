@@ -50,25 +50,25 @@ func TestOpenRejectsTamperingAndWrongKey(t *testing.T) {
 }
 
 func TestFromEnv(t *testing.T) {
-	t.Setenv("NASA_ENCRYPTION_KEY", "")
-	t.Setenv("NASA_ENCRYPTION_KEY_FILE", "")
+	t.Setenv("NASSA_ENCRYPTION_KEY", "")
+	t.Setenv("NASSA_ENCRYPTION_KEY_FILE", "")
 	if _, err := FromEnv(); err == nil {
 		t.Error("missing key accepted")
 	}
 	key := GenerateKey()
-	t.Setenv("NASA_ENCRYPTION_KEY", key)
+	t.Setenv("NASSA_ENCRYPTION_KEY", key)
 	if _, err := FromEnv(); err != nil {
 		t.Errorf("env key: %v", err)
 	}
 	file := filepath.Join(t.TempDir(), "key")
 	os.WriteFile(file, []byte(key+"\n"), 0o600)
-	t.Setenv("NASA_ENCRYPTION_KEY", "")
-	t.Setenv("NASA_ENCRYPTION_KEY_FILE", file)
+	t.Setenv("NASSA_ENCRYPTION_KEY", "")
+	t.Setenv("NASSA_ENCRYPTION_KEY_FILE", file)
 	if _, err := FromEnv(); err != nil {
 		t.Errorf("key file: %v", err)
 	}
-	t.Setenv("NASA_ENCRYPTION_KEY_FILE", "")
-	t.Setenv("NASA_ENCRYPTION_KEY", "not base64!!")
+	t.Setenv("NASSA_ENCRYPTION_KEY_FILE", "")
+	t.Setenv("NASSA_ENCRYPTION_KEY", "not base64!!")
 	if _, err := FromEnv(); err == nil {
 		t.Error("invalid base64 accepted")
 	}

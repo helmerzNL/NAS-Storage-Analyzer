@@ -14,7 +14,7 @@ import (
 )
 
 // runners returns cmd.exe, Windows PowerShell 5.1 and PowerShell 7 (when installed). cmd.exe and powershell.exe
-// ship with Windows, so they are always required; pwsh is required when NASA_REQUIRE_SHELLS names it.
+// ship with Windows, so they are always required; pwsh is required when NASSA_REQUIRE_SHELLS names it.
 func runners(t *testing.T) []runner {
 	cmdRunner := runner{name: "cmd", target: TargetCmd, eol: "\r\n"}
 	cmdRunner.run = func(t *testing.T, script, stdin string) (string, int) {

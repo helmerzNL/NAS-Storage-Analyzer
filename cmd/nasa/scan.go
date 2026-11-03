@@ -31,33 +31,33 @@ func newLogger() *slog.Logger {
 	return slog.New(slog.NewJSONHandler(os.Stdout, nil))
 }
 
-// dsnFromEnv returns NASA_DB_DSN, or builds a connection string from
-// NASA_DB_HOST, _PORT, _NAME, _USER, _PASSWORD (or _PASSWORD_FILE) and
+// dsnFromEnv returns NASSA_DB_DSN, or builds a connection string from
+// NASSA_DB_HOST, _PORT, _NAME, _USER, _PASSWORD (or _PASSWORD_FILE) and
 // _SSLMODE, which suits Docker Compose with a secret for the password.
 func dsnFromEnv() string {
-	if v := os.Getenv("NASA_DB_DSN"); v != "" {
+	if v := os.Getenv("NASSA_DB_DSN"); v != "" {
 		return v
 	}
-	pass := env("NASA_DB_PASSWORD", "")
-	if pass == "" && os.Getenv("NASA_DB_HOST") == "" {
+	pass := env("NASSA_DB_PASSWORD", "")
+	if pass == "" && os.Getenv("NASSA_DB_HOST") == "" {
 		return ""
 	}
 	u := url.URL{
 		Scheme:   "postgres",
-		User:     url.UserPassword(env("NASA_DB_USER", "nasa"), pass),
-		Host:     net.JoinHostPort(env("NASA_DB_HOST", "db"), env("NASA_DB_PORT", "5432")),
-		Path:     "/" + env("NASA_DB_NAME", "nasa"),
-		RawQuery: "sslmode=" + env("NASA_DB_SSLMODE", "disable"),
+		User:     url.UserPassword(env("NASSA_DB_USER", "nasa"), pass),
+		Host:     net.JoinHostPort(env("NASSA_DB_HOST", "db"), env("NASSA_DB_PORT", "5432")),
+		Path:     "/" + env("NASSA_DB_NAME", "nasa"),
+		RawQuery: "sslmode=" + env("NASSA_DB_SSLMODE", "disable"),
 	}
 	return u.String()
 }
 
 func runMigrate(args []string) error {
 	fs := flag.NewFlagSet("migrate", flag.ExitOnError)
-	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN)")
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASSA_DB_DSN)")
 	fs.Parse(args)
 	if *dsn == "" {
-		return errors.New("no database: pass -db or set NASA_DB_DSN")
+		return errors.New("no database: pass -db or set NASSA_DB_DSN")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -78,7 +78,7 @@ func runScan(args []string) error {
 	var excludes stringList
 	path := fs.String("path", "", "directory to scan (required); mounted read-only in production")
 	name := fs.String("name", "", "share name in the database (default: base name of -path)")
-	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN)")
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASSA_DB_DSN)")
 	workers := fs.Int("workers", 16, "parallel directory workers")
 	allowEmpty := fs.Bool("allow-empty", false, "publish a scan that finds nothing although the previous one found files (a missing mount is refused otherwise)")
 	full := fs.Bool("full", false, "full scan: stat every file instead of reusing unchanged directories")
@@ -128,7 +128,7 @@ func runScan(args []string) error {
 	}
 
 	if *dsn == "" {
-		return errors.New("no database: pass -db or set NASA_DB_DSN (or use -dry-run)")
+		return errors.New("no database: pass -db or set NASSA_DB_DSN (or use -dry-run)")
 	}
 	st, err := store.Open(ctx, *dsn)
 	if err != nil {
@@ -229,11 +229,11 @@ func human(n int64) string {
 
 func runRecategorize(args []string) error {
 	fs := flag.NewFlagSet("recategorize", flag.ExitOnError)
-	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASA_DB_DSN)")
+	dsn := fs.String("db", dsnFromEnv(), "PostgreSQL connection string (env NASSA_DB_DSN)")
 	name := fs.String("share", "", "share name (default: all shares)")
 	fs.Parse(args)
 	if *dsn == "" {
-		return errors.New("no database: pass -db or set NASA_DB_DSN")
+		return errors.New("no database: pass -db or set NASSA_DB_DSN")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
