@@ -55,13 +55,23 @@ func TestAnErrorOfAScanLeadsToItsAuditEntry(t *testing.T) {
 		return items[0].(map[string]any)
 	}
 
+	// The scan is marked as ended before the worker writes the entry that says how it ended, in a separate statement after it (for a refused
+	// scan even after a few queries that look up the share and the job). Seeing the scan ended does not mean its entry is there yet, so the
+	// first read of each waits for the entry itself. The reads after the changes below need no wait: they work on what is already there.
+	entryOnceWritten := func(scan float64) map[string]any {
+		t.Helper()
+		var found map[string]any
+		waitFor(t, fmt.Sprintf("the audit entry of scan %d", int64(scan)), func() bool { found = entry(scan); return found != nil })
+		return found
+	}
+
 	// A scan that went through: its outcome, and not the entry that says it was asked for (which also names the job).
-	if g := entry(good); g == nil || g["action"] != "scan.finished" || g["target"] != "media" || g["detail"].(map[string]any)["scan_id"] != good {
+	if g := entryOnceWritten(good); g["action"] != "scan.finished" || g["target"] != "media" || g["detail"].(map[string]any)["scan_id"] != good {
 		t.Errorf("the entry of the scan that went through: %+v", g)
 	}
 	// A scan that failed: the worker puts the scan's id in the entry.
-	f := entry(bad)
-	if f == nil || f["action"] != "scan.failed" || f["detail"].(map[string]any)["scan_id"] != bad || !strings.Contains(fmt.Sprint(f["detail"]), "still mounted") {
+	f := entryOnceWritten(bad)
+	if f["action"] != "scan.failed" || f["detail"].(map[string]any)["scan_id"] != bad || !strings.Contains(fmt.Sprint(f["detail"]), "still mounted") {
 		t.Fatalf("the entry of the scan that failed: %+v", f)
 	}
 	id := f["id"]
