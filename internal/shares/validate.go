@@ -19,7 +19,7 @@ import (
 const (
 	KindBind = "bind" // a path already mounted on the host and bind-mounted into the container (recommended)
 	KindNFS  = "nfs"  // mounted by the worker (needs CAP_SYS_ADMIN)
-	KindSMB  = "smb"  // mounted by the worker (needs CAP_SYS_ADMIN)
+	KindSMB  = "smb"  // mounted by the worker (needs CAP_SYS_ADMIN, CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE: mount.cifs asks for all three)
 )
 
 // Input is everything an administrator can set on a share. The same shape is

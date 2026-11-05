@@ -147,6 +147,36 @@ func TestMountFailureMessages(t *testing.T) {
 	}
 }
 
+// A container started with only SYS_ADMIN added fails inside mount.cifs, before anything is mounted: it asks for
+// CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE too, and Docker does not grant the first by default (reported from a Home Assistant
+// host, reproduced on Alpine 3.20 with cifs-utils 7.0; with cap_drop ALL the second is missing as well). The message must say which capability is missing, not send the reader
+// to the mount override they already use.
+func TestSMBCapabilityFailureNamesTheMissingCapability(t *testing.T) {
+	for name, out := range map[string]string{
+		"libcap, as Alpine builds it": "Unable to set current process capabilities: Operation not permitted\n" +
+			"mount: mounting //nas.lan/media on /run/nasa-managed/8 failed: No such device",
+		"libcap-ng, as Debian builds it": "Unable to apply new capability set.",
+	} {
+		r := &fakeRunner{failOn: "mount", out: out, err: errors.New("exit status 2")}
+		_, _, err := newManager(t, r).Prepare(context.Background(), smb("me"))
+		if !errors.Is(err, mounts.ErrNeedsCapabilities) {
+			t.Fatalf("%s: a capability failure of mount.cifs must say so: %v", name, err)
+		}
+		msg := err.Error()
+		for _, want := range []string{"CAP_DAC_READ_SEARCH", "CAP_DAC_OVERRIDE", "CAP_SYS_ADMIN", "DAC_READ_SEARCH", strings.SplitN(out, "\n", 2)[0]} {
+			if !strings.Contains(msg, want) {
+				t.Errorf("%s: the message does not contain %q: %s", name, want, msg)
+			}
+		}
+		if strings.Contains(msg, "No such device") {
+			t.Errorf("%s: only the first line of the helper's output belongs in the message: %s", name, msg)
+		}
+		if strings.Contains(msg, "mount override") {
+			t.Errorf("%s: it must not send the reader to an override they already use: %s", name, msg)
+		}
+	}
+}
+
 func TestBindShareChecksThePath(t *testing.T) {
 	dir := t.TempDir()
 	in := shares.Defaults()

@@ -202,6 +202,28 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.mounts.yml config -q
           docker compose -f docker-compose.yml -f docker-compose.build.yml config -q
           docker compose -f docker-compose.yml -f docker-compose.build.yml -f docker-compose.mounts.yml config -q
+      - name: mount.cifs gets past its capability step with what the mounts override gives the worker
+        run: |
+          # mount.cifs sets its own capabilities at start-up and asks for SYS_ADMIN, DAC_READ_SEARCH and DAC_OVERRIDE; when the container lacks
+          # one it stops before mounting, with "Unable to set current process capabilities: Operation not permitted". The worker drops every
+          # capability, so the override must add all three back. The flags are read from the merged Compose file, so this proves the override as
+          # shipped. There is no SMB server here: the question is only whether mount.cifs gets past that step, so what it says after that
+          # (no cifs support, AppArmor, connection refused) does not matter.
+          cp .env.example .env
+          flags="$(docker compose -f docker-compose.yml -f docker-compose.mounts.yml config --format json \
+            | jq -r '.services.worker | ((.cap_drop // []) | map("--cap-drop " + .)) + ((.cap_add // []) | map("--cap-add " + .)) + ((.security_opt // []) | map("--security-opt " + .)) | join(" ")')"
+          rm -f .env
+          echo "the worker's flags: $flags"
+          cifs() { docker run --rm --user 0:0 "$@" --entrypoint sh nas-storage-analyzer:ci -c 'mkdir -p /tmp/m && timeout 30 mount -t cifs -o ro,guest //127.0.0.1/none /tmp/m 2>&1' || true; }
+          stops='unable to (set current process capabilities|apply new capability set)'
+          out="$(cifs $flags)"
+          if grep -Eiq "$stops" <<<"$out"; then echo "::error::mount.cifs still stops on its capabilities with the worker's flags: $out"; exit 1; fi
+          # The same probe must see the failure with a set that lacks one, or it proves nothing (and a newer cifs-utils that asks for less
+          # would make the documentation and the override stale).
+          for lacking in "--cap-add SYS_ADMIN" "--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH"; do
+            out="$(cifs --cap-drop ALL $lacking)"
+            grep -Eiq "$stops" <<<"$out" || { echo "::error::mount.cifs did not stop on its capabilities with --cap-drop ALL $lacking: $out"; exit 1; }
+          done
       - name: The Docker-secrets variant is valid
         run: |
           rm -f .env

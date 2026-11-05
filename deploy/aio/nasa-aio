@@ -8,7 +8,9 @@
 # PostgreSQL listens on its unix socket only (no TCP port), and the app connects through that socket with peer authentication,
 # so there is no database password to keep. NASSA_ENCRYPTION_KEY (or NASSA_ENCRYPTION_KEY_FILE) is required: it encrypts the stored
 # SMB passwords and must not live in the data folder (AGENTS.md §4). serve runs as uid 10001; the worker too, unless the container
-# has CAP_SYS_ADMIN, in which case it runs as root so it can mount NFS/SMB shares itself (route a of docs/deploy.md).
+# has CAP_SYS_ADMIN, in which case it runs as root so it can mount NFS/SMB shares itself (route a of docs/deploy.md). Mounting an
+# SMB share also needs CAP_DAC_READ_SEARCH (and CAP_DAC_OVERRIDE, which Docker grants by default), because mount.cifs asks for
+# them; the start script says so when one is missing.
 #
 # If one of the three processes stops, the others are stopped and the container exits non-zero, so its restart policy (or the
 # Home Assistant watchdog) starts it again. SIGTERM stops serve and the worker first, then PostgreSQL with a fast shutdown.
@@ -59,12 +61,15 @@ as_user() {
   fi
 }
 
-# Whether this container may mount file systems (CAP_SYS_ADMIN, bit 21 of the effective capabilities).
-can_mount() {
+# Whether the effective capabilities of this (root) process hold capability number $1: CAP_DAC_READ_SEARCH is 2, CAP_SYS_ADMIN 21.
+has_cap() {
   [ "$(id -u)" = 0 ] || return 1
   eff="$(awk '/^CapEff:/ {print $2}' /proc/self/status 2>/dev/null)"
-  [ -n "$eff" ] && [ $(( (0x$eff >> 21) & 1 )) -eq 1 ]
+  [ -n "$eff" ] && [ $(( (0x$eff >> $1) & 1 )) -eq 1 ]
 }
+
+# Whether this container may mount file systems (CAP_SYS_ADMIN).
+can_mount() { has_cap 21; }
 
 if [ -z "${NASSA_ENCRYPTION_KEY:-}" ] && [ -z "${NASSA_ENCRYPTION_KEY_FILE:-}" ]; then
   fail "NASSA_ENCRYPTION_KEY is not set. It encrypts the stored SMB passwords; make one with: docker run --rm <this image> genkey
@@ -190,6 +195,13 @@ as_user --exec "$APP_UID" "$NASA" serve &
 serve_pid=$!
 if can_mount; then
   log "the container may mount file systems (CAP_SYS_ADMIN): the worker runs as root and can mount NFS/SMB shares itself"
+  # mount.cifs sets its own capabilities at start-up and asks for CAP_SYS_ADMIN, CAP_DAC_READ_SEARCH (bit 2) and CAP_DAC_OVERRIDE
+  # (bit 1); when the container lacks one it stops with "Unable to set current process capabilities: Operation not permitted".
+  # Docker grants CAP_DAC_OVERRIDE by default but not CAP_DAC_READ_SEARCH. NFS needs neither.
+  lacks=
+  has_cap 2 || lacks="CAP_DAC_READ_SEARCH"
+  has_cap 1 || lacks="${lacks:+$lacks and }CAP_DAC_OVERRIDE"
+  [ -z "$lacks" ] || log "WARNING: the container lacks $lacks: NFS shares can be mounted, SMB shares cannot (mount.cifs needs CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE next to CAP_SYS_ADMIN). Add what is missing: --cap-add DAC_READ_SEARCH --cap-add DAC_OVERRIDE"
   "$NASA" worker &
 else
   as_user --exec "$APP_UID" "$NASA" worker &

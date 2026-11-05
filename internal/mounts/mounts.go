@@ -1,6 +1,6 @@
 // Package mounts mounts NFS and SMB shares read-only inside the worker
-// container for the duration of a scan. This route needs CAP_SYS_ADMIN; the
-// safer alternative is to mount on the host and bind-mount the path (see the
+// container for the duration of a scan. This route needs CAP_SYS_ADMIN, and for
+// SMB also CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE (mount.cifs asks for them); the safer alternative is to mount on the host and bind-mount the path (see the
 // README), in which case this package only checks the path.
 package mounts
 
@@ -51,6 +51,24 @@ func New(dir string) *Manager {
 // ErrUnavailable: this container cannot mount (no CAP_SYS_ADMIN or no mount helpers).
 var ErrUnavailable = errors.New("mounting is not available in this container: mount the share on the host and bind-mount it " +
 	"under the shares directory, or run the worker with the mount override (see the README)")
+
+// ErrNeedsCapabilities: the container may mount (it has CAP_SYS_ADMIN), but mount.cifs could not set the capabilities it
+// asks for at start-up. It wants CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE next to CAP_SYS_ADMIN. Docker's default set has
+// CAP_DAC_OVERRIDE but not CAP_DAC_READ_SEARCH, and the Compose worker drops everything (cap_drop: ALL), so a container started
+// with only SYS_ADMIN added fails here, before anything is mounted. Told apart from ErrUnavailable because that message sends
+// the reader to the mount override, which they may already be using.
+var ErrNeedsCapabilities = errors.New("mounting an SMB share needs the capabilities CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE as well as " +
+	"CAP_SYS_ADMIN, and this container lacks one of them (Docker grants CAP_DAC_OVERRIDE by default, not CAP_DAC_READ_SEARCH): " +
+	"give the worker container all three (cap_add: SYS_ADMIN, DAC_READ_SEARCH and DAC_OVERRIDE, or --cap-add for each; " +
+	"docker-compose.mounts.yml has them), or mount the share on the host and bind-mount it under the shares directory")
+
+// capabilityFailure reports whether a mount helper's output says it could not set its capabilities: mount.cifs built with
+// libcap (Alpine) says "Unable to set current process capabilities", with libcap-ng (Debian, Ubuntu) "Unable to apply new
+// capability set".
+func capabilityFailure(low string) bool {
+	return strings.Contains(low, "unable to set current process capabilities") ||
+		strings.Contains(low, "unable to apply new capability set")
+}
 
 // Command returns the mount command for a share. credFile is the SMB
 // credentials file; it is ignored for NFS.
@@ -140,6 +158,9 @@ func (m *Manager) Prepare(ctx context.Context, f *shares.Full) (path string, cle
 	}
 	if out, err := m.Run.Run(ctx, name, args...); err != nil {
 		low := strings.ToLower(out + err.Error())
+		if capabilityFailure(low) {
+			return "", noop, fmt.Errorf("%w (the mount helper said: %s)", ErrNeedsCapabilities, firstLine(out, err))
+		}
 		if strings.Contains(low, "operation not permitted") || strings.Contains(low, "executable file not found") ||
 			strings.Contains(low, "must be superuser") || strings.Contains(low, "unknown filesystem type") {
 			return "", noop, fmt.Errorf("%w: %s", ErrUnavailable, firstLine(out, err))

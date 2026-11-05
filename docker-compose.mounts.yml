@@ -2,14 +2,22 @@
 #
 #   docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d
 #
-# This gives the worker container CAP_SYS_ADMIN and runs it as root, which is a lot more privilege
-# than the recommended route (mount on the host, bind read-only). Only the worker gets it, never the
-# web application. Scans themselves stay read-only: shares are mounted with "ro".
+# This gives the worker container CAP_SYS_ADMIN, CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE and runs it as
+# root, which is a lot more privilege than the recommended route (mount on the host, bind read-only).
+# Only the worker gets it, never the web application. Scans themselves stay read-only: shares are
+# mounted with "ro".
 services:
   worker:
     user: "0:0"
     cap_add:
       - SYS_ADMIN
+      # mount.cifs (SMB) sets its own capabilities at start-up and asks for all three of SYS_ADMIN,
+      # DAC_READ_SEARCH and DAC_OVERRIDE. When the container lacks one it stops before mounting, with
+      # "Unable to set current process capabilities: Operation not permitted". Docker's default set has
+      # DAC_OVERRIDE but not DAC_READ_SEARCH, and the worker drops every capability (cap_drop: ALL in
+      # docker-compose.yml), so both are added here. NFS needs neither.
+      - DAC_READ_SEARCH
+      - DAC_OVERRIDE
     # Hosts with AppArmor (Ubuntu, Debian) refuse mount(2) in containers unless the profile is relaxed.
     security_opt:
       - apparmor:unconfined

@@ -49,6 +49,17 @@ class ComposeLayout(unittest.TestCase):
         for src in re.findall(r"^\s+source: (\S+)", COMPOSE, re.M):
             self.assertTrue(src.startswith("${NASSA_SHARES_DIR"), f"a bind mount outside the shares folder: {src}")
 
+    def test_the_mounts_override_gives_the_worker_every_capability_mount_cifs_asks_for(self):
+        """mount.cifs sets its own capabilities at start-up and asks for all three. The worker drops every capability
+        (cap_drop: ALL), so the override must add each one back; with one missing, an SMB share stops before it is mounted
+        with "Unable to set current process capabilities: Operation not permitted". CI proves it with the real mount.cifs."""
+        self.assertIsNotNone(re.search(r"^  cap_drop:\n    - ALL$", COMPOSE, re.M), "the shared service settings no longer drop every capability")
+        self.assertIn("<<: *nasa\n", service_block("worker"), "the worker no longer takes the shared settings")
+        override = (ROOT / "docker-compose.mounts.yml").read_text(encoding="utf-8")
+        added = re.search(r"^    cap_add:\n((?:      .*\n)+)", override, re.M).group(1)
+        caps = {ln.strip()[2:] for ln in added.splitlines() if ln.strip().startswith("- ")}
+        self.assertEqual(caps, {"SYS_ADMIN", "DAC_READ_SEARCH", "DAC_OVERRIDE"})
+
     def test_data_path_and_the_shares_folder_are_required(self):
         """Compose refuses to start without them; DATA_PATH also reaches the containers so they can warn."""
         self.assertIn("DATA_PATH: ${DATA_PATH:?", COMPOSE)
