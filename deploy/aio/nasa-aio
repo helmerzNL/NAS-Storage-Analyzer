@@ -1,0 +1,215 @@
+#!/bin/sh
+# NAS Storage Analyzer, all in one: PostgreSQL 16, `nasa serve` and `nasa worker` in one container, for platforms that run one
+# container per app (the Unraid Community Applications store, Home Assistant). Docker Compose stays the recommended route.
+# Why and how: docs/adr/0013-all-in-one-image.md.
+#
+#   /data/postgres    the database; on the first start an empty folder is made into a PostgreSQL 16 cluster
+#
+# PostgreSQL listens on its unix socket only (no TCP port), and the app connects through that socket with peer authentication,
+# so there is no database password to keep. NASSA_ENCRYPTION_KEY (or NASSA_ENCRYPTION_KEY_FILE) is required: it encrypts the stored
+# SMB passwords and must not live in the data folder (AGENTS.md §4). serve runs as uid 10001; the worker too, unless the container
+# has CAP_SYS_ADMIN, in which case it runs as root so it can mount NFS/SMB shares itself (route a of docs/deploy.md).
+#
+# If one of the three processes stops, the others are stopped and the container exits non-zero, so its restart policy (or the
+# Home Assistant watchdog) starts it again. SIGTERM stops serve and the worker first, then PostgreSQL with a fast shutdown.
+#
+# Arguments: none starts the stack; a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize) runs that.
+# The variables AIO_* only exist for the tests (deploy/aio/test_nasa_aio.sh).
+set -eu
+
+DATA="${AIO_DATA_DIR:-/data}"
+PGDATA="$DATA/postgres"
+PGBIN="${AIO_PG_BIN:-/usr/libexec/postgresql16}"
+SOCKET="${AIO_SOCKET_DIR:-/run/postgresql}"
+NASA="${AIO_NASA:-nasa}"
+SETPRIV="${AIO_SETPRIV:-/usr/bin/setpriv}"
+PG_UID=70          # the postgres user of Alpine, the same as in the postgres:16-alpine image of the Compose stack
+APP_UID=10001      # the nasa user of the image
+PG_MAJOR=16
+STOP_SECONDS="${AIO_STOP_SECONDS:-25}"
+PG_STOP_SECONDS="${AIO_PG_STOP_SECONDS:-60}"
+READY_SECONDS="${AIO_READY_SECONDS:-120}"
+
+log() { printf '[nasa-aio] %s\n' "$*" >&2; }
+fail() { printf '[nasa-aio] ERROR: %s\n' "$*" >&2; exit 1; }
+
+case "${1:-}" in
+  "") ;;
+  genkey|version|-version|--version|healthcheck|migrate|scan|recategorize|help|-h|--help) exec "$NASA" "$@" ;;
+  *) fail "unknown argument '$1': start without arguments, or give a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize)" ;;
+esac
+
+# As root, run a command as another user; a test that is not root runs it as itself. With --exec the command replaces the shell,
+# so `as_user --exec ... &` leaves $! pointing at the process itself, and a signal sent to $! reaches it.
+as_user() {
+  run=
+  if [ "$1" = --exec ]; then run="exec"; shift; fi
+  uid="$1"; shift
+  # shellcheck disable=SC2086  # $run is empty or `exec`, on purpose unquoted
+  if [ "$(id -u)" != 0 ]; then $run "$@"; return; fi
+  if [ "$uid" = "$PG_UID" ]; then
+    # shellcheck disable=SC2086
+    $run "$SETPRIV" --reuid="$PG_UID" --regid="$PG_UID" --clear-groups --no-new-privs "$@"
+  elif [ -n "${NASSA_SHARES_GID:-}" ] && [ "$NASSA_SHARES_GID" != "$APP_UID" ]; then
+    # shellcheck disable=SC2086
+    $run "$SETPRIV" --reuid="$APP_UID" --regid="$APP_UID" --groups="$NASSA_SHARES_GID" --no-new-privs "$@"
+  else
+    # shellcheck disable=SC2086
+    $run "$SETPRIV" --reuid="$APP_UID" --regid="$APP_UID" --clear-groups --no-new-privs "$@"
+  fi
+}
+
+# Whether this container may mount file systems (CAP_SYS_ADMIN, bit 21 of the effective capabilities).
+can_mount() {
+  [ "$(id -u)" = 0 ] || return 1
+  eff="$(awk '/^CapEff:/ {print $2}' /proc/self/status 2>/dev/null)"
+  [ -n "$eff" ] && [ $(( (0x$eff >> 21) & 1 )) -eq 1 ]
+}
+
+if [ -z "${NASSA_ENCRYPTION_KEY:-}" ] && [ -z "${NASSA_ENCRYPTION_KEY_FILE:-}" ]; then
+  fail "NASSA_ENCRYPTION_KEY is not set. It encrypts the stored SMB passwords; make one with: docker run --rm <this image> genkey
+  (or openssl rand -base64 32), and keep it outside the data folder and its backups."
+fi
+case "${NASSA_SHARES_GID:-}" in
+  ""|*[!0-9]*) [ -z "${NASSA_SHARES_GID:-}" ] || fail "NASSA_SHARES_GID must be a number (the group that may read the shares, Unraid: 100)" ;;
+esac
+
+# --- PostgreSQL ------------------------------------------------------------------------------------------------------------------
+mkdir -p "$PGDATA" "$SOCKET"
+if [ "$(id -u)" = 0 ]; then
+  chown "$PG_UID:$PG_UID" "$PGDATA" "$SOCKET"
+fi
+chmod 700 "$PGDATA"
+chmod 755 "$SOCKET"
+
+if [ -f "$PGDATA/PG_VERSION" ]; then
+  have="$(tr -d '[:space:]' < "$PGDATA/PG_VERSION")"
+  if [ "$have" != "$PG_MAJOR" ]; then
+    fail "the database in $PGDATA was made by PostgreSQL $have and this image runs PostgreSQL $PG_MAJOR; a data folder cannot be opened by
+  another major version. Move it with pg_dump and pg_restore (docs/deploy.md), or start with an empty folder."
+  fi
+elif [ -n "$(ls -A "$PGDATA" 2>/dev/null)" ]; then
+  fail "$PGDATA is not empty but holds no PostgreSQL database (no PG_VERSION); refusing to start rather than overwrite it"
+else
+  log "first start: making the database in $PGDATA"
+  as_user "$PG_UID" "$PGBIN/initdb" -D "$PGDATA" --username=postgres --encoding=UTF8 --locale=C.UTF-8 \
+    --auth-local=peer --auth-host=reject >/dev/null
+  # Peer authentication over the socket: the database superuser only for the postgres user, the app's role for the app, also when
+  # the worker runs as root. There is no TCP listener, so no host lines.
+  cat > "$PGDATA/pg_hba.conf" <<'EOF'
+# Written by nasa-aio: unix socket only, peer authentication (see docs/adr/0013-all-in-one-image.md).
+local   all     postgres                peer
+local   nasa    nasa                    peer map=nasa
+EOF
+  cat > "$PGDATA/pg_ident.conf" <<'EOF'
+# Written by nasa-aio: which operating-system user may use which database role.
+nasa    nasa    nasa
+nasa    root    nasa
+EOF
+  if [ "$(id -u)" != 0 ]; then
+    # A test that is not root: its own user stands in for both.
+    me="$(id -un)"
+    printf 'local   all     all     trust\n' > "$PGDATA/pg_hba.conf"
+    log "not root: trust authentication for $me (tests only)"
+  fi
+fi
+
+# Parallel queries use /dev/shm. Docker gives a container 64 MB unless --shm-size says otherwise, which a large scan outgrows;
+# then dynamic shared memory goes through files in the data folder instead.
+dsm=posix
+shm_kb="$(df -k /dev/shm 2>/dev/null | awk 'NR == 2 {print $2}')"
+if [ -z "$shm_kb" ] || [ "$shm_kb" -lt 262144 ]; then
+  dsm=mmap
+  log "/dev/shm is smaller than 256 MB: dynamic shared memory goes through the data folder (give the container --shm-size=256m to avoid that)"
+fi
+
+as_user --exec "$PG_UID" "$PGBIN/postgres" -D "$PGDATA" \
+  -c listen_addresses= \
+  -c unix_socket_directories="$SOCKET" \
+  -c dynamic_shared_memory_type="$dsm" \
+  -c shared_buffers="${PG_SHARED_BUFFERS:-512MB}" \
+  -c effective_cache_size="${PG_EFFECTIVE_CACHE_SIZE:-2GB}" \
+  -c work_mem="${PG_WORK_MEM:-32MB}" \
+  -c max_parallel_workers_per_gather="${PG_PARALLEL_WORKERS:-2}" \
+  -c random_page_cost="${PG_RANDOM_PAGE_COST:-1.5}" &
+pg_pid=$!
+serve_pid=
+worker_pid=
+
+alive() { [ -n "$1" ] && kill -0 "$1" 2>/dev/null; }
+
+# Stop one process: the signal, then up to $3 seconds, then KILL.
+stop_pid() {
+  pid="$1"; sig="$2"; seconds="$3"
+  alive "$pid" || return 0
+  kill "-$sig" "$pid" 2>/dev/null || true
+  waited=0
+  while alive "$pid" && [ "$waited" -lt "$seconds" ]; do sleep 1; waited=$((waited + 1)); done
+  if alive "$pid"; then
+    log "process $pid did not stop within $seconds s; killing it"
+    kill -KILL "$pid" 2>/dev/null || true
+  fi
+  wait "$pid" 2>/dev/null || true
+}
+
+stop_all() {
+  stop_pid "$worker_pid" TERM "$STOP_SECONDS"
+  stop_pid "$serve_pid" TERM "$STOP_SECONDS"
+  stop_pid "$pg_pid" INT "$PG_STOP_SECONDS"      # SIGINT: PostgreSQL's fast shutdown, which rolls back and writes a checkpoint
+}
+
+stopping=0
+trap 'stopping=1' TERM INT
+
+waited=0
+until as_user "$PG_UID" "$PGBIN/pg_isready" -q -h "$SOCKET" -U postgres -d postgres >/dev/null 2>&1; do
+  alive "$pg_pid" || fail "PostgreSQL stopped while starting; its messages are above"
+  [ "$stopping" = 0 ] || { stop_all; exit 0; }
+  [ "$waited" -lt "$READY_SECONDS" ] || { stop_all; fail "PostgreSQL did not become ready within $READY_SECONDS s"; }
+  sleep 1; waited=$((waited + 1))
+done
+
+# The app's role and database, made once. An existing cluster (moved from the Compose stack) already has them, there as the superuser.
+if ! as_user "$APP_UID" "$PGBIN/psql" -h "$SOCKET" -U nasa -d nasa -X -q -A -t -c 'select 1' >/dev/null 2>&1; then
+  log "making the role and database nasa"
+  as_user "$PG_UID" "$PGBIN/psql" -h "$SOCKET" -U postgres -d postgres -X -q -v ON_ERROR_STOP=1 \
+    -c "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'nasa') THEN CREATE ROLE nasa LOGIN; END IF; END \$\$;" >/dev/null \
+    || { stop_all; fail "could not make the role nasa"; }
+  if [ -z "$(as_user "$PG_UID" "$PGBIN/psql" -h "$SOCKET" -U postgres -d postgres -X -A -t -c "SELECT 1 FROM pg_database WHERE datname = 'nasa'")" ]; then
+    as_user "$PG_UID" "$PGBIN/psql" -h "$SOCKET" -U postgres -d postgres -X -q -v ON_ERROR_STOP=1 -c 'CREATE DATABASE nasa OWNER nasa' >/dev/null \
+      || { stop_all; fail "could not make the database nasa"; }
+  fi
+fi
+
+# --- The app ---------------------------------------------------------------------------------------------------------------------
+NASSA_DB_DSN="postgres://nasa@/nasa?host=$SOCKET&sslmode=disable"
+export NASSA_DB_DSN
+unset NASSA_DB_HOST NASSA_DB_PORT NASSA_DB_PASSWORD NASSA_DB_USER NASSA_DB_NAME 2>/dev/null || true
+
+as_user --exec "$APP_UID" "$NASA" serve &
+serve_pid=$!
+if can_mount; then
+  log "the container may mount file systems (CAP_SYS_ADMIN): the worker runs as root and can mount NFS/SMB shares itself"
+  "$NASA" worker &
+else
+  as_user --exec "$APP_UID" "$NASA" worker &
+fi
+worker_pid=$!
+log "started: PostgreSQL $pg_pid, serve $serve_pid, worker $worker_pid"
+
+while [ "$stopping" = 0 ]; do
+  gone=
+  alive "$pg_pid" || gone=PostgreSQL
+  alive "$serve_pid" || gone="${gone:+$gone, }serve"
+  alive "$worker_pid" || gone="${gone:+$gone, }worker"
+  if [ -n "$gone" ]; then
+    log "$gone stopped; stopping the rest"
+    stop_all
+    exit 1
+  fi
+  sleep 1
+done
+
+log "stopping"
+stop_all
+exit 0
