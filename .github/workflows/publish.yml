@@ -8,7 +8,8 @@
 #      only keeps the number. The commit is pushed with GITHUB_TOKEN and so starts no workflow of its own; the
 #      repository must let github-actions push to main (a ruleset bypass if main is protected). Without that the bump
 #      fails here, loudly, before anything is published.
-#   2. publishes the stable image for linux/amd64 and linux/arm64: `latest` is a channel and moves on every build;
+#   2. publishes the stable image for linux/amd64 and linux/arm64, and the all-in-one image `-aio` on it (deploy/aio,
+#      docs/adr/0013-all-in-one-image.md): `latest` is a channel and moves on every build;
 #      `X.Y.Z` names one artifact, so it is only pushed while the git tag vX.Y.Z does not exist yet. That tag is made
 #      by the release workflow (release.yml), which needs reviewed notes: cut the release right after a promotion.
 #   3. brings beta level with main, so the next pull request into beta starts from the new VERSION.
@@ -86,6 +87,7 @@ jobs:
       - id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -99,6 +101,23 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:latest
             ${{ steps.version.outputs.new == 'true' && format('{0}:{1}', steps.image.outputs.name, steps.version.outputs.version) || '' }}
+      # The all-in-one image (docs/adr/0013), on the very image pushed above, with the same rule for its version tag.
+      - name: Build and push the all-in-one image
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/aio
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE=${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+            CHANNEL=latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ steps.bump.outputs.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ steps.image.outputs.name }}-aio:latest
+            ${{ steps.version.outputs.new == 'true' && format('{0}-aio:{1}', steps.image.outputs.name, steps.version.outputs.version) || '' }}
       # beta is where pull requests land and main only receives promotions from it, so beta has to carry the
       # VERSION bump main just made. Best effort: a failure here never undoes the publish.
       - name: Bring beta level with main

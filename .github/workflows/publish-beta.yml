@@ -1,7 +1,7 @@
 # Rules: project-baseline.md §20 (a new app starts on beta and main). docs/adr/0002-beta-main-promotion.md.
 #
-# Every push to beta builds the beta image for linux/amd64 and linux/arm64. `beta` is a channel tag and moves on every
-# build; `beta-<sha>` names one build. It never writes a stable tag (`latest`, `X.Y.Z`), never touches VERSION and never
+# Every push to beta builds the beta image for linux/amd64 and linux/arm64, and the all-in-one image `-aio` on it
+# (deploy/aio, docs/adr/0013-all-in-one-image.md). `beta` is a channel tag and moves on every build; `beta-<sha>` names one build. It never writes a stable tag (`latest`, `X.Y.Z`), never touches VERSION and never
 # creates a GitHub Release: main does that, after a promotion (publish.yml, release.yml).
 name: publish-beta
 
@@ -35,6 +35,7 @@ jobs:
       - id: image
         run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Build and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -48,3 +49,21 @@ jobs:
           tags: |
             ${{ steps.image.outputs.name }}:beta
             ${{ steps.image.outputs.name }}:beta-${{ github.sha }}
+      # The all-in-one image (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; docs/adr/0013), built on
+      # the very image pushed above, by digest, so both carry the same binary.
+      - name: Build and push the all-in-one image
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/aio
+          push: true
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            BASE=${{ steps.image.outputs.name }}@${{ steps.build.outputs.digest }}
+            CHANNEL=beta
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+          tags: |
+            ${{ steps.image.outputs.name }}-aio:beta
+            ${{ steps.image.outputs.name }}-aio:beta-${{ github.sha }}

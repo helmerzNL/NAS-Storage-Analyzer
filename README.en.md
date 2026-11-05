@@ -169,6 +169,10 @@ Do the folder picker or the scan report *permission denied* for a folder with `d
 
 Only what you add as a share is scanned. A share that is no longer mounted leaves an empty folder behind; a scan that then finds nothing where the previous one saw more than 100 files is refused and keeps the old data. Details, SMB examples, AppArmor, single Unraid disks and Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken) (in Dutch, with an English summary at the end).
 
+### Unraid and Home Assistant
+
+Where a platform runs one container per app (the Unraid Community Applications store, a Home Assistant add-on), there is an all-in-one image: `ghcr.io/helmerznl/nas-storage-analyzer-aio`, with the same tags. It runs PostgreSQL 16, the web interface and the worker in one container and keeps everything in `/data`. `NASSA_ENCRYPTION_KEY` is required there too: `docker run --rm ghcr.io/helmerznl/nas-storage-analyzer-aio genkey` makes one. Compose stays the recommended route; details in [`docs/deploy.md`](docs/deploy.md#8b-all-in-one-image-unraid-store-en-home-assistant) and [ADR 0013](docs/adr/0013-all-in-one-image.md).
+
 ## Usage
 
 ### Scanning

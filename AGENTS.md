@@ -88,6 +88,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
   | `browser-e2e` | the whole application in a real browser, including passkeys and the worker |
   | `docker-build` | the image builds for `linux/amd64` and `linux/arm64` and the Compose files are valid for `.env.example` |
+  | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, and takes over the database folder of the Compose stack |
 
 - A control has to be findable on the pull request under the name a document cites it by. Renaming a job without
   renaming its citations breaks the control as surely as deleting it.
