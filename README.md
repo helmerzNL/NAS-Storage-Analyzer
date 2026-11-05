@@ -169,6 +169,10 @@ Melden de mapkiezer of de scan *permission denied* voor een map met `drwxrwx---`
 
 Alleen wat je als share toevoegt wordt gescand. Een share die niet (meer) gemount is laat een lege map achter; een scan die dan niets vindt terwijl de vorige meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan. Details, SMB-voorbeelden, AppArmor, losse Unraid-schijven en Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
 
+### Unraid en Home Assistant
+
+Waar een platform per app één container draait (de Community Applications-store van Unraid, een Home Assistant-add-on), is er een all-in-one image: `ghcr.io/helmerznl/nas-storage-analyzer-aio`, met dezelfde tags. Het draait PostgreSQL 16, de webinterface en de worker in één container en bewaart alles in `/data`. Ook daar is `NASSA_ENCRYPTION_KEY` verplicht: `docker run --rm ghcr.io/helmerznl/nas-storage-analyzer-aio genkey` maakt er een. Compose blijft de aanbevolen route; details in [`docs/deploy.md`](docs/deploy.md#8b-all-in-one-image-unraid-store-en-home-assistant) en [ADR 0013](docs/adr/0013-all-in-one-image.md).
+
 ## Gebruik
 
 ### Scannen

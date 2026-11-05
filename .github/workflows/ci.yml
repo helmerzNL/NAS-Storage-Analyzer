@@ -141,6 +141,28 @@ jobs:
           go test -count=1 -v ./internal/delscript/ | tee "$RUNNER_TEMP/delscript.out"
           ! grep -q -- "--- SKIP" "$RUNNER_TEMP/delscript.out"
 
+  aio-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The start script passes shellcheck
+        run: shellcheck deploy/aio/nasa-aio deploy/aio/smoke-test.sh
+      - name: Build the image and the all-in-one image on it
+        run: |
+          docker build --build-arg VERSION=ci -t nas-storage-analyzer:ci .
+          docker build --build-arg BASE=nas-storage-analyzer:ci --build-arg CHANNEL=beta -t nas-storage-analyzer-aio:ci-beta deploy/aio
+          docker build --build-arg BASE=nas-storage-analyzer:ci --build-arg CHANNEL=latest -t nas-storage-analyzer-aio:ci-latest deploy/aio
+      - name: The all-in-one image starts, stops, keeps and takes over its data (beta channel)
+        run: sh deploy/aio/smoke-test.sh nas-storage-analyzer-aio:ci-beta beta
+      - name: The stable all-in-one image reports the stable channel
+        run: |
+          key="$(docker run --rm nas-storage-analyzer-aio:ci-latest genkey)"
+          docker run -d --name aio-stable -p 18090:8080 -e NASSA_ENCRYPTION_KEY="$key" nas-storage-analyzer-aio:ci-latest
+          for i in $(seq 1 120); do curl -sf http://127.0.0.1:18090/readyz >/dev/null && break; sleep 1; done
+          version="$(curl -s http://127.0.0.1:18090/api/v1/version)"
+          docker rm -f aio-stable
+          grep -q '"channel":"stable"' <<<"$version" || { echo "::error::the stable all-in-one image reports $version"; exit 1; }
+
   docker-build:
     runs-on: ubuntu-latest
     steps:

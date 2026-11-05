@@ -12,6 +12,7 @@ Dit document hoort bij de [README](../README.md) ([English](../README.en.md)). N
 6. [PostgreSQL afstellen](#6-postgresql-afstellen)
 7. [Monitoring: `/metrics`, logs, health checks](#7-monitoring)
 8. [Bijwerken](#8-bijwerken)
+   * [8b. All-in-one image: Unraid-store en Home Assistant](#8b-all-in-one-image-unraid-store-en-home-assistant)
 9. [Bekende beperkingen](#9-bekende-beperkingen)
 10. [Problemen oplossen](#10-problemen-oplossen)
 11. [English summary](#11-english-summary)
@@ -567,6 +568,42 @@ uit; je draait het **één keer zelf, vóór je de nieuwe versie uitrolt**:
 setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (niet verwijderen) `DATA_PATH/postgres` weg, en draai
 `sh scripts/migrate_data.sh --data-path <DATA_PATH> --from-volume`; start daarna opnieuw. Het script herkent die situatie ook en zegt het.
 
+## 8b. All-in-one image: Unraid-store en Home Assistant
+
+Docker Compose blijft de aanbevolen route. Voor platforms die per app één container draaien (de Community Applications-store van
+Unraid, een Home Assistant-add-on) is er `ghcr.io/helmerznl/nas-storage-analyzer-aio`: hetzelfde image met PostgreSQL 16 erbij, en
+`serve`, de worker en de database in één container ([ADR 0013](adr/0013-all-in-one-image.md)). De tags zijn dezelfde als die van het
+gewone image: `latest`, `beta`, `beta-<sha>` en een versienummer.
+
+* **Eén map:** `/data`; de database staat in `/data/postgres`. Een lege map wordt bij de eerste start een database. Een map van een
+  andere PostgreSQL-hoofdversie, of een volle map zonder database, wordt geweigerd en niet aangeraakt.
+* **De sleutel is verplicht:** `NASSA_ENCRYPTION_KEY` (of `NASSA_ENCRYPTION_KEY_FILE`). Zonder sleutel start de container niet en
+  zegt hij hoe je er een maakt: `docker run --rm ghcr.io/helmerznl/nas-storage-analyzer-aio genkey`. Bewaar hem buiten `/data` en de
+  back-ups daarvan, net als bij Compose.
+* **Geen databasewachtwoord:** PostgreSQL luistert alleen op zijn unix-socket in de container, niet op een TCP-poort; de app logt in
+  met peer-authenticatie.
+* **Shares:** mount de map met shares alleen-lezen en zet `NASSA_SHARES_ROOT` op die map. Op Unraid is dat `/mnt/user`, op beide
+  plaatsen hetzelfde pad, zodat je in de interface typt wat je op Unraid kent. Met `NASSA_SHARES_GID=100` leest de app shares van
+  `nobody:users`. Geef je de container `CAP_SYS_ADMIN`, dan draait de worker als root en kan hij zelf NFS/SMB mounten (route (a));
+  zonder die rechten draait niets als root behalve het startscript.
+* **Gedeeld geheugen:** geef de container `--shm-size=256m`. Met minder gebruikt PostgreSQL bestanden in `/data` voor parallelle
+  query's, en zegt het image dat in de log.
+* **Afstellen:** de `PG_*`-variabelen van §6 werken hier ook.
+* **Van Compose naar all-in-one:** stop de stack en mount `DATA_PATH` als `/data`. De database `DATA_PATH/postgres` (uid 70) wordt met
+  zijn gegevens overgenomen; gebruik dezelfde `NASSA_ENCRYPTION_KEY`.
+* **Stoppen:** `docker stop` stopt eerst `serve` en de worker en daarna PostgreSQL netjes. Stopt een van de drie zelf, dan stopt de
+  container met een fout, zodat Docker of Home Assistant hem opnieuw start.
+
+```sh
+docker run -d --name nassa --shm-size=256m -p 8080:8080 \
+  -e NASSA_ENCRYPTION_KEY="$(docker run --rm ghcr.io/helmerznl/nas-storage-analyzer-aio genkey)" \
+  -e NASSA_SHARES_ROOT=/mnt/user -e NASSA_SHARES_GID=100 \
+  -v /mnt/cache/appdata/nas-storage-analyzer:/data -v /mnt/user:/mnt/user:ro \
+  ghcr.io/helmerznl/nas-storage-analyzer-aio:latest
+```
+
+Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden niet meer ontsleuteld worden.
+
 ## 9. Bekende beperkingen
 
 * **atime is vaak onbetrouwbaar.** Veel NAS-systemen en netwerkmounts werken de leestijd niet bij (`noatime`,
@@ -639,6 +676,12 @@ setup-token. Je gegevens staan nog in het volume. Stop de stack, **verplaats** (
   --data-path <DATA_PATH>`, then without `--check`, as root on the Docker host (it stops the stack, copies and verifies, never deletes the
   volume; a deploy tool does not run it). If the new version was deployed first and the app asks for the setup token again, your data is
   still in the volume: stop the stack, move `DATA_PATH/postgres` away and run the script with `--from-volume`. Details: §8.
+* **All-in-one image (§8b):** for platforms that run one container per app (the Unraid store, Home Assistant),
+  `ghcr.io/helmerznl/nas-storage-analyzer-aio` runs PostgreSQL 16, `serve` and the worker in one container, with the same tags. One
+  folder, `/data` (the database in `/data/postgres`; an empty folder becomes one, another major version is refused); `NASSA_ENCRYPTION_KEY`
+  is required (`docker run --rm <image> genkey`); PostgreSQL listens on its socket only, with no password; give it `--shm-size=256m`.
+  With `CAP_SYS_ADMIN` the worker runs as root and can mount NFS/SMB itself. The database folder of the Compose stack is taken over
+  with its data. Compose stays the recommended route (ADR 0013).
 * **Services:** `app` (UI, API, scheduler), `worker` (runs scans), `db` (PostgreSQL 16). `app` and `worker` run as
   uid 10001 with no capabilities and a read-only root file system.
 * **Shares, recommended (route b):** mount NFS/SMB on the Docker host read-only, set `NASSA_SHARES_DIR` to the
