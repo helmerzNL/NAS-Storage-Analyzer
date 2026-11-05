@@ -86,7 +86,7 @@ paths:
       tags: [admin]
       operationId: createShare
       summary: Add a share (admin)
-      description: "`kind` is `bind` (a path below the shares directory, already mounted into the container; recommended), `nfs` or `smb` (mounted read-only by the worker, needs `CAP_SYS_ADMIN`). Settings you leave out get their defaults."
+      description: "`kind` is `bind` (a path below the shares directory, already mounted into the container; recommended), `nfs` or `smb` (mounted read-only by the worker, needs `CAP_SYS_ADMIN`, and for `smb` also `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE`). Settings you leave out get their defaults."
       requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/ShareInput"}}}}
       responses:
         "201": {description: "Created.", content: {application/json: {schema: {$ref: "#/components/schemas/ShareInfo"}}}}

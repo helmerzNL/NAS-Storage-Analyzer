@@ -165,13 +165,13 @@ NASSA_SHARES_MOUNT=/mnt/user
 
 Melden de mapkiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan `NASSA_SHARES_GID=100`.
 
-**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root en `CAP_SYS_ADMIN`; je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
+**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE` (SMB heeft ze alle drie nodig: `mount.cifs` stopt zonder een ervan met *Unable to set current process capabilities*); je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
 
 Alleen wat je als share toevoegt wordt gescand. Een share die niet (meer) gemount is laat een lege map achter; een scan die dan niets vindt terwijl de vorige meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan. Details, SMB-voorbeelden, AppArmor, losse Unraid-schijven en Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
 
 ### Unraid en Home Assistant
 
-Waar een platform per app één container draait (de Community Applications-store van Unraid, een Home Assistant-add-on), is er een all-in-one image: `ghcr.io/helmerznl/nas-storage-analyzer-aio`, met dezelfde tags. Het draait PostgreSQL 16, de webinterface en de worker in één container en bewaart alles in `/data`. Ook daar is `NASSA_ENCRYPTION_KEY` verplicht: `docker run --rm ghcr.io/helmerznl/nas-storage-analyzer-aio genkey` maakt er een. Compose blijft de aanbevolen route; details in [`docs/deploy.md`](docs/deploy.md#8b-all-in-one-image-unraid-store-en-home-assistant) en [ADR 0013](docs/adr/0013-all-in-one-image.md).
+Waar een platform per app één container draait (de Community Applications-store van Unraid, een Home Assistant-add-on), is er een all-in-one image: `ghcr.io/helmerznl/nas-storage-analyzer-aio`, met dezelfde tags. Het draait PostgreSQL 16, de webinterface en de worker in één container en bewaart alles in `/data`. Ook daar is `NASSA_ENCRYPTION_KEY` verplicht: `docker run --rm ghcr.io/helmerznl/nas-storage-analyzer-aio genkey` maakt er een. Wil je dat de worker daar zelf SMB of NFS mount, geef de container dan `--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH` bovenop Docker's standaardrechten (voor NFS volstaat `SYS_ADMIN`; waar AppArmor de mount blokkeert komt er `--security-opt apparmor=unconfined` bij). Compose blijft de aanbevolen route; details in [`docs/deploy.md`](docs/deploy.md#8b-all-in-one-image-unraid-store-en-home-assistant) en [ADR 0013](docs/adr/0013-all-in-one-image.md).
 
 ## Gebruik
 

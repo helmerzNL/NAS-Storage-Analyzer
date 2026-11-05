@@ -48,6 +48,12 @@ Two facts of the app shape the answer:
   - When the container has `CAP_SYS_ADMIN`, the worker runs as root instead, so it can mount NFS/SMB shares itself (route (a) of
     docs/deploy.md). That needs no new variable: whoever grants the capability asks for exactly that. Without the capability
     nothing runs as root but the start script.
+  - SMB needs `CAP_DAC_READ_SEARCH` as well: `mount.cifs` sets its own capabilities at start-up (it asks for `CAP_DAC_READ_SEARCH`,
+    `CAP_DAC_OVERRIDE` and `CAP_SYS_ADMIN`) and stops with "Unable to set current process capabilities: Operation not permitted" when
+    the container lacks one of them. Docker's default set has `CAP_DAC_OVERRIDE` but not `CAP_DAC_READ_SEARCH`, so `--cap-add SYS_ADMIN
+    --cap-add DAC_READ_SEARCH` is what a `docker run` needs. NFS needs neither. The first version of this ADR
+    named only `CAP_SYS_ADMIN`; a Home Assistant user found the gap. The start script now logs a warning when `CAP_SYS_ADMIN` is
+    there and one of the other two is not, and the worker's error says which capability is missing.
 - **One process down means the container is down.** If one of the three stops, the others are stopped and the container exits
   non-zero, so its restart policy or the Home Assistant watchdog starts it again. SIGTERM stops `serve` and the worker
   first, then PostgreSQL with a fast shutdown. tini is PID 1 and reaps the children of the mount helpers.
@@ -92,5 +98,6 @@ The CI job `aio-image` runs shellcheck on the scripts, builds the image and the 
 - has no TCP port for PostgreSQL;
 - stops cleanly, and starts again on the same data;
 - exits non-zero when a process dies;
-- runs the worker as root with `CAP_SYS_ADMIN`;
+- runs the worker as root with `CAP_SYS_ADMIN`, warns when `CAP_DAC_READ_SEARCH` is missing, and shows with the real `mount.cifs`
+  that it stops on its capabilities with `SYS_ADMIN` alone and gets past them with both;
 - takes over the database folder of the Compose stack with its data.
