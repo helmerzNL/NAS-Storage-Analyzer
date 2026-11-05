@@ -152,11 +152,15 @@ Kies een absoluut pad dat de container zelf niet gebruikt: niet `/`, `/usr`, `/e
 
 ### Route (a): de worker mount zelf (NFS/SMB in de container)
 
-Handig als je geen host-mounts wilt beheren. De prijs: de worker draait als root met `CAP_SYS_ADMIN`.
+Handig als je geen host-mounts wilt beheren. De prijs: de worker draait als root met `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE`.
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d
 ```
+
+Draai je de container niet met Compose (het all-in-one image op Unraid, in Portainer of onder Home Assistant), geef hem dan zelf
+`--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH` (de rest van Docker's standaardrechten blijft staan, ook `DAC_OVERRIDE`), en waar
+AppArmor de mount blokkeert ook `--security-opt apparmor=unconfined`.
 
 Voeg de share toe als type *NFS* of *SMB* en vul server, export of share, versie en (SMB) gebruikersnaam en
 wachtwoord in. Het wachtwoord wordt met AES-256-GCM versleuteld opgeslagen (sleutel: `NASSA_ENCRYPTION_KEY`) en
@@ -164,13 +168,21 @@ nooit teruggegeven door de API of getoond in de UI; de worker schrijft het kort 
 een tmpfs en verwijdert het na het mounten. Opties komen uit een allow-list en de mount is altijd `ro`.
 
 * Alleen de **worker** krijgt de extra rechten; de web-applicatie niet.
+* **SMB heeft meer nodig dan `CAP_SYS_ADMIN`.** `mount.cifs` zet bij de start zelf zijn rechten en vraagt daar `CAP_DAC_READ_SEARCH` en
+  `CAP_DAC_OVERRIDE` bij `CAP_SYS_ADMIN`. Docker's standaardset heeft de tweede maar niet de eerste: bij `docker run` (all-in-one
+  image, Portainer, Home Assistant) volstaat `--cap-add DAC_READ_SEARCH` naast `--cap-add SYS_ADMIN`. De worker in Compose laat alle
+  rechten vallen (`cap_drop: ALL`), daarom geeft het override-bestand alle drie terug. Ontbreekt er een, dan stopt de mount nog voordat
+  er iets gemount wordt, en zegt het auditlog bij `scan.failed` welke rechten SMB nodig heeft (de helper zelf meldt `Unable to set
+  current process capabilities: Operation not permitted`). NFS heeft ze niet nodig. Eerdere versies van deze handleiding noemden alleen
+  `CAP_SYS_ADMIN`; een stack die alleen dat gaf, krijgt SMB pas aan de praat met de rest erbij.
 * Op hosts met AppArmor (Ubuntu, Debian) is `security_opt: apparmor:unconfined` nodig; dat staat al in het override-bestand.
 * Extra opties kies je uit een vaste lijst (onder andere `nolock`, `noatime`, `nconnect=`, `timeo=`, `soft`/`hard`); de
   mount is altijd `ro`. NFSv3 heeft soms `nolock` nodig; NFSv4 heeft geen rpcbind nodig.
-* Dit pad is in de ontwikkelomgeving getest tot en met de rechten (worker draait als root met precies
-  `CAP_SYS_ADMIN`, `mount -t tmpfs` lukt, `mount.nfs` en `mount.cifs` zijn aanwezig) en met een nagebootste
-  mount-uitvoerder in de unit tests. Een echte NFS- of SMB-server was daar niet beschikbaar (de kernel had geen
-  NFS-client); test een nieuwe share dus eerst met *Scan nu* en lees de foutmelding op het dashboard.
+* Dit pad is in de ontwikkelomgeving getest tot en met de rechten en met een nagebootste mount-uitvoerder in de unit tests. Wat
+  daarbij gemeten is, in een container met Alpine 3.20 en `cifs-utils` 7.0 (het pakket in dit image): met Docker's standaardrechten plus
+  `CAP_SYS_ADMIN` stopt `mount.cifs` op zijn rechten, met `CAP_DAC_READ_SEARCH` erbij komt hij daar voorbij; met `cap_drop: ALL` heeft hij
+  alle drie nodig, zoals het override-bestand ze geeft. CI controleert beide bij elke build. Een echte NFS- of SMB-server was er niet beschikbaar (de kernel had geen NFS- of cifs-client); test een nieuwe
+  share dus eerst met *Scan nu* en lees de foutmelding op het dashboard.
 
 ### Route (c): de stack draait op de NAS zelf
 
@@ -584,8 +596,10 @@ gewone image: `latest`, `beta`, `beta-<sha>` en een versienummer.
   met peer-authenticatie.
 * **Shares:** mount de map met shares alleen-lezen en zet `NASSA_SHARES_ROOT` op die map. Op Unraid is dat `/mnt/user`, op beide
   plaatsen hetzelfde pad, zodat je in de interface typt wat je op Unraid kent. Met `NASSA_SHARES_GID=100` leest de app shares van
-  `nobody:users`. Geef je de container `CAP_SYS_ADMIN`, dan draait de worker als root en kan hij zelf NFS/SMB mounten (route (a));
-  zonder die rechten draait niets als root behalve het startscript.
+  `nobody:users`. Geef je de container `CAP_SYS_ADMIN`, dan draait de worker als root en kan hij zelf NFS mounten (route (a)); voor
+  SMB heeft hij ook `CAP_DAC_READ_SEARCH` nodig (`--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH`, en waar AppArmor de mount blokkeert
+  `--security-opt apparmor=unconfined`), en het startscript zegt in de log dat die ontbreekt. Zonder die rechten draait niets als root
+  behalve het startscript.
 * **Gedeeld geheugen:** geef de container `--shm-size=256m`. Met minder gebruikt PostgreSQL bestanden in `/data` voor parallelle
   query's, en zegt het image dat in de log.
 * **Afstellen:** de `PG_*`-variabelen van §6 werken hier ook.
@@ -680,8 +694,11 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
   `ghcr.io/helmerznl/nas-storage-analyzer-aio` runs PostgreSQL 16, `serve` and the worker in one container, with the same tags. One
   folder, `/data` (the database in `/data/postgres`; an empty folder becomes one, another major version is refused); `NASSA_ENCRYPTION_KEY`
   is required (`docker run --rm <image> genkey`); PostgreSQL listens on its socket only, with no password; give it `--shm-size=256m`.
-  With `CAP_SYS_ADMIN` the worker runs as root and can mount NFS/SMB itself. The database folder of the Compose stack is taken over
-  with its data. Compose stays the recommended route (ADR 0013).
+  With `CAP_SYS_ADMIN` the worker runs as root and can mount NFS itself; mounting SMB needs `CAP_DAC_READ_SEARCH` as well
+  (`--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH`, on top of Docker's default capabilities, which include `CAP_DAC_OVERRIDE`;
+  `mount.cifs` stops with "Unable to set current process capabilities" without it),
+  and where AppArmor blocks the mount also `--security-opt apparmor=unconfined`. The database folder of the Compose stack is taken
+  over with its data. Compose stays the recommended route (ADR 0013).
 * **Services:** `app` (UI, API, scheduler), `worker` (runs scans), `db` (PostgreSQL 16). `app` and `worker` run as
   uid 10001 with no capabilities and a read-only root file system.
 * **Shares, recommended (route b):** mount NFS/SMB on the Docker host read-only, set `NASSA_SHARES_DIR` to the
@@ -706,8 +723,11 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
   can click to a folder instead of typing its path. Folders only, never above that folder; links are shown only when they
   point to a folder inside it; a folder with more than 1,000 sub-folders is cut off.
 * **Shares, route a:** `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d` lets the worker
-  mount NFS/SMB itself, at the cost of root and `CAP_SYS_ADMIN` in the worker container only. This route is
-  verified up to the privileges; it could not be tested against a real NFS/SMB server in the development sandbox.
+  mount NFS/SMB itself, at the cost of root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` in the worker container only (the worker
+  drops every capability, so the override gives all three back; SMB needs them all because `mount.cifs` stops on its own capabilities
+  without them, NFS needs none of the last two). This route is verified up to the privileges, including that `mount.cifs` of Alpine
+  3.20 gets past its capability step with the override's set and not with `SYS_ADMIN` alone; it could not be tested against a real
+  NFS/SMB server in the development sandbox.
 * **Missing mounts:** a scan that finds an empty share where the previous one found 100+ files is refused and the
   old data kept (`nasa scan -allow-empty` overrides, for a share that was emptied on purpose).
 * **Reverse proxy:** set `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS=true`, `NASSA_RP_ID`, `NASSA_RP_ORIGINS`; turn off

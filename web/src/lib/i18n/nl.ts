@@ -73,7 +73,7 @@ export const nl: Record<string, string> = {
   'shares.none': 'Nog geen shares.', 'shares.target': 'Locatie', 'shares.schedule': 'Schema', 'shares.next': 'volgende: {when}', 'shares.saved': 'Share opgeslagen', 'shares.deleted': 'Share verwijderd',
   'shares.delete.title': 'Share verwijderen?', 'shares.delete.body': 'De scangegevens en historie van “{name}” worden verwijderd. De bestanden op de NAS blijven onaangetast.',
   'shares.name': 'Naam', 'shares.kind': 'Soort', 'shares.recommended': 'aanbevolen', 'shares.path': 'Pad in de container', 'shares.path.hint': 'Mount de share op de host en geef hem als read-only bind-mount door; het pad moet onder {root} liggen.',
-  'shares.mount.note': 'NFS en SMB worden door de worker gemount. Dat vraagt extra rechten (CAP_SYS_ADMIN); veiliger is de share op de host mounten en als gemount pad toevoegen.',
+  'shares.mount.note': 'NFS en SMB worden door de worker gemount. Dat vraagt extra rechten (CAP_SYS_ADMIN, en voor SMB ook CAP_DAC_READ_SEARCH en CAP_DAC_OVERRIDE); veiliger is de share op de host mounten en als gemount pad toevoegen.',
   'shares.browse': 'Bladeren…', 'fs.title': 'Kies een map', 'fs.up': 'Omhoog', 'fs.choose': 'Kies', 'fs.choose.named': 'Kies {name}', 'fs.choose.this': 'Deze map kiezen',
   'fs.empty': 'Geen submappen.', 'fs.empty.root': 'Geen mappen gevonden. Is de share gemount op de host? Controleer NASSA_SHARES_DIR (zie docs/deploy.md).',
   'fs.truncated': 'Deze map heeft meer submappen dan hier getoond worden. Typ het pad zelf om een andere map te kiezen.', 'fs.symlink': 'Koppeling (symlink) naar een map',

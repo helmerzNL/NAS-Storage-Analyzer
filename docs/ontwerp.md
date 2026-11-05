@@ -52,7 +52,7 @@ DuckDB + SQLite (zie prestatiebeslissing: extra export-stap, CGO, single writer)
 - Voortgang: worker schrijft elke ~1 s tellers naar `scans` + `NOTIFY`; de app streamt dat als SSE.
   Annuleren = vlag in `scan_jobs`, door de worker gepolld en via context doorgegeven.
 - Mounten: **aanbevolen route (b)** host-mount + `:ro` bind-mount onder `/mnt/shares/*` (geen extra capabilities).
-  **Route (a)** zit in `docker-compose.mount.yml` (`cap_add: SYS_ADMIN`, `nfs-common`, `cifs-utils`) alleen voor de
+  **Route (a)** zit in `docker-compose.mounts.yml` (`cap_add: SYS_ADMIN`, `DAC_READ_SEARCH` en `DAC_OVERRIDE`, de laatste twee omdat `mount.cifs` ze zelf vraagt; `nfs-utils`, `cifs-utils`) alleen voor de
   `worker`; zonder die override tonen NFS/SMB-shares in de UI een duidelijke "mount niet beschikbaar"-melding.
   SMB-credentials gaan via een `0600` credentials-file in tmpfs, nooit op de command line.
 - Beveiliging scanner: de code opent alleen met `O_RDONLY`, `fstatat(AT_SYMLINK_NOFOLLOW)`; er bestaat geen

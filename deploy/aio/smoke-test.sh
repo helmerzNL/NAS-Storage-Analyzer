@@ -6,8 +6,9 @@
 # The image is started on an empty data folder and must: refuse to start without NASSA_ENCRYPTION_KEY; make the database and become
 # ready; report the channel it was built for; have a healthy worker; run serve and the worker as uid 10001, with NASSA_SHARES_GID as an
 # extra group; stop cleanly (exit 0) well inside Docker's stop timeout; start again on the same data without making it again; exit
-# non-zero when one of its processes dies; run the worker as root when the container has CAP_SYS_ADMIN; and take over the database
-# folder of the Compose stack (postgres:16-alpine), keeping its data.
+# non-zero when one of its processes dies; run the worker as root when the container has CAP_SYS_ADMIN, and say so when
+# CAP_DAC_READ_SEARCH or CAP_DAC_OVERRIDE is missing, which mount.cifs needs (shown with the real mount.cifs, with and without it); and take over the
+# database folder of the Compose stack (postgres:16-alpine), keeping its data.
 # `check && pass || fail` is meant: pass only prints, so it never sends a passed check on to fail.
 # shellcheck disable=SC2015
 set -eu
@@ -78,6 +79,22 @@ docker rm -f "$NAME" >/dev/null
 start --cap-add SYS_ADMIN -v "$WORK/data:/data"
 ready && pass "with CAP_SYS_ADMIN: ready" || fail "with CAP_SYS_ADMIN: not ready"
 docker exec "$NAME" sh -c 'grep -Eq "^Uid:[[:space:]]+0[[:space:]]" /proc/$(pgrep -f "^nasa worker")/status' && pass "the worker runs as root to mount shares" || fail "worker is not root"
+# Why the documentation asks for DAC_READ_SEARCH next to SYS_ADMIN: mount.cifs sets its own capabilities at start-up and stops before
+# it mounts anything when the container lacks this one (reported from Home Assistant). The mount itself is not expected to work: there
+# is no SMB server; the question is only whether mount.cifs gets past its capability step. If a newer cifs-utils stops needing the
+# capability, the first check below fails, and the documentation and docker-compose.mounts.yml are due for a change.
+cifs_probe() { docker exec "$NAME" sh -c 'mkdir -p /run/aio-probe && timeout 30 mount -t cifs -o ro,guest //127.0.0.1/none /run/aio-probe 2>&1' || true; }
+cap_failure='unable to (set current process capabilities|apply new capability set)'
+docker logs "$NAME" 2>&1 | grep -q "the container lacks CAP_DAC_READ_SEARCH:" && pass "says that SMB needs CAP_DAC_READ_SEARCH when only SYS_ADMIN is given" || fail "no warning about CAP_DAC_READ_SEARCH"
+out="$(cifs_probe)"
+printf %s "$out" | grep -Eiq "$cap_failure" && pass "mount.cifs stops on its capabilities with SYS_ADMIN alone" || fail "mount.cifs with SYS_ADMIN alone said: $out"
+docker rm -f "$NAME" >/dev/null
+
+start --cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH -v "$WORK/data:/data"
+ready && pass "with SYS_ADMIN and DAC_READ_SEARCH: ready" || fail "with SYS_ADMIN and DAC_READ_SEARCH: not ready"
+docker logs "$NAME" 2>&1 | grep -q "the container lacks" && fail "warns about a capability although the container has them" || pass "no warning when both are given"
+out="$(cifs_probe)"
+printf %s "$out" | grep -Eiq "$cap_failure" && fail "mount.cifs still stops on its capabilities with both: $out" || pass "mount.cifs gets past its capability step with both"
 docker rm -f "$NAME" >/dev/null
 
 mkdir -p "$WORK/compose/postgres"

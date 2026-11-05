@@ -73,7 +73,7 @@ export const en: Record<string, string> = {
   'shares.none': 'No shares yet.', 'shares.target': 'Location', 'shares.schedule': 'Schedule', 'shares.next': 'next: {when}', 'shares.saved': 'Share saved', 'shares.deleted': 'Share deleted',
   'shares.delete.title': 'Delete share?', 'shares.delete.body': 'The scan data and history of “{name}” will be deleted. The files on the NAS are not touched.',
   'shares.name': 'Name', 'shares.kind': 'Type', 'shares.recommended': 'recommended', 'shares.path': 'Path in the container', 'shares.path.hint': 'Mount the share on the host and pass it in as a read-only bind mount; the path must be below {root}.',
-  'shares.mount.note': 'NFS and SMB are mounted by the worker. That needs extra privileges (CAP_SYS_ADMIN); mounting on the host and adding the share as a mounted path is safer.',
+  'shares.mount.note': 'NFS and SMB are mounted by the worker. That needs extra privileges (CAP_SYS_ADMIN, and for SMB also CAP_DAC_READ_SEARCH and CAP_DAC_OVERRIDE); mounting on the host and adding the share as a mounted path is safer.',
   'shares.browse': 'Browse…', 'fs.title': 'Choose a folder', 'fs.up': 'Up', 'fs.choose': 'Choose', 'fs.choose.named': 'Choose {name}', 'fs.choose.this': 'Choose this folder',
   'fs.empty': 'No sub-folders.', 'fs.empty.root': 'No folders found. Is the share mounted on the host? Check NASSA_SHARES_DIR (see docs/deploy.md).',
   'fs.truncated': 'This folder has more sub-folders than are shown here. Type the path yourself to choose another folder.', 'fs.symlink': 'Link (symlink) to a folder',
