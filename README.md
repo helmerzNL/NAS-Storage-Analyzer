@@ -17,6 +17,7 @@ Scant je NFS- en SMB-shares alleen-lezen en laat per share, map en bestandstype 
 [![Self-hosted](https://img.shields.io/badge/self--hosted-Docker-2496ED?logo=docker&logoColor=white)](#installatie-zelf-hosten)
 [![Talen](https://img.shields.io/badge/languages-NL%20%7C%20EN-lightgrey)](#wat-kan-het)
 
+[![Laatste release](https://img.shields.io/github/v/release/helmerzNL/NAS-Storage-Analyzer)](https://github.com/helmerzNL/NAS-Storage-Analyzer/releases/latest)
 [![Laatste commit](https://img.shields.io/github/last-commit/helmerzNL/NAS-Storage-Analyzer/beta)](https://github.com/helmerzNL/NAS-Storage-Analyzer/commits/beta)
 [![Commitactiviteit](https://img.shields.io/github/commit-activity/m/helmerzNL/NAS-Storage-Analyzer/beta)](https://github.com/helmerzNL/NAS-Storage-Analyzer/graphs/commit-activity)
 [![Forks](https://img.shields.io/github/forks/helmerzNL/NAS-Storage-Analyzer?style=social)](https://github.com/helmerzNL/NAS-Storage-Analyzer/forks)
@@ -368,9 +369,9 @@ Elke wijziging komt eerst in de **beta**; alleen een bewuste promotie van `beta`
 |---|---|
 | `latest` | De stabiele lijn. Wordt gepubliceerd als `beta` wordt gepromoveerd naar `main`. |
 | `beta` | De build waar elke wijziging eerst in landt; de interface toont een **beta**-label. Gebruik een aparte `DATA_PATH`. |
-| `0.2.0` (een versienummer) | Blijft staan tot je het wijzigt. |
+| `0.3.1` (een versienummer) | Blijft staan tot je het wijzigt. |
 
-Tot de eerste promotie naar `main` bestaat `latest` nog niet: gebruik dan `NASSA_TAG=beta`, of bouw zelf uit een checkout. Wat er per versie veranderde, staat in de [releasenotes](docs/releases/), in het Nederlands en het Engels.
+Elke stabiele versie staat onder [Releases](https://github.com/helmerzNL/NAS-Storage-Analyzer/releases). Wat er per versie veranderde, staat in de [releasenotes](docs/releases/), in het Nederlands en het Engels.
 
 ## Meewerken
 
