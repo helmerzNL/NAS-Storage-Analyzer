@@ -2,10 +2,10 @@
 # `worker` (runs the scans). Build:  docker build -t nas-storage-analyzer .
 #
 # The base images can be replaced, for example to pull from a mirror:
-#   docker build --build-arg GO_IMAGE=mirror.example/golang:1.24-alpine ...
+#   docker build --build-arg GO_IMAGE=mirror.example/golang:1.27-alpine ...
 ARG NODE_IMAGE=node:22-alpine
-ARG GO_IMAGE=golang:1.24-alpine
-ARG RUNTIME_IMAGE=alpine:3.20
+ARG GO_IMAGE=golang:1.27-alpine
+ARG RUNTIME_IMAGE=alpine:3.24
 
 # 1. The web interface (Svelte), built into internal/webui/dist.
 FROM ${NODE_IMAGE} AS web

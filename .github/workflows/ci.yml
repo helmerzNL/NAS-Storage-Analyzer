@@ -205,7 +205,7 @@ jobs:
       - name: mount.cifs gets past its capability step with what the mounts override gives the worker
         run: |
           # mount.cifs sets its own capabilities at start-up and asks for SYS_ADMIN, DAC_READ_SEARCH and DAC_OVERRIDE; when the container lacks
-          # one it stops before mounting, with "Unable to set current process capabilities: Operation not permitted". The worker drops every
+          # one it stops before mounting, with "Unable to apply new capability set." (older cifs-utils: "Unable to set current process capabilities"). The worker drops every
           # capability, so the override must add all three back. The flags are read from the merged Compose file, so this proves the override as
           # shipped. There is no SMB server here: the question is only whether mount.cifs gets past that step, so what it says after that
           # (no cifs support, AppArmor, connection refused) does not matter.

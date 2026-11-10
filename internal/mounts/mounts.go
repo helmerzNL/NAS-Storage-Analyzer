@@ -63,7 +63,7 @@ var ErrNeedsCapabilities = errors.New("mounting an SMB share needs the capabilit
 	"docker-compose.mounts.yml has them), or mount the share on the host and bind-mount it under the shares directory")
 
 // capabilityFailure reports whether a mount helper's output says it could not set its capabilities: mount.cifs built with
-// libcap (Alpine) says "Unable to set current process capabilities", with libcap-ng (Debian, Ubuntu) "Unable to apply new
+// libcap (Alpine up to 3.20) says "Unable to set current process capabilities", with libcap-ng (Alpine 3.24, Debian, Ubuntu) "Unable to apply new
 // capability set".
 func capabilityFailure(low string) bool {
 	return strings.Contains(low, "unable to set current process capabilities") ||

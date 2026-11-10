@@ -24,7 +24,7 @@ PGDATA="$DATA/postgres"
 PGBIN="${AIO_PG_BIN:-/usr/libexec/postgresql16}"
 SOCKET="${AIO_SOCKET_DIR:-/run/postgresql}"
 NASA="${AIO_NASA:-nasa}"
-SETPRIV="${AIO_SETPRIV:-/usr/bin/setpriv}"
+SETPRIV="${AIO_SETPRIV:-}"          # looked up below, once it is known that it is needed
 PG_UID=70          # the postgres user of Alpine, the same as in the postgres:16-alpine image of the Compose stack
 APP_UID=10001      # the nasa user of the image
 PG_MAJOR=16
@@ -40,6 +40,15 @@ case "${1:-}" in
   genkey|version|-version|--version|healthcheck|migrate|scan|recategorize|help|-h|--help) exec "$NASA" "$@" ;;
   *) fail "unknown argument '$1': start without arguments, or give a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize)" ;;
 esac
+
+# util-linux's setpriv, not the busybox applet of the same name, which cannot change users. Its place is looked up and not assumed:
+# Alpine had it in /usr/bin next to busybox's /bin/setpriv, and from 3.24 it is /bin/setpriv itself. Only root needs it.
+if [ "$(id -u)" = 0 ] && [ -z "$SETPRIV" ]; then
+  for candidate in /usr/bin/setpriv /bin/setpriv /usr/sbin/setpriv /sbin/setpriv; do
+    if [ -x "$candidate" ] && "$candidate" --version 2>/dev/null | grep -q util-linux; then SETPRIV="$candidate"; break; fi
+  done
+  [ -n "$SETPRIV" ] || fail "setpriv of util-linux is not in this image (busybox's cannot start a process as another user); the image is broken, pull it again"
+fi
 
 # As root, run a command as another user; a test that is not root runs it as itself. With --exec the command replaces the shell,
 # so `as_user --exec ... &` leaves $! pointing at the process itself, and a signal sent to $! reaches it.
@@ -196,7 +205,8 @@ serve_pid=$!
 if can_mount; then
   log "the container may mount file systems (CAP_SYS_ADMIN): the worker runs as root and can mount NFS/SMB shares itself"
   # mount.cifs sets its own capabilities at start-up and asks for CAP_SYS_ADMIN, CAP_DAC_READ_SEARCH (bit 2) and CAP_DAC_OVERRIDE
-  # (bit 1); when the container lacks one it stops with "Unable to set current process capabilities: Operation not permitted".
+  # (bit 1); when the container lacks one it stops with "Unable to apply new capability set." (older cifs-utils: "Unable to set
+  # current process capabilities: Operation not permitted").
   # Docker grants CAP_DAC_OVERRIDE by default but not CAP_DAC_READ_SEARCH. NFS needs neither.
   lacks=
   has_cap 2 || lacks="CAP_DAC_READ_SEARCH"

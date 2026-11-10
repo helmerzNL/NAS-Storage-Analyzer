@@ -166,7 +166,7 @@ NASSA_SHARES_MOUNT=/mnt/user
 
 Melden de mapkiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan `NASSA_SHARES_GID=100`.
 
-**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE` (SMB heeft ze alle drie nodig: `mount.cifs` stopt zonder een ervan met *Unable to set current process capabilities*); je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
+**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE` (SMB heeft ze alle drie nodig: `mount.cifs` stopt zonder een ervan met *Unable to apply new capability set* (oudere versies: *Unable to set current process capabilities*)); je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
 
 Alleen wat je als share toevoegt wordt gescand. Een share die niet (meer) gemount is laat een lege map achter; een scan die dan niets vindt terwijl de vorige meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan. Details, SMB-voorbeelden, AppArmor, losse Unraid-schijven en Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
 
@@ -429,7 +429,7 @@ Er is nog geen licentie gekozen: alle rechten voorbehouden.
 
 ### Onderdelen
 
-NASSA is gebouwd met Go 1.24 en Svelte 5, op PostgreSQL 16. De directe afhankelijkheden:
+NASSA is gebouwd met Go 1.27 en Svelte 5, op PostgreSQL 16. De directe afhankelijkheden:
 
 | Onderdeel | Waarvoor | Licentie |
 |---|---|---|

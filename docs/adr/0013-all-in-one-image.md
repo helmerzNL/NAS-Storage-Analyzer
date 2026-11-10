@@ -49,7 +49,7 @@ Two facts of the app shape the answer:
     docs/deploy.md). That needs no new variable: whoever grants the capability asks for exactly that. Without the capability
     nothing runs as root but the start script.
   - SMB needs `CAP_DAC_READ_SEARCH` as well: `mount.cifs` sets its own capabilities at start-up (it asks for `CAP_DAC_READ_SEARCH`,
-    `CAP_DAC_OVERRIDE` and `CAP_SYS_ADMIN`) and stops with "Unable to set current process capabilities: Operation not permitted" when
+    `CAP_DAC_OVERRIDE` and `CAP_SYS_ADMIN`) and stops with "Unable to apply new capability set." (cifs-utils 7.0 on Alpine 3.20 said "Unable to set current process capabilities: Operation not permitted") when
     the container lacks one of them. Docker's default set has `CAP_DAC_OVERRIDE` but not `CAP_DAC_READ_SEARCH`, so `--cap-add SYS_ADMIN
     --cap-add DAC_READ_SEARCH` is what a `docker run` needs. NFS needs neither. The first version of this ADR
     named only `CAP_SYS_ADMIN`; a Home Assistant user found the gap. The start script now logs a warning when `CAP_SYS_ADMIN` is

@@ -18,7 +18,7 @@ PostgreSQL als enige database, doel < 500 ms met ≤ 2 s geaccepteerd voor vrije
 
 | Onderdeel | Keuze | Onderbouwing |
 |---|---|---|
-| Scanner, API, scheduler | **Go 1.24, één module, één binary `nasa`** met subcommando's `serve`, `worker`, `scan`, `migrate`, `seed` | Goroutines passen bij I/O-bound walks; `x/sys/unix` geeft `openat`/`fstatat`/`getdents`; één taal en één image voor `app` en `worker`; geen CGO nodig |
+| Scanner, API, scheduler | **Go 1.27, één module, één binary `nasa`** met subcommando's `serve`, `worker`, `scan`, `migrate`, `seed` | Goroutines passen bij I/O-bound walks; `x/sys/unix` geeft `openat`/`fstatat`/`getdents`; één taal en één image voor `app` en `worker`; geen CGO nodig |
 | Database | **PostgreSQL 16** (`pgx/v5`, `CopyFrom`) | Gevraagd; COPY, partitionering, `ltree`, `pg_trgm`, advisory locks, `LISTEN/NOTIFY`, `SKIP LOCKED` dekken schema, queue en zoeken zonder extra services |
 | API | `chi` + **spec-first OpenAPI 3.1** (`api/openapi.yaml`, `oapi-codegen`) | Spec is de bron van waarheid, CI controleert dat code en spec gelijk lopen |
 | Frontend | **SvelteKit + TypeScript** (static adapter, via `go:embed` in de binary), d3-hierarchy voor treemap/sunburst, uPlot voor tijdreeksen | Klein, snel, geen aparte Node-runtime in productie; dark mode via CSS-variabelen; i18n via NL/EN-woordenboeken |

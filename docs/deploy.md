@@ -172,14 +172,14 @@ een tmpfs en verwijdert het na het mounten. Opties komen uit een allow-list en d
   `CAP_DAC_OVERRIDE` bij `CAP_SYS_ADMIN`. Docker's standaardset heeft de tweede maar niet de eerste: bij `docker run` (all-in-one
   image, Portainer, Home Assistant) volstaat `--cap-add DAC_READ_SEARCH` naast `--cap-add SYS_ADMIN`. De worker in Compose laat alle
   rechten vallen (`cap_drop: ALL`), daarom geeft het override-bestand alle drie terug. Ontbreekt er een, dan stopt de mount nog voordat
-  er iets gemount wordt, en zegt het auditlog bij `scan.failed` welke rechten SMB nodig heeft (de helper zelf meldt `Unable to set
-  current process capabilities: Operation not permitted`). NFS heeft ze niet nodig. Eerdere versies van deze handleiding noemden alleen
+  er iets gemount wordt, en zegt het auditlog bij `scan.failed` welke rechten SMB nodig heeft (de helper zelf meldt `Unable to apply new capability set.`; oudere versies
+  `Unable to set current process capabilities: Operation not permitted`). NFS heeft ze niet nodig. Eerdere versies van deze handleiding noemden alleen
   `CAP_SYS_ADMIN`; een stack die alleen dat gaf, krijgt SMB pas aan de praat met de rest erbij.
 * Op hosts met AppArmor (Ubuntu, Debian) is `security_opt: apparmor:unconfined` nodig; dat staat al in het override-bestand.
 * Extra opties kies je uit een vaste lijst (onder andere `nolock`, `noatime`, `nconnect=`, `timeo=`, `soft`/`hard`); de
   mount is altijd `ro`. NFSv3 heeft soms `nolock` nodig; NFSv4 heeft geen rpcbind nodig.
 * Dit pad is in de ontwikkelomgeving getest tot en met de rechten en met een nagebootste mount-uitvoerder in de unit tests. Wat
-  daarbij gemeten is, in een container met Alpine 3.20 en `cifs-utils` 7.0 (het pakket in dit image): met Docker's standaardrechten plus
+  daarbij gemeten is, in een container met Alpine 3.24 en `cifs-utils` 7.5 (het pakket in dit image; hetzelfde gold voor Alpine 3.20 met 7.0): met Docker's standaardrechten plus
   `CAP_SYS_ADMIN` stopt `mount.cifs` op zijn rechten, met `CAP_DAC_READ_SEARCH` erbij komt hij daar voorbij; met `cap_drop: ALL` heeft hij
   alle drie nodig, zoals het override-bestand ze geeft. CI controleert beide bij elke build. Een echte NFS- of SMB-server was er niet beschikbaar (de kernel had geen NFS- of cifs-client); test een nieuwe
   share dus eerst met *Scan nu* en lees de foutmelding op het dashboard.
@@ -696,7 +696,7 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
   is required (`docker run --rm <image> genkey`); PostgreSQL listens on its socket only, with no password; give it `--shm-size=256m`.
   With `CAP_SYS_ADMIN` the worker runs as root and can mount NFS itself; mounting SMB needs `CAP_DAC_READ_SEARCH` as well
   (`--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH`, on top of Docker's default capabilities, which include `CAP_DAC_OVERRIDE`;
-  `mount.cifs` stops with "Unable to set current process capabilities" without it),
+  `mount.cifs` stops with "Unable to apply new capability set" without it; older versions said "Unable to set current process capabilities"),
   and where AppArmor blocks the mount also `--security-opt apparmor=unconfined`. The database folder of the Compose stack is taken
   over with its data. Compose stays the recommended route (ADR 0013).
 * **Services:** `app` (UI, API, scheduler), `worker` (runs scans), `db` (PostgreSQL 16). `app` and `worker` run as
