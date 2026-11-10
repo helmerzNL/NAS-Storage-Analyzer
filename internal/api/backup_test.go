@@ -166,7 +166,7 @@ func TestARefusedBackupIsAnsweredWithTheReason(t *testing.T) {
 	r := admin.rawBody("POST", "/api/v1/backup/stage", []byte(`this is not json`))
 	expect(t, r, 400, "backup_not_backup")
 
-	r = admin.rawBody("POST", "/api/v1/backup/stage", []byte(`{`+hdr+`,"format_version":2,"app_version":"7.0.0"}`))
+	r = admin.rawBody("POST", "/api/v1/backup/stage", []byte(`{`+hdr+`,"format_version":3,"app_version":"7.0.0"}`))
 	expect(t, r, 400, "backup_newer")
 	if p, _ := r.Body["params"].(map[string]any); p["app_version"] != "7.0.0" {
 		t.Errorf("the version that wrote the file must be in the answer: %s", r.Raw)

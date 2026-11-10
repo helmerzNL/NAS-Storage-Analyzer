@@ -23,6 +23,7 @@ var Tables = map[string]Coverage{
 	"invitations":          {false, "unlocks the app: a link that creates or resets an account"},
 	"audit_log":            {false, "a record of what happened here, not something the owner entered"},
 	"app_settings":         {false, "not written by the application at present; when it is, decide here whether it belongs in the file"},
+	"notification_targets": {true, "what the owner entered: where messages about scans go (the address only as the encrypted blob; not the outcome of the last delivery)"},
 
 	"scans":             {false, "derived from the files on the NAS: scan again after a restore"},
 	"scan_errors":       {false, "derived from a scan"},

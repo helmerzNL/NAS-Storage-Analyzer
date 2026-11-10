@@ -175,6 +175,10 @@ A pull request that raises a size, rate or timeout limit states the new value as
   (`internal/backup`, [ADR 0007](docs/adr/0007-in-app-backup-restore.md)): the file never holds anything that unlocks the application (no credential, session, invitation, account or role; an SMB password
   only as the ciphertext sealed with the key in the environment), and a file is refused whole rather than partly accepted; the restore is one transaction run by the server as a job; and **a new table
   or a new `shares` column is classified in `backup.Tables` / `backup.ShareColumns` in the same change**, with a seed and a round-trip test if the owner enters it (a test fails when it is not).
+- **The address of a notification target is a secret of another service** (`internal/notify`: its token is in the path or the query). It is stored sealed,
+  leaves the server only as scheme and host (`notify.Hint`), and is never written to the audit log, a log line or an error message. What a message says is the
+  outcome of a scan, never a file name or a folder listing. The request itself keeps its limits (no redirect followed, the answer never shown, link-local
+  addresses refused): they are what stands between an administrator's typo and a request the server should not make.
 - **A column that stores a sealed value** (`secrets.Box`: a `bytea` whose name ends in `_enc`) **is added to `rekey.Columns` in the same change**, or `nasa rekey` would leave it under the old key and
   it would be lost with that key (`TestEverySealedColumnIsKnown` fails when it is not).
 - **The factory reset follows App-Guidance's [`factory-reset.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/factory-reset.md)**

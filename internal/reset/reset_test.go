@@ -41,6 +41,7 @@ func fill(t *testing.T, st *store.Store) {
 	exec(t, st, `INSERT INTO login_failures (scope, key) VALUES ('user', 'helmer')`)
 	exec(t, st, `INSERT INTO audit_log (action, username) VALUES ('login.success', 'helmer')`)
 	exec(t, st, `INSERT INTO app_settings (key, value) VALUES ('k', '"v"')`)
+	exec(t, st, `INSERT INTO notification_targets (name, url_enc, format, lang) VALUES ('ntfy', '\\x07', 'text', 'en')`)
 	exec(t, st, `INSERT INTO invitations (token_hash, kind, username, role, expires_at) VALUES ('\x05', 'new', 'guest', 'viewer', now() + interval '1 day')`)
 
 	exec(t, st, `INSERT INTO shares (name, kind, config, secret_enc) VALUES ('media', 'bind', '{"path":"/mnt/shares/media"}', '\x06'), ('docs', 'bind', '{"path":"/mnt/shares/docs"}', NULL)`)

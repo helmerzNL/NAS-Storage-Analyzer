@@ -22,7 +22,7 @@
   let timer: ReturnType<typeof setTimeout> | undefined, leaving = false;
 
   const s = $derived(staged?.summary ?? null);
-  const everythingMissing = $derived(!!s && s.missing.length === 3);
+  const everythingMissing = $derived(!!s && s.missing.length === 4);   // shares, file types, preferences, notification targets
   const nothing = $derived(!!s && changesNothing(s.changes, everythingMissing));
 
   // ---- making a backup ----
@@ -161,7 +161,7 @@
   {#if s}
     <div class="stack" data-testid="backup-confirm">
       <p class="small muted">{t('backup.confirm.made', { when: formatDateTime(s.created_at, i18n.lang), version: s.app_version })}
-        {t('backup.confirm.counts', { shares: s.counts.shares, types: s.counts.file_types, prefs: s.counts.preferences })}</p>
+        {t('backup.confirm.counts', { shares: s.counts.shares, types: s.counts.file_types, prefs: s.counts.preferences, targets: s.counts.notifications })}</p>
 
       {#if s.scans_active}<div class="notice warn" data-testid="backup-scans">{t('backup.scans')}</div>{/if}
       {#if dialogError}<div class="notice error" role="alert" data-testid="backup-dialog-error">{dialogError}</div>{/if}
@@ -176,10 +176,12 @@
           {#if s.changes.shares_updated.length}<li data-testid="backup-updated">{t('backup.will.updated', { names: nameList(s.changes.shares_updated) })}</li>{/if}
           {#if s.changes.file_types_changed}<li data-testid="backup-types">{t('backup.will.types', { n: s.changes.file_types_changed })}</li>{/if}
           {#if s.changes.preferences_applied}<li>{t('backup.will.prefs', { n: s.changes.preferences_applied })}</li>{/if}
+          {#if s.changes.notification_targets}<li data-testid="backup-targets">{t('backup.will.targets', { n: s.changes.notification_targets })}</li>{/if}
         </ul>
       {/if}
       {#if s.changes.preferences_skipped.length}<p class="small muted">{t('backup.will.skipped', { names: nameList(s.changes.preferences_skipped) })}</p>{/if}
       {#if s.changes.passwords_unreadable.length}<div class="notice warn small" data-testid="backup-pw">{t('backup.will.pw', { names: nameList(s.changes.passwords_unreadable) })}</div>{/if}
+      {#if s.changes.notifications_unreadable.length}<div class="notice warn small" data-testid="backup-targets-unreadable">{t('backup.will.targets.unreadable', { names: nameList(s.changes.notifications_unreadable) })}</div>{/if}
       {#if s.missing.length && !everythingMissing}<p class="small muted">{t('backup.will.missing', { sections: s.missing.map((m) => t('backup.section.' + m)).join(', ') })}</p>{/if}
 
       <p class="small">{t('backup.stays')}</p>

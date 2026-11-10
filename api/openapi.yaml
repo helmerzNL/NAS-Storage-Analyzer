@@ -1217,6 +1217,61 @@ paths:
           description: Newest first.
           content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/Job"}}}}}}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/notifications:
+    get:
+      tags: [admin]
+      operationId: listNotificationTargets
+      summary: Where messages about scans are sent (admin)
+      description: "The notification targets, by name. The address of a target is never returned: only its scheme and host (`url_hint`)."
+      responses:
+        "200":
+          description: Targets.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, max]
+                properties:
+                  items: {type: array, items: {$ref: "#/components/schemas/NotificationTarget"}}
+                  max: {type: integer, description: "How many targets an installation can have."}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      tags: [admin]
+      operationId: createNotificationTarget
+      summary: Add a notification target (admin)
+      description: "409 `conflict` when the name is taken, 409 `limit_reached` when there are already `max` targets."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/NotificationInput"}}}}
+      responses:
+        "201": {description: Added., content: {application/json: {schema: {$ref: "#/components/schemas/NotificationTarget"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/notifications/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    patch:
+      tags: [admin]
+      operationId: updateNotificationTarget
+      summary: Change a notification target (admin)
+      description: "Only what the request names changes. Leave `url` out to keep the stored address; sending one forgets the outcome of the last delivery."
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/NotificationInput"}}}}
+      responses:
+        "200": {description: Changed., content: {application/json: {schema: {$ref: "#/components/schemas/NotificationTarget"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [admin]
+      operationId: deleteNotificationTarget
+      summary: Remove a notification target (admin)
+      responses:
+        "204": {description: Removed.}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/notifications/{id}/test:
+    parameters: [{name: id, in: path, required: true, schema: {type: integer, format: int64}}]
+    post:
+      tags: [admin]
+      operationId: testNotificationTarget
+      summary: Send a test message now (admin)
+      description: "One attempt of at most 10 seconds, to a target that is enabled or not. The answer says how it went; the receiver's own answer is never passed on. A delivery that failed is a 200 with `ok: false`."
+      responses:
+        "200": {description: How the delivery went., content: {application/json: {schema: {$ref: "#/components/schemas/NotificationDelivery"}}}}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/settings:
     get:
       tags: [reference]
@@ -1695,7 +1750,7 @@ components:
     BackupChanges:
       type: object
       description: What a restore does to what is there now, or did.
-      required: [shares_added, shares_updated, shares_removed, file_types_changed, preferences_applied, preferences_skipped, passwords_unreadable, recategorize_shares]
+      required: [shares_added, shares_updated, shares_removed, file_types_changed, preferences_applied, preferences_skipped, passwords_unreadable, recategorize_shares, notification_targets, notifications_unreadable]
       properties:
         shares_added: {type: array, items: {type: string}}
         shares_updated: {type: array, items: {type: string}, description: "Shares that are in the file and whose settings differ from what is stored; the others are left alone, so a restore that changes nothing does not even move a schedule."}
@@ -1705,6 +1760,8 @@ components:
         preferences_skipped: {type: array, items: {type: string}, description: "People the file names who have no account here."}
         passwords_unreadable: {type: array, items: {type: string}, description: "Shares restored without their SMB password, because this installation's encryption key cannot open the one in the file."}
         recategorize_shares: {type: integer, description: "How many shares are categorised again in the background because the file-type map changed."}
+        notification_targets: {type: integer, description: "How many notification targets the file puts in place of the ones here; 0 when the file has no such section, or when its targets are exactly the ones here."}
+        notifications_unreadable: {type: array, items: {type: string}, description: "Notification targets left out, because this installation's encryption key cannot open their address."}
     BackupSummary:
       type: object
       required: [format_version, app_version, created_at, counts, missing, changes, scans_active]
@@ -1714,9 +1771,9 @@ components:
         created_at: {type: string, format: date-time}
         counts:
           type: object
-          required: [shares, file_types, preferences]
-          properties: {shares: {type: integer}, file_types: {type: integer}, preferences: {type: integer}}
-        missing: {type: array, items: {type: string, enum: [shares, file_types, preferences]}, description: "Sections the file does not have: a restore leaves them as they are."}
+          required: [shares, file_types, preferences, notifications]
+          properties: {shares: {type: integer}, file_types: {type: integer}, preferences: {type: integer}, notifications: {type: integer}}
+        missing: {type: array, items: {type: string, enum: [shares, file_types, preferences, notifications]}, description: "Sections the file does not have: a restore leaves them as they are. A file of format version 1 has no `notifications`."}
         changes: {$ref: "#/components/schemas/BackupChanges"}
         scans_active: {type: boolean, description: "Scans are queued or running: the restore is refused until they are done or cancelled."}
     StagedBackup:
@@ -1890,6 +1947,57 @@ components:
         created_at: {type: string, format: date-time}
         last_used_at: {type: string, format: date-time, nullable: true}
         synced: {type: boolean, description: "Backed up to a password manager or cloud keychain."}
+    NotificationEvents:
+      type: object
+      description: "For which outcomes of a scan a target gets a message."
+      required: [failed, empty, errors, finished]
+      properties:
+        failed: {type: boolean, description: "The scan failed, or was refused because the share looked unmounted."}
+        empty: {type: boolean, description: "The scan finished and found no files."}
+        errors: {type: boolean, description: "The scan finished, and some folders or files could not be read."}
+        finished: {type: boolean, description: "The scan finished with nothing to report."}
+    NotificationTarget:
+      type: object
+      required: [id, name, url_hint, format, lang, events, enabled, created_at, updated_at, last_at, last_ok, last_status, last_error]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        url_hint: {type: string, description: "The scheme and host of the address, as in `https://ntfy.sh/…`. Empty when the stored address does not open with the installation's key."}
+        format: {type: string, enum: [json, text], description: "`json`: one JSON object (Home Assistant, Gotify, generic). `text`: the message as plain text with `Title`, `Priority` and `Tags` headers (ntfy)."}
+        lang: {type: string, enum: [nl, en], description: "The language of the title and the message."}
+        events: {$ref: "#/components/schemas/NotificationEvents"}
+        enabled: {type: boolean}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        last_at: {type: string, format: date-time, nullable: true, description: "When a message was last sent to this target, a test included."}
+        last_ok: {type: boolean, nullable: true}
+        last_status: {type: integer, nullable: true, description: "The HTTP status of that delivery; null when there was no answer."}
+        last_error: {type: string, nullable: true, description: "Why that delivery failed, without the address."}
+    NotificationInput:
+      type: object
+      properties:
+        name: {type: string, maxLength: 60}
+        url: {type: string, maxLength: 2000, description: "http or https. Stored encrypted and never returned. Required for a new target."}
+        format: {type: string, enum: [json, text]}
+        lang: {type: string, enum: [nl, en]}
+        events:
+          type: object
+          properties:
+            failed: {type: boolean}
+            empty: {type: boolean}
+            errors: {type: boolean}
+            finished: {type: boolean}
+        enabled: {type: boolean}
+    NotificationDelivery:
+      type: object
+      required: [target_id, target, ok, status, error, attempts]
+      properties:
+        target_id: {type: integer, format: int64}
+        target: {type: string}
+        ok: {type: boolean}
+        status: {type: integer, description: "The HTTP status of the last attempt, 0 when there was no answer."}
+        error: {type: string, description: "Why it failed, without the address; empty when it was delivered."}
+        attempts: {type: integer}
     SessionInfo:
       type: object
       description: "One browser in which the user is signed in. `id` is a reference to name the session by; it is not the session's token and opens nothing."

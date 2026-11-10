@@ -65,7 +65,7 @@ func TestRekeyCommand(t *testing.T) {
 	// -check needs no new key and changes nothing.
 	t.Setenv("NASSA_NEW_ENCRYPTION_KEY", "")
 	out, err := run("-check")
-	if err != nil || !strings.Contains(out, "All stored secrets open with NASSA_ENCRYPTION_KEY (1 SMB password(s) of shares, 0 authenticator secret(s) of users)") {
+	if err != nil || !strings.Contains(out, "All stored secrets open with NASSA_ENCRYPTION_KEY (1 SMB password(s) of shares, 0 authenticator secret(s) of users, 0 address(es) of notification targets)") {
 		t.Fatalf("-check with the right key: %q, %v", out, err)
 	}
 

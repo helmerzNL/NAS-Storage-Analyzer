@@ -288,7 +288,7 @@ func (s *Server) fail(w http.ResponseWriter, r *http.Request, err error) {
 			"Narrow the filters (a smaller folder, a category, a size range) and try again.")
 	case errors.Is(err, context.Canceled):
 		// The client went away; nothing to answer.
-	case s.authFail(w, r, err), s.adminFail(w, r, err), s.backupFail(w, r, err), s.resetFail(w, r, err):
+	case s.authFail(w, r, err), s.adminFail(w, r, err), s.backupFail(w, r, err), s.resetFail(w, r, err), s.notifyFail(w, r, err):
 	default:
 		s.log.Error("request failed", "request_id", requestID(r), "path", r.URL.Path, "error", err)
 		s.problem(w, r, http.StatusInternalServerError, "internal error", "")

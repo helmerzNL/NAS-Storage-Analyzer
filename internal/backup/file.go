@@ -24,22 +24,25 @@ import (
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 )
 
 const (
 	// Format names the kind of file; FormatVersion is its version. A file of an older version still restores (a section that did not exist yet is
 	// left as it is); a file of a newer version is refused with the version that wrote it.
+	// Version 2 added the notification targets. A version 1 file has no such section, so a restore of one leaves the targets alone.
 	Format        = "nas-storage-analyzer-backup"
-	FormatVersion = 1
+	FormatVersion = 2
 
 	// MaxFileBytes is the largest file the stage route accepts. A backup is a few tens of kilobytes (a share is about a kilobyte, a file type thirty
 	// bytes), so this is generous; whatever runs in front of the application has to allow a body this large (docs/deploy.md).
 	MaxFileBytes = 8 << 20
 	// The most entries a file may hold in a section. They are far above anything real and keep a hostile file from asking for work without end.
-	MaxShares      = 200
-	MaxFileTypes   = 5000
-	MaxPreferences = 500
+	MaxShares        = 200
+	MaxFileTypes     = 5000
+	MaxPreferences   = 500
+	MaxNotifications = notify.MaxTargets
 
 	// StageTTL is how long an uploaded, checked file waits for the owner's confirmation.
 	StageTTL = time.Hour
@@ -60,6 +63,8 @@ type File struct {
 	Shares      []shares.Portable `json:"shares"`
 	FileTypes   []shares.FileType `json:"file_types"`
 	Preferences []auth.UserPrefs  `json:"preferences"`
+	// Notifications are the notification targets, since format version 2: the address only as the sealed value.
+	Notifications []notify.Portable `json:"notifications"`
 }
 
 // InvalidError is a file that is refused. Key names what is wrong in a way the screen words in the reader's language; Detail is the English
@@ -89,6 +94,8 @@ type Checked struct {
 	Unreadable []string
 	// Prefs are the preferences as they will be stored (through auth.CleanPrefs).
 	Prefs []auth.UserPrefs
+	// TargetsUnreadable names the notification targets whose address could not be opened with this installation's key; they are left out.
+	TargetsUnreadable []string
 }
 
 // header is the part of a file every version has. It is read first and loosely, so a file of a newer version is reported as that and not as a
@@ -136,6 +143,8 @@ func (s *Service) Check(ctx context.Context, data []byte) (*Checked, error) {
 		return nil, tooMany("file_types", len(f.FileTypes), MaxFileTypes)
 	case len(f.Preferences) > MaxPreferences:
 		return nil, tooMany("preferences", len(f.Preferences), MaxPreferences)
+	case len(f.Notifications) > MaxNotifications:
+		return nil, tooMany("notifications", len(f.Notifications), MaxNotifications)
 	}
 
 	out := &Checked{File: f}
@@ -175,6 +184,13 @@ func (s *Service) Check(ctx context.Context, data []byte) (*Checked, error) {
 			out.Prefs = append(out.Prefs, auth.UserPrefs{Username: strings.TrimSpace(p.Username), Prefs: clean})
 		}
 	}
+	if f.Notifications != nil {
+		ready, unreadable, err := s.notify.Prepare(f.Notifications)
+		if err != nil {
+			return nil, asInvalid(err)
+		}
+		out.File.Notifications, out.TargetsUnreadable = ready, unreadable
+	}
 	return out, nil
 }
 
@@ -189,6 +205,10 @@ func asInvalid(err error) error {
 	var ve *shares.ValidationError
 	if errors.As(err, &ve) {
 		return invalid("invalid", ve.Field, "%s", ve.Msg)
+	}
+	var ne *notify.ValidationError
+	if errors.As(err, &ne) {
+		return invalid("invalid", ne.Field, "%s", ne.Msg)
 	}
 	return err
 }

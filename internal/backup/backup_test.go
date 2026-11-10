@@ -16,6 +16,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
@@ -31,6 +32,7 @@ type env struct {
 	sh  *shares.Service
 	au  *auth.Service
 	q   *jobs.Queue
+	nt  *notify.Service
 	bk  *backup.Service
 }
 
@@ -47,10 +49,11 @@ func newEnv(t *testing.T, key byte) *env {
 	sh := shares.NewService(st.Pool, box, shares.Options{SharesRoot: "/mnt/shares"}, time.UTC)
 	au := auth.NewService(st.Pool, box, auth.DefaultConfig())
 	q := jobs.NewQueue(st.Pool)
-	bk := backup.New(st.Pool, sh, au, q, nil, "9.9.9")
+	nt := notify.NewService(st.Pool, box)
+	bk := backup.New(st.Pool, sh, au, nt, q, nil, "9.9.9")
 	bk.Now = func() time.Time { return fixed }
 	bk.Go = func(f func()) { f() }
-	return &env{t: t, st: st, box: box, sh: sh, au: au, q: q, bk: bk}
+	return &env{t: t, st: st, box: box, sh: sh, au: au, q: q, nt: nt, bk: bk}
 }
 
 func (e *env) exec(sql string, args ...any) {
@@ -116,7 +119,17 @@ func (e *env) seed() {
 		('helmer', 'admin', '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNo', '{"language":"nl","theme":"dark","accent":"#0c9aa6"}'),
 		('Anna', 'viewer', '$argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$b3RoZXJoYXNo', '{"units":"decimal"}'),
 		('quiet', 'viewer', NULL, '{}')`)
+	address := webhookAddress
+	target := notify.Defaults()
+	target.Name, target.URL, target.Lang, target.Format = "Home Assistant", &address, "nl", notify.FormatJSON
+	target.Events = notify.Events{Failed: true, Empty: true, Finished: true}
+	if _, err := e.nt.Create(context.Background(), target); err != nil {
+		e.t.Fatal(err)
+	}
 }
+
+// The address of the seeded notification target: its path is the token of the receiver.
+const webhookAddress = "https://ha.example.org:8123/api/webhook/secret-webhook-id"
 
 func (e *env) export() []byte {
 	e.t.Helper()
@@ -378,6 +391,87 @@ func TestASecretThatThisKeyCannotOpenIsLeftOutAndSaid(t *testing.T) {
 	if full, err := b.sh.Load(context.Background(), docs); err != nil || full.Password != "" {
 		t.Errorf("load: %q %v", full.Password, err)
 	}
+	// The same for the address of a notification target, with one difference: a target without an address is nothing, so it is left out.
+	if got := j.Summary.NotificationsUnreadable; len(got) != 1 || got[0] != "Home Assistant" || j.Summary.NotificationTargets != 0 || st.Summary.Counts.Notifications != 1 {
+		t.Errorf("the target whose address cannot come back: %+v (counts %+v)", j.Summary, st.Summary.Counts)
+	}
+	if n := b.count(`SELECT count(*) FROM notification_targets`); n != 0 {
+		t.Errorf("a target was stored with an address nobody can read (%d)", n)
+	}
+}
+
+func TestNotificationTargetsComeBackWithTheirAddressSealed(t *testing.T) {
+	a := newEnv(t, 1)
+	a.seed()
+	file := a.export()
+	// The file has the target as the owner entered it, and the address only sealed: not its host, not its path.
+	var f struct {
+		Notifications []map[string]any `json:"notifications"`
+	}
+	if err := json.Unmarshal(file, &f); err != nil || len(f.Notifications) != 1 {
+		t.Fatalf("the notifications section: %v %v", f.Notifications, err)
+	}
+	n := f.Notifications[0]
+	if n["name"] != "Home Assistant" || n["format"] != "json" || n["lang"] != "nl" || n["enabled"] != true || n["address"] == "" ||
+		fmt.Sprint(n["events"]) != "map[empty:true errors:false failed:true finished:true]" {
+		t.Errorf("the target in the file: %v", n)
+	}
+	// Nor the outcome of the last delivery, which is state and not something the owner entered.
+	for _, plain := range []string{"ha.example.org", "secret-webhook-id", "api/webhook", "last_at", "last_ok", "last_status", "last_error"} {
+		if bytes.Contains(file, []byte(plain)) {
+			t.Errorf("the file has %q in it", plain)
+		}
+	}
+
+	// Another installation with the same key: the target is there and its address works as before.
+	b := newEnv(t, 1)
+	old := "https://old.example/x"
+	stale := notify.Defaults()
+	stale.Name, stale.URL = "Was here before", &old
+	if _, err := b.nt.Create(context.Background(), stale); err != nil {
+		t.Fatal(err)
+	}
+	j := b.restore(file, "helmer")
+	if j.Status != "done" || j.Summary.NotificationTargets != 1 || len(j.Summary.NotificationsUnreadable) != 0 {
+		t.Fatalf("%+v", j)
+	}
+	list, err := b.nt.List(context.Background())
+	if err != nil || len(list) != 1 {
+		t.Fatalf("the targets after the restore replace the ones that were there: %+v %v", list, err)
+	}
+	got := list[0]
+	if got.Name != "Home Assistant" || got.URLHint != "https://ha.example.org:8123/…" || got.Format != "json" || got.Lang != "nl" || !got.Enabled ||
+		got.Events != (notify.Events{Failed: true, Empty: true, Finished: true}) || got.LastAt != nil {
+		t.Errorf("the restored target: %+v", got)
+	}
+	// An empty section says there are none; restoring that removes them.
+	none := bytes.Replace(b.export(), file[bytes.Index(file, []byte(`"notifications": [`)):bytes.LastIndex(file, []byte("]"))+1], []byte(`"notifications": []`), 1)
+	if !bytes.Contains(none, []byte(`"notifications": []`)) {
+		t.Fatal("could not make a file with an empty notifications section")
+	}
+	if j := b.restore(none, "helmer"); j.Status != "done" || b.count(`SELECT count(*) FROM notification_targets`) != 0 {
+		t.Fatalf("an empty section left targets: %+v", j)
+	}
+
+	// A target the file describes wrongly refuses the whole file, by field; so do more targets than an installation can have.
+	hdr := `{"format":"nas-storage-analyzer-backup","format_version":2,"notifications":[`
+	entry := func(name, format string) string {
+		return fmt.Sprintf(`{"name":%q,"format":%q,"lang":"en","events":{"failed":true,"empty":false,"errors":false,"finished":false},"enabled":true,"address":"AAAA"}`, name, format)
+	}
+	var inv *backup.InvalidError
+	if _, err := b.bk.Stage(context.Background(), "helmer", strings.NewReader(hdr+entry("x", "xml")+`]}`)); !errors.As(err, &inv) || inv.Field != "notifications[0].format" {
+		t.Errorf("a target with an unknown format: %v", err)
+	}
+	if _, err := b.bk.Stage(context.Background(), "helmer", strings.NewReader(hdr+entry("x", "json")+","+entry("X", "json")+`]}`)); !errors.As(err, &inv) || inv.Field != "notifications[1].name" {
+		t.Errorf("two targets with the same name: %v", err)
+	}
+	var many []string
+	for i := 0; i < notify.MaxTargets+1; i++ {
+		many = append(many, entry(fmt.Sprint("t", i), "json"))
+	}
+	if _, err := b.bk.Stage(context.Background(), "helmer", strings.NewReader(hdr+strings.Join(many, ",")+`]}`)); !errors.As(err, &inv) || inv.Key != "too_many" {
+		t.Errorf("more targets than an installation can have: %v", err)
+	}
 }
 
 // ---- rule 2: all or nothing, and the file is not trusted --------------------------------------------------
@@ -401,7 +495,7 @@ func TestARefusedFileChangesNothingAndIsNotKept(t *testing.T) {
 		{"not JSON", `{"format": `, "not_backup", ""},
 		{"another kind of file", `{"format":"something-else","format_version":1}`, "not_backup", ""},
 		{"no version", `{"format":"nas-storage-analyzer-backup"}`, "not_backup", "format_version"},
-		{"a newer version", `{"format":"nas-storage-analyzer-backup","format_version":2,"app_version":"7.0.0","brand_new":true}`, "newer", "format_version"},
+		{"a newer version", `{"format":"nas-storage-analyzer-backup","format_version":3,"app_version":"7.0.0","brand_new":true}`, "newer", "format_version"},
 		{"an unknown field", `{` + hdr + `,"surprise":1}`, "invalid", ""},
 		{"an unknown field in a share", `{` + hdr + `,"shares":[` + smb(`,"role":"admin"`) + `]}`, "invalid", ""},
 		{"files claimed", `{` + hdr + `,"includes_files":true}`, "invalid", "includes_files"},
@@ -581,7 +675,7 @@ func TestTheConfirmationSaysWhatWillHappen(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := st.Summary
-	if s.Counts.Shares != 3 || s.Counts.FileTypes == 0 || s.Counts.Preferences != 2 || s.AppVersion != "9.9.9" || s.FormatVersion != 1 || !s.CreatedAt.Equal(fixed) {
+	if s.Counts.Shares != 3 || s.Counts.FileTypes == 0 || s.Counts.Preferences != 2 || s.Counts.Notifications != 1 || s.AppVersion != "9.9.9" || s.FormatVersion != 2 || !s.CreatedAt.Equal(fixed) {
 		t.Errorf("counts and header: %+v", s)
 	}
 	if strings.Join(s.Changes.SharesRemoved, ",") != "extra" || len(s.Changes.SharesAdded) != 0 || len(s.Changes.SharesUpdated) != 0 {
@@ -610,7 +704,7 @@ func TestASectionThatIsNotInTheFileIsLeftAsItIsAndAnEmptyOneIsNot(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(st.Summary.Missing, ",") != "file_types,preferences" {
+	if strings.Join(st.Summary.Missing, ",") != "file_types,preferences,notifications" {
 		t.Errorf("missing: %v", st.Summary.Missing)
 	}
 	if len(st.Summary.Changes.SharesRemoved) != 3 {
@@ -622,7 +716,8 @@ func TestASectionThatIsNotInTheFileIsLeftAsItIsAndAnEmptyOneIsNot(t *testing.T) 
 	if n := e.count(`SELECT count(*) FROM shares`); n != 0 {
 		t.Errorf("an explicit empty list left %d shares", n)
 	}
-	if e.count(`SELECT count(*) FROM users WHERE prefs <> '{}'::jsonb`) != prefs || e.count(`SELECT count(*) FROM extension_map`) != types {
+	if e.count(`SELECT count(*) FROM users WHERE prefs <> '{}'::jsonb`) != prefs || e.count(`SELECT count(*) FROM extension_map`) != types ||
+		e.count(`SELECT count(*) FROM notification_targets`) != 1 {
 		t.Error("a section that is not in the file was changed")
 	}
 }
@@ -676,13 +771,20 @@ func TestRestoringWhatIsAlreadyThereChangesNothingAndLeavesTheSchedulesAlone(t *
 		t.Fatal(err)
 	}
 	c := st.Summary.Changes
-	if len(c.SharesAdded)+len(c.SharesUpdated)+len(c.SharesRemoved) != 0 || c.FileTypesChanged != 0 || c.PreferencesApplied != 0 || len(c.PreferencesSkipped) != 0 {
+	if len(c.SharesAdded)+len(c.SharesUpdated)+len(c.SharesRemoved) != 0 || c.FileTypesChanged != 0 || c.PreferencesApplied != 0 || len(c.PreferencesSkipped) != 0 ||
+		c.NotificationTargets != 0 {
 		t.Fatalf("the file is what is here, so nothing changes: %+v", c)
 	}
+	// The notification target keeps what it knows about its last delivery: it is not replaced by an identical one.
+	e.exec(`UPDATE notification_targets SET last_at = now(), last_ok = true, last_status = 200`)
 	j := e.start("helmer", st.Token)
 	// What the job reports it did is what the confirmation said it would do: nothing.
-	if jc := j.Summary; j.Status != "done" || jc.RecategorizeShares != 0 || jc.PreferencesApplied != 0 || len(jc.SharesAdded)+len(jc.SharesUpdated)+len(jc.SharesRemoved) != 0 || jc.FileTypesChanged != 0 {
+	if jc := j.Summary; j.Status != "done" || jc.RecategorizeShares != 0 || jc.PreferencesApplied != 0 || len(jc.SharesAdded)+len(jc.SharesUpdated)+len(jc.SharesRemoved) != 0 || jc.FileTypesChanged != 0 ||
+		jc.NotificationTargets != 0 {
 		t.Fatalf("%+v", j)
+	}
+	if n := e.count(`SELECT count(*) FROM notification_targets WHERE last_ok AND last_status = 200`); n != 1 {
+		t.Error("a restore that changed nothing replaced the notification target")
 	}
 	var after *time.Time
 	e.st.Pool.QueryRow(ctx, `SELECT next_run_at FROM shares WHERE name = 'media'`).Scan(&after)
@@ -799,7 +901,7 @@ func TestAFinishedJobReportsStepsTimingsAndWhatWasRestored(t *testing.T) {
 	}
 	var detail string
 	e.st.Pool.QueryRow(context.Background(), `SELECT detail::text FROM audit_log WHERE action = 'backup.restore'`).Scan(&detail)
-	for _, leak := range []string{"media", "docs", "nas", "helmer", smbPassword} {
+	for _, leak := range []string{"media", "docs", "nas", "helmer", smbPassword, "Home Assistant", "secret-webhook-id"} {
 		if strings.Contains(detail, leak) {
 			t.Errorf("the audit entry names %q: counts only", leak)
 		}

@@ -31,6 +31,7 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("GET "+v+"/fs/dirs", lvAdmin, s.browseFolders)
 	}
 	s.backupRoutes(h, v)
+	s.notificationRoutes(h, v)
 	s.resetRoutes(h, v)
 	if s.opts.Updates != nil {
 		// The administrator is told that a newer release exists; nobody else, and nothing is updated or downloaded.

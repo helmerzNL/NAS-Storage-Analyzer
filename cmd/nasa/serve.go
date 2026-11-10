@@ -17,6 +17,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/rekey"
 	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
@@ -137,8 +138,10 @@ func runServe(args []string) error {
 		checker.BaseURL = base // a mirror, or a test double
 	}
 	sharesSvc := shares.NewService(rw.Pool, box, shares.Options{SharesRoot: sharesRoot}, loc)
+	targets := notify.NewService(rw.Pool, box)
 	opts := api.Options{
-		Backup:          backup.New(rw.Pool, sharesSvc, svc, queue, log, version),
+		Backup:          backup.New(rw.Pool, sharesSvc, svc, targets, queue, log, version),
+		Notify:          targets,
 		Updates:         checker,
 		PublicURL:       env("NASSA_PUBLIC_URL", ""),
 		Auth:            svc,

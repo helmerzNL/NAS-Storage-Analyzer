@@ -10,11 +10,13 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 )
 
-// replaceSteps is how many things the swap does, for the progress: the shares, the file types, the preferences, and the commit.
-const replaceSteps = 4
+// replaceSteps is how many things the swap does, for the progress: the shares, the file types, the preferences, the notification
+// targets, and the commit.
+const replaceSteps = 5
 
 // run is the restore, in the background. It reports a phase and a step in the job's row (so the screen can follow it from any page, and pick it
 // up again after a reload), checks the file once more, and replaces everything in one transaction. Whatever happens, the job ends as done or
@@ -94,7 +96,7 @@ func (s *Service) replace(ctx context.Context, jobID int64, c *Checked, checkMS 
 	}
 
 	ch := &Changes{SharesAdded: []string{}, SharesUpdated: []string{}, SharesRemoved: []string{}, PreferencesSkipped: []string{},
-		PasswordsUnreadable: nonNil(c.Unreadable)}
+		PasswordsUnreadable: nonNil(c.Unreadable), NotificationsUnreadable: nonNil(c.TargetsUnreadable)}
 
 	if c.File.Shares != nil {
 		p, err := s.shares.ReplaceTx(ctx, tx, c.File.Shares)
@@ -133,6 +135,22 @@ func (s *Service) replace(ctx context.Context, jobID int64, c *Checked, checkMS 
 		}
 	}
 	if err := s.step(ctx, jobID, "preferences", 3); err != nil {
+		return nil, nil, err
+	}
+
+	if c.File.Notifications != nil {
+		differs, err := notify.Differs(ctx, tx, c.File.Notifications)
+		if err != nil {
+			return nil, nil, err
+		}
+		if differs {
+			if err := s.notify.ReplaceTx(ctx, tx, c.File.Notifications); err != nil {
+				return nil, nil, err
+			}
+			ch.NotificationTargets = len(c.File.Notifications)
+		}
+	}
+	if err := s.step(ctx, jobID, "notifications", 4); err != nil {
 		return nil, nil, err
 	}
 

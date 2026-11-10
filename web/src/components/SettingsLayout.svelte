@@ -23,6 +23,7 @@
       { href: '/admin/shares', label: 'nav.shares', icon: 'shares', admin: true, on: (p) => p.startsWith('/admin/shares') },
       { href: '/admin/extensions', label: 'nav.extensions', icon: 'types', admin: true, on: (p) => p.startsWith('/admin/extensions') },
       { href: '/admin/delete', label: 'nav.delete', icon: 'delete', admin: true, on: (p) => p.startsWith('/admin/delete') },
+      { href: '/admin/notifications', label: 'nav.notifications', icon: 'bell', admin: true, on: (p) => p.startsWith('/admin/notifications') },
       { href: '/admin/backup', label: 'nav.backup', icon: 'backup', admin: true, on: (p) => p.startsWith('/admin/backup') },
     ] },
     { title: 'settings.admin', scope: 'settings', parts: [

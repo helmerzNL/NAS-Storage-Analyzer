@@ -25,6 +25,31 @@ function totp(secret, stepOffset = 0) {
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0');
 }
 
+// A webhook receiver for the notification targets: it keeps what it is sent and answers with the status the test sets.
+const http = require('node:http');
+const HOOK_PORT = Number(process.env.HOOK_PORT || 8099);
+const hooks = [];
+let hookStatus = 200;
+const hookServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    let json = null;
+    try { json = JSON.parse(body); } catch { /* a text target */ }
+    hooks.push({ path: req.url, type: req.headers['content-type'], title: req.headers.title, body, json });
+    res.statusCode = hookStatus;
+    res.end('the answer of the receiver');
+  });
+});
+const waitForHook = async (what, match) => {
+  for (let i = 0; i < 150; i++) {
+    const found = hooks.find(match);
+    if (found) return found;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the receiver never got ' + what + '; it got: ' + JSON.stringify(hooks.map((h) => h.json?.event || h.body.slice(0, 40))));
+};
+
 let failures = 0;
 const results = [];
 async function step(name, fn) {
@@ -47,6 +72,7 @@ const expectText = async (page, sel, re, msg) => {
   w('media/photos/img.CR2', 9_000_000); w('media/docs/report.pdf', 700_000); w('media/docs/notes.txt', 50_000);
   const old = new Date('2015-01-01'); fs.utimesSync(path.join(SHARE_DIR, 'media/video/film.mkv'), old, old);
 
+  await new Promise((resolve) => hookServer.listen(HOOK_PORT, '127.0.0.1', resolve));
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'nl-NL' });
   const page = await ctx.newPage();
@@ -915,6 +941,57 @@ const expectText = async (page, sel, re, msg) => {
       await moved('→ Video');
     });
 
+    await step('notifications: a target is added without showing its address again, a test message arrives, and a refusal is said', async () => {
+      const address = 'http://127.0.0.1:' + HOOK_PORT + '/api/webhook/geheim-id';
+      await page.goto(BASE + '/admin/notifications');
+      await page.waitForSelector('[data-testid=target-table] >> text=Nog geen doelen');
+      if (hooks.length) throw new Error('something was sent before any target existed: ' + JSON.stringify(hooks));
+
+      // What is wrong with the form is said at the field.
+      await page.click('[data-testid=add-target]');
+      await page.fill('[data-testid=t-name]', 'Home Assistant');
+      await page.fill('[data-testid=t-url]', 'ftp://nas/x');
+      await page.click('[data-testid=t-save]');
+      await page.waitForSelector('dialog[open] .field-error');
+      await page.fill('[data-testid=t-url]', address);
+      await shot('14b-notification-form');
+      await page.click('[data-testid=t-save]');
+      const row = '[data-testid=target-row]:has-text("Home Assistant")';
+      await page.waitForSelector(row);
+      // The address is on the screen as its scheme and host only; the part that is the token is nowhere.
+      let text = (await page.textContent(row)).replace(/\s+/g, ' ');
+      if (!text.includes('http://127.0.0.1:' + HOOK_PORT + '/…') || !/Nog niets verstuurd/.test(text) || !/mislukt, niets vindt, niet alles kan lezen/.test(text))
+        throw new Error('the new target in the list: ' + text);
+      if ((await page.content()).includes('geheim-id')) throw new Error('the page still has the address of the target in it');
+
+      // The test message arrives, in the language of the interface it was made in.
+      await page.click('[data-testid="target-test-Home Assistant"]');
+      const sent = await waitForHook('the test message', (h) => h.json?.event === 'test');
+      if (sent.path !== '/api/webhook/geheim-id' || sent.type !== 'application/json' || sent.json.title !== 'NASSA: testmelding' || sent.json.app !== 'NASSA')
+        throw new Error('the test message: ' + JSON.stringify(sent));
+      await page.waitForSelector('[data-testid="target-last-Home Assistant"][data-tone=ok]');
+      await shot('14c-notification-arrived');
+
+      // A receiver that is down: the test says so, and the list keeps the reason without the receiver's own answer.
+      hookStatus = 500;
+      await page.click('[data-testid="target-test-Home Assistant"]');
+      await page.waitForSelector('[data-testid="target-last-Home Assistant"][data-tone=bad]');
+      text = (await page.textContent('[data-testid="target-last-Home Assistant"]')).replace(/\s+/g, ' ');
+      if (!/Niet aangekomen/.test(text) || !/HTTP 500/.test(text) || /answer of the receiver/.test(text)) throw new Error('a refused test in the list: ' + text);
+      hookStatus = 200;
+
+      // Changing something else keeps the address: the field is empty and the next test still arrives there.
+      await page.click('[data-testid="target-edit-Home Assistant"]');
+      if ((await page.inputValue('[data-testid=t-url]')) !== '') throw new Error('the form shows the stored address');
+      await page.check('[data-testid=t-finished]');
+      await page.click('[data-testid=t-save]');
+      await page.waitForSelector(row + ':has-text("klaar is")');
+      const before = hooks.length;
+      await page.click('[data-testid="target-test-Home Assistant"]');
+      await page.waitForSelector('[data-testid="target-last-Home Assistant"][data-tone=ok]');
+      if (hooks.length !== before + 1 || hooks[hooks.length - 1].path !== '/api/webhook/geheim-id') throw new Error('after an edit without an address the test went elsewhere');
+    });
+
     await step('a scan that finds nothing is flagged in the audit log', async () => {
       // A wrong NASSA_SHARES_DIR or an unmounted share is an empty folder: the scan succeeds, and used to leave no trace.
       fs.mkdirSync(path.join(SHARE_DIR, 'leeg'), { recursive: true });
@@ -944,6 +1021,15 @@ const expectText = async (page, sel, re, msg) => {
       if (!(await row.$('.badge.warn'))) throw new Error('an empty scan must stand out (amber badge)');
       if (!(await page.$('[data-testid=audit-table] tbody tr:has-text("scan.finished"):has-text("Media")'))) throw new Error('the scan of Media is missing as scan.finished');
       await shot('14-audit-empty-scan');
+      // The notification target was told by the worker, in its language, with the outcome and no file name.
+      const told = await waitForHook('the message about the empty scan', (h) => h.json?.event === 'scan.empty' && h.json?.share === 'Leeg');
+      if (told.json.title !== 'NASSA: scan van Leeg vond niets' || told.json.files !== 0 || told.json.priority !== 8 || !/gekoppeld/.test(told.json.message))
+        throw new Error('the message about a scan that found nothing: ' + JSON.stringify(told.json));
+      // Adding and testing the target is in the audit log, by its name and host: the address is not.
+      await page.goto(BASE + '/admin/audit');
+      await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=notification.create');
+      const auditText = await page.textContent('[data-testid=audit-table]');
+      if (!auditText.includes('notification.test') || auditText.includes('geheim-id')) throw new Error('the audit log about the notification target');
     });
 
     await step('a scan that could not read folders: the audit log lists them, folded, as text', async () => {
@@ -1144,6 +1230,9 @@ const expectText = async (page, sel, re, msg) => {
       const text = fs.readFileSync(file, 'utf8');
       const backup = JSON.parse(text);
       if (backup.format !== 'nas-storage-analyzer-backup' || backup.includes_files !== false || !backup.shares.some((x) => x.name === 'Media')) throw new Error('the file: ' + text.slice(0, 200));
+      // The notification target is in it as it was entered, its address only sealed: not its host, not its token.
+      if (backup.format_version !== 2 || backup.notifications?.length !== 1 || backup.notifications[0].name !== 'Home Assistant' || !backup.notifications[0].address ||
+        text.includes('geheim-id') || text.includes('api/webhook') || text.includes('127.0.0.1:' + HOOK_PORT)) throw new Error('the notification target in the backup: ' + JSON.stringify(backup.notifications));
       for (const w of [PASSWORD, 'argon2', 'totp', 'recovery', 'webauthn', 'credential', 'password', '"role"', 'csrf', 'session']) if (text.toLowerCase().includes(w.toLowerCase())) throw new Error('the backup holds "' + w + '"');
       await page.waitForSelector('[data-testid=backup-timing]');
       if (!/Server: [\d,]+ s, download: [\d,]+ s/.test(await page.textContent('[data-testid=backup-timing]'))) throw new Error('where the time went is not shown');
@@ -1167,7 +1256,7 @@ const expectText = async (page, sel, re, msg) => {
       await expectText(page, '[data-testid=backup-error]', /shares\[0\]\.cron/, 'a bad share');
       // A file from a newer version is refused with the version that made it.
       const newer = path.join(SHOTS, 'newer.json');
-      fs.writeFileSync(newer, JSON.stringify({ format: 'nas-storage-analyzer-backup', format_version: 2, app_version: '7.0.0' }));
+      fs.writeFileSync(newer, JSON.stringify({ format: 'nas-storage-analyzer-backup', format_version: 3, app_version: '7.0.0' }));
       await page.setInputFiles('[data-testid=backup-file]', newer);
       await expectText(page, '[data-testid=backup-error]', /nieuwere versie \(7\.0\.0\)/, 'a newer file');
       const afterRefusals = await api('GET', '/shares');
@@ -1225,7 +1314,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('.settings-nav');
       if (new URL(page.url()).pathname !== '/admin/shares') throw new Error('Settings opened ' + page.url());
       const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
-      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/delete', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
+      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/delete', '/admin/notifications', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
       if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
       for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
       const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));
@@ -1587,6 +1676,7 @@ const expectText = async (page, sel, re, msg) => {
     console.log('\nfailed at the step above; screenshot:', path.join(SHOTS, 'failure.png'));
   } finally {
     await browser.close();
+    hookServer.close();
   }
   console.log(`\n${results.filter((r) => r[0] === 'ok').length} steps passed, ${failures} failed`);
   process.exit(failures ? 1 : 0);

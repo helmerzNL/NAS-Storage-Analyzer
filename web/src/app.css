@@ -194,6 +194,9 @@ tbody tr.probe-row:hover { background: none; } tr.probe-row > td { padding-top: 
 .probe-line { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
 .probe-line .badge { flex: none; } .probe-line .btn { flex: none; margin-left: auto; }
 .probe-text { flex: 1 1 28ch; min-width: 0; font-size: .875rem; overflow-wrap: anywhere; align-self: center; }
+/* A group of checkboxes with its question as the legend, without the browser's frame; and the examples under a form. */
+fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; } fieldset.plain > legend { padding: 0; font-size: .82rem; font-weight: 600; letter-spacing: .01em; color: var(--text-muted); }
+ul.examples { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; overflow-wrap: anywhere; }
 td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }   /* the row's actions wrap instead of pushing the table wider than the screen */
 
 /* The update check: a banner at the top of the page for administrators, and a dot on the entries that lead to Settings > System. The dot is not

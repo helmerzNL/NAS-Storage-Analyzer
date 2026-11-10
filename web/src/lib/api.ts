@@ -156,6 +156,14 @@ export interface ShareInfo {
   day_start_hour: number; day_end_hour: number; retention_scans: number; retention_days: number; snapshot_depth: number;
   last_scan: ScanInfo | null; latest_scan: ScanInfo | null; active_job: ActiveJob | null;
 }
+/** Where a message goes when a scan needs attention. The address itself never leaves the server: `url_hint` is its scheme and host. */
+export interface NotificationTarget {
+  id: number; name: string; url_hint: string; format: 'json' | 'text'; lang: 'nl' | 'en';
+  events: { failed: boolean; empty: boolean; errors: boolean; finished: boolean }; enabled: boolean; created_at: string; updated_at: string;
+  last_at: string | null; last_ok: boolean | null; last_status: number | null; last_error: string | null;
+}
+/** How sending one message went. */
+export interface NotificationDelivery { target_id: number; target: string; ok: boolean; status: number; error: string; attempts: number }
 /** One browser in which the person is signed in. `id` names the session; it is not its token. */
 export interface SessionInfo { id: string; created_at: string; last_seen_at: string; expires_at: string; ip: string; user_agent: string; current: boolean }
 /** A connection test of a share: can the worker reach it and list its top folder? `entries` counts that folder, up to a limit (`more`). */
@@ -201,9 +209,10 @@ export interface Category { id: number; key: string; }
 export interface BackupChanges {
   shares_added: string[]; shares_updated: string[]; shares_removed: string[]; file_types_changed: number;
   preferences_applied: number; preferences_skipped: string[]; passwords_unreadable: string[]; recategorize_shares: number;
+  notification_targets: number; notifications_unreadable: string[];
 }
 export interface BackupSummary {
-  format_version: number; app_version: string; created_at: string; counts: { shares: number; file_types: number; preferences: number };
+  format_version: number; app_version: string; created_at: string; counts: { shares: number; file_types: number; preferences: number; notifications: number };
   missing: string[]; changes: BackupChanges; scans_active: boolean;
 }
 export interface StagedBackup { token: string; summary: BackupSummary }

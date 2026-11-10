@@ -14,6 +14,7 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
@@ -24,11 +25,12 @@ import (
 var ctx = context.Background()
 
 type env struct {
-	st   *store.Store
-	q    *jobs.Queue
-	svc  *shares.Service
-	w    *worker.Worker
-	stop func()
+	st     *store.Store
+	q      *jobs.Queue
+	svc    *shares.Service
+	notify *notify.Service
+	w      *worker.Worker
+	stop   func()
 }
 
 type failingRunner struct{ out string }
@@ -50,7 +52,10 @@ func newEnv(t *testing.T, mut func(*worker.Config), runner mounts.Runner) *env {
 	if runner != nil {
 		m.Run = runner
 	}
-	cfg := worker.Config{ID: "test-worker", Parallel: 2, PollEvery: 20 * time.Millisecond, Beat: 50 * time.Millisecond}
+	// The notification targets: none unless a test adds one, and then without waiting between attempts.
+	nt := notify.NewService(st.Pool, box)
+	nt.SetRetryWaits(0, 0, 0)
+	cfg := worker.Config{ID: "test-worker", Parallel: 2, PollEvery: 20 * time.Millisecond, Beat: 50 * time.Millisecond, Notify: nt}
 	if mut != nil {
 		mut(&cfg)
 	}
@@ -58,7 +63,7 @@ func newEnv(t *testing.T, mut func(*worker.Config), runner mounts.Runner) *env {
 	wctx, cancel := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() { w.Run(wctx); close(done) }()
-	e := &env{st: st, q: jobs.NewQueue(st.Pool), svc: svc, w: w}
+	e := &env{st: st, q: jobs.NewQueue(st.Pool), svc: svc, notify: nt, w: w}
 	e.stop = func() { cancel(); <-done }
 	t.Cleanup(e.stop)
 	return e
