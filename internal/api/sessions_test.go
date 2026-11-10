@@ -3,6 +3,8 @@ package api_test
 import (
 	"strings"
 	"testing"
+
+	"github.com/helmerznl/nas-storage-analyzer/internal/api"
 )
 
 // signInAgain signs the administrator in once more, in another browser: password, then a recovery code (an authenticator code
@@ -126,5 +128,39 @@ func TestSignOutEverywhereElse(t *testing.T) {
 	// Nothing left to end.
 	if r := admin.do("DELETE", "/api/v1/auth/sessions", nil); r.Status != 200 || r.Body["revoked"] != float64(0) {
 		t.Fatalf("a second time: %d %s", r.Status, r.Raw)
+	}
+}
+
+// An administrator is told how the request arrived, so the interface can warn about a connection that is not encrypted. A viewer is
+// not: it is not theirs to fix, and it describes the installation.
+func TestSettingsTellAnAdministratorHowTheConnectionArrived(t *testing.T) {
+	e := newAuthEnv(t, nil)
+	admin, _, _ := e.setupAdmin()
+	viewer, _ := e.newUser(admin, "viewer1", "viewer")
+
+	r := admin.do("GET", "/api/v1/settings", nil)
+	expect(t, r, 200, "")
+	conn, _ := r.Body["connection"].(map[string]any)
+	if conn == nil || conn["scheme"] != "http" || conn["require_https"] != false || conn["via_trusted_proxy"] != false {
+		t.Fatalf("plain http, nothing enforced, no proxy: %s", r.Raw)
+	}
+	// A header from an address that is not a trusted proxy changes nothing: anybody can send it.
+	r = admin.do("GET", "/api/v1/settings", nil, "X-Forwarded-Proto", "https")
+	if conn, _ := r.Body["connection"].(map[string]any); conn == nil || conn["scheme"] != "http" {
+		t.Fatalf("an untrusted X-Forwarded-Proto was believed: %s", r.Raw)
+	}
+	r = viewer.do("GET", "/api/v1/settings", nil)
+	expect(t, r, 200, "")
+	if _, has := r.Body["connection"]; has || r.Body["shares_root"] == nil {
+		t.Fatalf("a viewer gets the settings without the connection: %s", r.Raw)
+	}
+
+	// Behind a proxy the app trusts, which says the browser used https.
+	e2 := newAuthEnv(t, func(o *api.Options) { o.TrustedProxies = mustCIDR(t, "127.0.0.0/8"); o.RequireHTTPS = false })
+	admin2, _, _ := e2.setupAdmin()
+	r = admin2.do("GET", "/api/v1/settings", nil, "X-Forwarded-Proto", "https")
+	expect(t, r, 200, "")
+	if conn, _ := r.Body["connection"].(map[string]any); conn == nil || conn["scheme"] != "https" || conn["via_trusted_proxy"] != true || conn["require_https"] != false {
+		t.Fatalf("https through a trusted proxy, not enforced: %s", r.Raw)
 	}
 }

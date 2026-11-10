@@ -693,6 +693,52 @@ const expectText = async (page, sel, re, msg) => {
       } finally { await phone.c.close(); await laptop.c.close(); }
     });
 
+    await step('connection: over http from another machine an administrator is warned, can put the banner away, and Settings says what to do', async () => {
+      // On this computer itself (localhost) there is nothing to warn about, and Settings says why.
+      await page.goto(BASE + '/admin/system');
+      await page.waitForSelector('[data-testid=connection-card][data-state=local]');
+      if (await page.$('[data-testid=connection-banner]')) throw new Error('http on localhost is not something to warn about');
+
+      // The same server under a name that is not this computer: a second browser in which nas.test leads to it.
+      const far = await chromium.launch({ args: ['--host-resolver-rules=MAP nas.test 127.0.0.1'] });
+      try {
+        const c = await far.newContext({ locale: 'nl-NL', viewport: { width: 1280, height: 900 } });
+        const p = await c.newPage();
+        const jsErrors = []; p.on('pageerror', (e) => jsErrors.push(e.message));
+        await p.goto('http://nas.test:' + new URL(BASE).port + '/');
+        await p.fill('[data-testid=login-username]', 'helmer');
+        await p.fill('[data-testid=login-password]', PASSWORD);
+        await p.click('[data-testid=login-submit]');
+        await p.waitForSelector('[data-testid=mfa-use-recovery]');
+        await p.click('[data-testid=mfa-use-recovery]');
+        await p.fill('[data-testid=mfa-code]', codes[3]);
+        await p.click('[data-testid=mfa-submit]');
+        await p.waitForSelector('[data-testid=user-menu]');
+
+        const banner = '[data-testid=connection-banner]';
+        await p.waitForSelector(banner + '[data-state=plain_http]');
+        const said = (await p.textContent(banner)).replace(/\s+/g, ' ');
+        if (!/niet versleuteld/.test(said) || !/wachtwoord/.test(said)) throw new Error('the banner does not say what is wrong: ' + said);
+        await p.screenshot({ path: path.join(SHOTS, '12c-connection-banner.png'), fullPage: true });
+
+        // "What can I do?" leads to the card, which names what to set.
+        await p.click('[data-testid=connection-view]');
+        await p.waitForSelector('[data-testid=connection-card][data-state=plain_http]');
+        const card = (await p.textContent('[data-testid=connection-card]')).replace(/\s+/g, ' ');
+        for (const want of ['NASSA_REQUIRE_HTTPS', 'NASSA_TRUSTED_PROXIES', 'reverse proxy']) if (!card.includes(want)) throw new Error('the card does not name ' + want + ': ' + card);
+        if (!(await p.$('[data-testid=connection-card] .badge.warn'))) throw new Error('an unencrypted connection has the amber status');
+        await p.screenshot({ path: path.join(SHOTS, '12d-connection-card.png'), fullPage: true });
+
+        // Put away: gone on every screen and after a reload. The card stays.
+        await p.click('[data-testid=connection-hide]');
+        await p.waitForSelector(banner, { state: 'detached' });
+        await p.reload();
+        await p.waitForSelector('[data-testid=connection-card][data-state=plain_http]');
+        if (await p.$(banner)) throw new Error('a banner that was put away came back after a reload');
+        if (jsErrors.length) throw new Error('JavaScript errors over plain http: ' + jsErrors.join('; '));
+      } finally { await far.close(); }
+    });
+
     await step('users: add a viewer who must enrol a second factor; viewers cannot administer', async () => {
       await page.goto(BASE + '/admin/users');
       // The administrator makes a link; the guest opens it and chooses their own password, so the administrator never learns it.

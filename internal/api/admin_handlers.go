@@ -336,12 +336,22 @@ func (s *Server) browseFolders(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) error {
-	return writeJSON(w, map[string]any{
+	out := map[string]any{
 		"shares_root":     s.opts.SharesRoot,
 		"version":         "1",
 		"server_time":     time.Now().UTC(),
 		"mount_supported": true,
-	})
+	}
+	// How this request reached the app, for an administrator: the interface warns when the connection is not encrypted, or when it
+	// is and the app cannot tell (a proxy it does not trust), which leaves the session cookie without its Secure flag.
+	if sess := sessionOf(r); sess != nil && sess.User.Role == "admin" {
+		out["connection"] = map[string]any{
+			"scheme":            s.scheme(r),
+			"require_https":     s.opts.RequireHTTPS,
+			"via_trusted_proxy": s.isTrusted(r),
+		}
+	}
+	return writeJSON(w, out)
 }
 
 // ---- history -------------------------------------------------------------------------

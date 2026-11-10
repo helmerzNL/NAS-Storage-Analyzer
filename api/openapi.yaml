@@ -1235,6 +1235,14 @@ paths:
                   version: {type: string}
                   server_time: {type: string, format: date-time}
                   mount_supported: {type: boolean}
+                  connection:
+                    type: object
+                    description: "Administrators only: how this request reached the app. The interface warns when the connection is not encrypted, or when the browser uses https and the app sees http (a proxy that is not in NASSA_TRUSTED_PROXIES)."
+                    required: [scheme, require_https, via_trusted_proxy]
+                    properties:
+                      scheme: {type: string, enum: [http, https], description: "What the app takes this request to be: https with TLS on the connection, or when a trusted proxy says so in X-Forwarded-Proto."}
+                      require_https: {type: boolean, description: "NASSA_REQUIRE_HTTPS: sign-in over plain http is refused."}
+                      via_trusted_proxy: {type: boolean, description: "The connection comes from an address in NASSA_TRUSTED_PROXIES."}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/fs/dirs:
     get:

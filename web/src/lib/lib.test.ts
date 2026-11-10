@@ -168,6 +168,7 @@ describe('translations', () => {
   it('define the keys behind dynamic lookups', () => {
     const need: Record<string, string[]> = {
       'cat.': ['video', 'audio', 'images', 'documents', 'archives', 'code', 'disk_images', 'other'],
+      'connection.': ['plain_http', 'proxy_not_trusted', 'not_enforced', 'local', 'ok', 'unknown'],
       'kind.': ['bind', 'nfs', 'smb'], 'mode.': ['full', 'incremental'], 'role.': ['admin', 'viewer'],
       'sort.': ['size', 'name', 'mtime', 'used', 'ext'], 'mfa.use.': ['totp', 'passkey', 'recovery'],
       'backup.section.': ['shares', 'file_types', 'preferences'], 'script.simple.paste.': ['sh', 'powershell', 'cmd'],
