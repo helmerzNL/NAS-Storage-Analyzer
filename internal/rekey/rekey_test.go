@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/rekey"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
@@ -63,8 +64,16 @@ func seed(t *testing.T, key *secrets.Box) (st *store.Store, shareID int64, totpS
 	if totpSecret, _, err = a.BeginTOTP(ctx, alice); err != nil {
 		t.Fatal(err)
 	}
+	address := webhookAddress
+	target := notify.Defaults()
+	target.Name, target.URL = "ntfy", &address
+	if _, err := notify.NewService(st.Pool, key).Create(ctx, target); err != nil {
+		t.Fatal(err)
+	}
 	return st, shareID, totpSecret
 }
+
+const webhookAddress = "https://ntfy.example.org/a-secret-topic"
 
 func sealed(t *testing.T, st *store.Store) (share, user []byte) {
 	t.Helper()
@@ -94,8 +103,16 @@ func TestRekeyMovesEverySecretToTheNewKey(t *testing.T) {
 	if err != nil || already {
 		t.Fatalf("rekey: %v (already %v)", err, already)
 	}
-	if len(res.Counts) != 2 || res.Counts[0] != 1 || res.Counts[1] != 1 || res.Total() != 2 {
-		t.Fatalf("one SMB password and one authenticator secret: %+v", res)
+	if len(res.Counts) != 3 || res.Counts[0] != 1 || res.Counts[1] != 1 || res.Counts[2] != 1 || res.Total() != 3 ||
+		res.String() != "1 SMB password(s) of shares, 1 authenticator secret(s) of users, 1 address(es) of notification targets" {
+		t.Fatalf("one SMB password, one authenticator secret and one address: %+v (%s)", res, res)
+	}
+	// The address of the notification target, read by the application started with the new key and not with the old one.
+	if list, err := notify.NewService(st.Pool, newKey).List(ctx); err != nil || len(list) != 1 || list[0].URLHint != "https://ntfy.example.org/…" {
+		t.Fatalf("the notification target under the new key: %+v %v", list, err)
+	}
+	if list, _ := notify.NewService(st.Pool, oldKey).List(ctx); len(list) != 1 || list[0].URLHint != "" {
+		t.Errorf("the old key still opens the address of the notification target: %+v", list)
 	}
 
 	// The application, started with the new key, reads what it stored; with the old key it reads nothing.
@@ -124,7 +141,7 @@ func TestRekeyMovesEverySecretToTheNewKey(t *testing.T) {
 	if err := st.Pool.QueryRow(ctx, `SELECT username, detail::text FROM audit_log WHERE action = 'encryption.rekey'`).Scan(&who, &detail); err != nil {
 		t.Fatal(err)
 	}
-	if who != "nasa rekey" || !strings.Contains(detail, `"secrets": 2`) || strings.Contains(detail, smbPassword) || strings.Contains(detail, totpSecret) {
+	if who != "nasa rekey" || !strings.Contains(detail, `"secrets": 3`) || strings.Contains(detail, smbPassword) || strings.Contains(detail, totpSecret) {
 		t.Errorf("audit entry: by %q, %s", who, detail)
 	}
 
@@ -174,15 +191,16 @@ func TestCheckNamesWhatDoesNotOpen(t *testing.T) {
 	shareBefore, userBefore := sealed(t, st)
 
 	res, problems, err := rekey.Check(ctx, st.Pool, key)
-	if err != nil || len(problems) != 0 || res.Total() != 2 {
+	if err != nil || len(problems) != 0 || res.Total() != 3 {
 		t.Fatalf("the right key: %+v %v %v", res, problems, err)
 	}
 	res, problems, err = rekey.Check(ctx, st.Pool, box(t, 9))
-	if err != nil || res.Total() != 2 || len(problems) != 2 {
+	if err != nil || res.Total() != 3 || len(problems) != 3 {
 		t.Fatalf("a wrong key: %+v %v %v", res, problems, err)
 	}
 	all := strings.Join(problems, " | ")
-	if !strings.Contains(all, `share "media"`) || !strings.Contains(all, `user "alice"`) || strings.Contains(all, smbPassword) {
+	if !strings.Contains(all, `share "media"`) || !strings.Contains(all, `user "alice"`) || !strings.Contains(all, `notification target "ntfy"`) ||
+		strings.Contains(all, smbPassword) || strings.Contains(all, "a-secret-topic") {
 		t.Errorf("the problems name the share and the user, never a value: %s", all)
 	}
 	shareAfter, userAfter := sealed(t, st)

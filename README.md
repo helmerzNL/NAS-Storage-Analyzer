@@ -70,6 +70,7 @@ Een NAS loopt langzaam vol, en op een share met miljoenen bestanden is *waar bli
 - **Verwijderscripts**: vink bestanden en mappen aan en je krijgt één script (`.ps1`, `.cmd`, `.sh` of een eenvoudige `.txt`) dat precies die dingen verwijdert. **NASSA verwijdert zelf nooit iets**: het schrijft de tekst, jij draait hem. Zie [Verwijderen](#verwijderen).
 - **Veilig inloggen, met meerdere gebruikers**: lokale accounts met Argon2id, een **verplichte tweede factor** (authenticator-app of passkey, ook wachtwoordloos met alleen een passkey), herstelcodes, lockout, CSRF-bescherming, de rollen Admin en Viewer en een auditlog. Geen standaardwachtwoorden. Een beheerder nodigt anderen uit met een eenmalige link; niemand kiest het wachtwoord van een ander.
 - **Instellingen per persoon**: Nederlands of Engels, binaire of decimale eenheden, licht, donker of volgens je systeem, en een eigen accentkleur.
+- **Meldingen**: laat een bericht sturen naar Home Assistant, ntfy, Gotify of een andere webhook als een scan mislukt, niets vindt of niet alles kon lezen.
 - **Voor beheerders**: een OpenAPI-REST-API, Prometheus-`/metrics`, JSON-logs, health checks, een back-up van wat je zelf invoerde en een fabrieksreset.
 - **Jij houdt de regie**: alles draait in je eigen containers. De update-check vraagt alleen aan GitHub of er een nieuwere release is en stuurt niets over jouw installatie mee; je zet hem uit met `NASSA_UPDATE_CHECK=false`.
 
@@ -298,6 +299,7 @@ sed -i 's/^NASA_/NASSA_/' .env
 | Scan mislukt met "permission denied" | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`). |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkeys werken niet ("Passkeys hebben een beveiligd adres nodig") | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASSA_RP_ID` in. |
+| Je wilt weten dat een scan mislukte zonder het dashboard te openen | **Instellingen → Meldingen**: een webhook naar Home Assistant, ntfy of Gotify. Zie [`docs/deploy.md`](docs/deploy.md#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft). |
 | Een scanfout op het dashboard | Klik erop (beheerder): het auditlog toont de oorzaak en de mappen die niet te lezen waren. |
 | `/metrics` geeft 401 of 403 | Zet `NASSA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
@@ -415,7 +417,7 @@ Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media
 
 ## Privacy en beveiliging
 
-- **Alles staat op je eigen server**: geen account bij ons, geen analytics, geen tracking. De enige verbinding naar buiten is de update-check: die vraagt aan `github.com` of er een nieuwere release is, met alleen een vaste `User-Agent` (geen versie, geen installatie-id, geen gebruikersgegevens), en werkt niets bij.
+- **Alles staat op je eigen server**: geen account bij ons, geen analytics, geen tracking. Uit zichzelf maakt de app één verbinding naar buiten, de update-check: die vraagt aan `github.com` of er een nieuwere release is, met alleen een vaste `User-Agent` (geen versie, geen installatie-id, geen gebruikersgegevens), en werkt niets bij. Voeg je onder **Meldingen** een doel toe, dan stuurt NASSA de uitkomst van een scan naar het adres dat jij koos, en naar niets anders: de naam van de share, wat er gebeurde en de aantallen, nooit een bestandsnaam.
 - **Lokale accounts** met Argon2id, lockout na mislukte pogingen en CSRF-bescherming. Een **tweede factor is verplicht**: een authenticator-app (met herstelcodes) of een passkey, die ook wachtwoordloos inloggen kan.
 - **Sessies:** onder *Beveiliging* in het gebruikersmenu zie je in welke browsers je bent aangemeld, en meld je een andere sessie af of alle andere in één keer.
 - **Rollen:** Admin en Viewer. Alleen beheerders maken verwijderscripts, beheren shares, gebruikers en bestandstypes en zien het auditlog.

@@ -34,6 +34,9 @@ These are properties of the design, described in [`docs/deploy.md`](docs/deploy.
   The recommended route mounts on the host and gives the containers no privileges.
 - The application makes one outgoing request of its own, the update check to `github.com`, which can be switched off
   (`NASSA_UPDATE_CHECK=false`).
+- An administrator can add notification targets: addresses the server POSTs the outcome of a scan to. Private networks and the
+  server itself are allowed destinations (that is where Home Assistant and Gotify live); redirects are not followed, the answer is
+  never shown, and link-local addresses are refused. Nothing is sent without a target.
 - TLS is terminated by a reverse proxy; the application does not serve HTTPS itself.
 
 A way for someone who is **not** an administrator to do any of this, or for an administrator to reach beyond it (reading file

@@ -70,6 +70,7 @@ A NAS fills up slowly, and on a share with millions of files *where did the spac
 - **Delete scripts**: tick files and folders and get one script (`.ps1`, `.cmd`, `.sh` or a simple `.txt`) that deletes exactly those. **NASSA never deletes anything itself**: it writes the text, you run it. See [Deleting](#deleting).
 - **Secure sign-in, for several users**: local accounts with Argon2id, a **mandatory second factor** (authenticator app or passkey, passwordless with a passkey alone too), recovery codes, lockout, CSRF protection, the roles Admin and Viewer and an audit log. No default passwords. An administrator invites others with a one-time link; nobody chooses anyone else's password.
 - **Settings per person**: Dutch or English, binary or decimal units, light, dark or following your system, and an accent colour of your own.
+- **Notifications**: have a message sent to Home Assistant, ntfy, Gotify or another webhook when a scan fails, finds nothing or could not read everything.
 - **For operators**: an OpenAPI REST API, Prometheus `/metrics`, JSON logs, health checks, a backup of what you entered yourself and a factory reset.
 - **Your data, your server**: everything runs in your own containers. The update check only asks GitHub whether a newer release exists and sends nothing about your installation; switch it off with `NASSA_UPDATE_CHECK=false`.
 
@@ -298,6 +299,7 @@ sed -i 's/^NASA_/NASSA_/' .env
 | Scan fails with "permission denied" | The container runs as uid 10001 and does not own the folder. Set `NASSA_SHARES_GID` to the group that owns the share (Unraid: `100`). |
 | The screen asks for a setup token you do not have | `docker compose logs app \| grep setup_token`, or `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkeys do not work ("Passkeys need a secure address") | Open the app through a host name with https (or `http://localhost`) and set `NASSA_RP_ID`. |
+| You want to know that a scan failed without opening the dashboard | **Settings → Notifications**: a webhook to Home Assistant, ntfy or Gotify. See [`docs/deploy.md`](docs/deploy.md#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft). |
 | A scan error on the dashboard | Click it (administrator): the audit log shows the cause and the folders that could not be read. |
 | `/metrics` gives 401 or 403 | Set `NASSA_METRICS_TOKEN` and send it; without a token only loopback is answered. |
 | `worker` stays `unhealthy` | `docker compose logs worker`: usually the database cannot be reached. |
@@ -415,7 +417,7 @@ Scanning without the interface works too: `nasa scan -path /mnt/shares/media -na
 
 ## Privacy and security
 
-- **Everything is stored on your own server**: no account with us, no analytics, no tracking. The only outgoing connection is the update check: it asks `github.com` whether a newer release exists, with only a fixed `User-Agent` (no version, no installation id, no user data), and updates nothing.
+- **Everything is stored on your own server**: no account with us, no analytics, no tracking. Of its own accord the app makes one outgoing connection, the update check: it asks `github.com` whether a newer release exists, with only a fixed `User-Agent` (no version, no installation id, no user data), and updates nothing. If you add a target under **Notifications**, NASSA sends the outcome of a scan to the address you chose, and to nothing else: the name of the share, what happened and the counts, never a file name.
 - **Local accounts** with Argon2id, lockout after failed attempts and CSRF protection. A **second factor is mandatory**: an authenticator app (with recovery codes) or a passkey, which can also sign in without a password.
 - **Sessions:** under *Security* in the user menu you see the browsers you are signed in with, and sign another session out, or all the others at once.
 - **Roles:** Admin and Viewer. Only administrators make delete scripts, manage shares, users and file types and see the audit log.

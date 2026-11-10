@@ -18,6 +18,7 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanner"
 	"github.com/helmerznl/nas-storage-analyzer/internal/scanrun"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
@@ -31,8 +32,10 @@ type Config struct {
 	PollEvery  time.Duration // queue polling interval (default 2 s)
 	Beat       time.Duration // heartbeat / progress interval (default 2 s)
 	DirTimeout time.Duration // see scanner.Options.DirTimeout (default 10 min)
-	Loc        *time.Location
-	Now        func() time.Time
+	// Notify tells the notification targets how a scan ended. Nil sends nothing.
+	Notify *notify.Service
+	Loc    *time.Location
+	Now    func() time.Time
 }
 
 // Worker executes jobs from the queue.
@@ -45,8 +48,9 @@ type Worker struct {
 	cfg    Config
 	log    *slog.Logger
 
-	running   atomic.Int32 // jobs executing right now
-	lastClaim atomic.Int64 // unix nanoseconds of the last claim attempt that reached the database
+	running    atomic.Int32   // jobs executing right now
+	announcing sync.WaitGroup // messages about a scan that are on their way
+	lastClaim  atomic.Int64   // unix nanoseconds of the last claim attempt that reached the database
 }
 
 func New(st *store.Store, sh *shares.Service, m *mounts.Manager, cfg Config, log *slog.Logger) *Worker {
@@ -159,7 +163,50 @@ func (w *Worker) Run(ctx context.Context) {
 		}()
 	}
 	wg.Wait()
+	// A scan that ended just before the stop still gets its message out; a receiver that does not answer is not waited for.
+	sent := make(chan struct{})
+	go func() { w.announcing.Wait(); close(sent) }()
+	select {
+	case <-sent:
+	case <-time.After(announceGrace):
+		w.log.Warn("stopping before every notification was delivered")
+	}
 	w.log.Info("worker stopped", "id", w.cfg.ID)
+}
+
+const (
+	announceLimit = 90 * time.Second // every target, with its attempts
+	announceGrace = 5 * time.Second  // how long a stopping worker waits for messages on their way
+)
+
+// announce tells the notification targets how a scan ended. It runs beside the job: a receiver that is slow or down must not hold
+// the scan's slot, and a message that cannot be delivered changes nothing about the scan. A delivery that failed is in the audit
+// log, by the name of the target and never with its address. A scan that ended because the worker itself is stopping is not
+// announced: nothing is wrong with the share, and there is no time left to send.
+func (w *Worker) announce(ctx context.Context, log *slog.Logger, ev notify.Event) {
+	if w.cfg.Notify == nil || ctx.Err() != nil {
+		return
+	}
+	ev.At = w.cfg.Now()
+	w.announcing.Add(1)
+	go func() {
+		defer w.announcing.Done()
+		nctx, cancel := context.WithTimeout(context.Background(), announceLimit)
+		defer cancel()
+		deliveries, err := w.cfg.Notify.Notify(nctx, ev)
+		if err != nil {
+			log.Error("cannot read the notification targets", "error", err)
+			return
+		}
+		for _, d := range deliveries {
+			if d.OK {
+				log.Info("notification sent", "target", d.Target, "event", ev.Kind, "status", d.Status, "attempts", d.Attempts)
+				continue
+			}
+			log.Warn("notification not delivered", "target", d.Target, "event", ev.Kind, "status", d.Status, "attempts", d.Attempts, "error", d.Error)
+			w.audit(log, "notification.failed", d.Target, map[string]any{"event": ev.Kind, "share": ev.Share, "status": d.Status, "attempts": d.Attempts, "error": d.Error})
+		}
+	}()
 }
 
 // A connection test ("probe") of a share: mount it (or find its path) and list the top folder. The whole test is bounded well inside
@@ -270,7 +317,10 @@ func (w *Worker) execute(ctx context.Context, job *jobs.Job) {
 		state, msg = jobs.StateFailed, "unknown job kind"
 	}
 	if state == jobs.StateFailed {
-		w.auditFailure(log, job, msg)
+		name, scanID := w.auditFailure(log, job, msg)
+		if job.Kind == jobs.KindScan {
+			w.announce(ctx, log, notify.Event{Kind: notify.KindFailed, Share: name, ShareID: job.ShareID, ScanID: scanID, JobID: job.ID, Trigger: job.Trigger, Error: msg})
+		}
 	}
 	done, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
@@ -405,6 +455,9 @@ func (w *Worker) runScan(ctx context.Context, job *jobs.Job, log *slog.Logger) (
 		}
 		addUnreadable(detail, res.Unreadable)
 		w.audit(log, action, f.Input.Name, detail)
+		// The audit action is the kind of the message: scan.finished, scan.empty or scan.errors.
+		w.announce(ctx, log, notify.Event{Kind: action, Share: f.Input.Name, ShareID: f.ID, ScanID: res.ScanID, JobID: job.ID, Trigger: job.Trigger,
+			Files: res.Totals.Files, Dirs: res.Totals.Dirs, Bytes: res.Totals.Bytes, Errors: res.Progress.Errors})
 		return jobs.StateDone, ""
 	case wasCancelled:
 		return jobs.StateCancelled, ""
@@ -476,8 +529,9 @@ func jobDetail(job *jobs.Job) map[string]any {
 }
 
 // auditFailure records why a job failed. The job's own error is kept in the jobs table and shown on the
-// dashboard, but only the audit log is a place to look back through, and it is the one admins read.
-func (w *Worker) auditFailure(log *slog.Logger, job *jobs.Job, msg string) {
+// dashboard, but only the audit log is a place to look back through, and it is the one admins read. It returns the name of the
+// share and the scan the job had started (0 when it had not), for the message to the notification targets.
+func (w *Worker) auditFailure(log *slog.Logger, job *jobs.Job, msg string) (share string, scan int64) {
 	action := "scan.failed"
 	if job.Kind != jobs.KindScan {
 		action = "share.recategorize_failed"
@@ -495,12 +549,13 @@ func (w *Worker) auditFailure(log *slog.Logger, job *jobs.Job, msg string) {
 	// cannot be opened) has none.
 	var scanID *int64
 	if err := w.st.Pool.QueryRow(ctx, `SELECT scan_id FROM jobs WHERE id = $1`, job.ID).Scan(&scanID); err == nil && scanID != nil {
-		detail["scan_id"] = *scanID
+		detail["scan_id"], scan = *scanID, *scanID
 	}
 	if hint := failureHint(msg); hint != "" {
 		detail["hint"] = hint
 	}
 	w.audit(log, action, target, detail)
+	return target, scan
 }
 
 // failureHint says what to do about the failures that have one fix people keep needing: the share cannot be read

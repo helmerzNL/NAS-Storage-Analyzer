@@ -21,6 +21,7 @@
   import About from './routes/About.svelte';
   import UserMenu from './components/UserMenu.svelte';
   import Backup from './routes/Backup.svelte';
+  import Notifications from './routes/Notifications.svelte';
   import Delete from './routes/Delete.svelte';
   import Invite from './routes/Invite.svelte';
   import { invite } from './lib/invite.svelte';
@@ -105,6 +106,7 @@
       {:else if route.path.startsWith('/admin/shares') && isAdmin()}<SettingsLayout scope="settings"><Shares /></SettingsLayout>
       {:else if route.path.startsWith('/admin/extensions') && isAdmin()}<SettingsLayout scope="settings"><Extensions /></SettingsLayout>
       {:else if route.path.startsWith('/admin/delete') && isAdmin()}<SettingsLayout scope="settings"><Delete /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/notifications') && isAdmin()}<SettingsLayout scope="settings"><Notifications /></SettingsLayout>
       {:else if route.path.startsWith('/admin/backup') && isAdmin()}<SettingsLayout scope="settings"><Backup /></SettingsLayout>
       {:else if route.path.startsWith('/admin/users') && isAdmin()}<SettingsLayout scope="settings"><Users /></SettingsLayout>
       {:else if route.path.startsWith('/admin/audit') && isAdmin()}<SettingsLayout scope="settings"><Audit /></SettingsLayout>

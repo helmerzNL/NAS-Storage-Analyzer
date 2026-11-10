@@ -14,21 +14,49 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 )
 
-// Column is one place where a sealed value is stored. Label is how a row is named in a message: never the value.
+// Column is one place where a sealed value is stored. Label is the column that names a row in a message (never the value), What
+// says what one value is, and Counted what a number of them is.
 type Column struct {
-	Table, Column, Label, What string
+	Table, Column, Label, What, Counted string
 }
 
 // Columns lists every sealed column. A test compares it with the schema (every bytea column whose name ends in _enc), so a new
 // encrypted column cannot be added without teaching this package about it.
 var Columns = []Column{
-	{Table: "shares", Column: "secret_enc", Label: "name", What: "the SMB password of share"},
-	{Table: "users", Column: "totp_secret_enc", Label: "username", What: "the authenticator secret of user"},
+	{Table: "shares", Column: "secret_enc", Label: "name", What: "the SMB password of share", Counted: "SMB password(s) of shares"},
+	{Table: "users", Column: "totp_secret_enc", Label: "username", What: "the authenticator secret of user", Counted: "authenticator secret(s) of users"},
+	{Table: "notification_targets", Column: "url_enc", Label: "name", What: "the address of notification target", Counted: "address(es) of notification targets"},
+}
+
+// tables is every table of Columns once, for the lock.
+func tables() string {
+	var names []string
+	seen := map[string]bool{}
+	for _, c := range Columns {
+		if !seen[c.Table] {
+			seen[c.Table] = true
+			names = append(names, pgx.Identifier{c.Table}.Sanitize())
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // Result counts what was looked at, per column, in the order of Columns.
 type Result struct {
 	Counts []int
+}
+
+// String says what was counted: "1 SMB password(s) of shares, 0 authenticator secret(s) of users, ...".
+func (r Result) String() string {
+	var parts []string
+	for i, c := range Columns {
+		n := 0
+		if i < len(r.Counts) {
+			n = r.Counts[i]
+		}
+		parts = append(parts, fmt.Sprintf("%d %s", n, c.Counted))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // Total is the number of stored secrets.
@@ -106,8 +134,8 @@ func Run(ctx context.Context, pool *pgxpool.Pool, oldBox, newBox *secrets.Box, a
 		return res, false, err
 	}
 	defer tx.Rollback(ctx)
-	// Writers of these two tables wait until the new values are in: nothing can be sealed with the old key behind our back.
-	if _, err := tx.Exec(ctx, `LOCK TABLE shares, users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+	// Writers of these tables wait until the new values are in: nothing can be sealed with the old key behind our back.
+	if _, err := tx.Exec(ctx, `LOCK TABLE `+tables()+` IN SHARE ROW EXCLUSIVE MODE`); err != nil {
 		return res, false, err
 	}
 	var unreadable []string

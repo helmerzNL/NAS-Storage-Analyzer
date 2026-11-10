@@ -15,6 +15,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/updates"
@@ -60,6 +61,8 @@ type Options struct {
 	Backup *backup.Service
 	// Reset wipes the installation on an administrator's request (nil: the routes are not registered).
 	Reset *reset.Service
+	// Notify holds the notification targets and sends the test message (nil: the routes are not registered).
+	Notify *notify.Service
 }
 
 // ParseTrustedProxies parses a comma-separated list of CIDRs or addresses.

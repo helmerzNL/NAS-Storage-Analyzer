@@ -171,7 +171,7 @@ describe('translations', () => {
       'connection.': ['plain_http', 'proxy_not_trusted', 'not_enforced', 'local', 'ok', 'unknown'],
       'kind.': ['bind', 'nfs', 'smb'], 'mode.': ['full', 'incremental'], 'role.': ['admin', 'viewer'],
       'sort.': ['size', 'name', 'mtime', 'used', 'ext'], 'mfa.use.': ['totp', 'passkey', 'recovery'],
-      'backup.section.': ['shares', 'file_types', 'preferences'], 'script.simple.paste.': ['sh', 'powershell', 'cmd'],
+      'backup.section.': ['shares', 'file_types', 'preferences', 'notifications'], 'notify.format.': ['json', 'text'], 'script.simple.paste.': ['sh', 'powershell', 'cmd'],
       'atime.reason.': ['mount_noatime', 'network_fs', 'small_sample', 'atime_equals_mtime_majority', 'atime_equals_mtime_many', 'atime_before_mtime_majority'],
     };
     for (const p of prefixes) if (p in need) for (const s of need[p]) expect(p + s in nl, p + s).toBe(true);
@@ -308,10 +308,12 @@ describe('backup and restore', () => {
     const b = await import('./backup.svelte');
     expect(b.nameList(['a', 'b'])).toBe('a, b');
     expect(b.nameList(Array.from({ length: 12 }, (_, i) => 'n' + i), 3)).toContain('9');
-    const none = { shares_added: [], shares_updated: ['a'], shares_removed: [], file_types_changed: 0, preferences_applied: 0, preferences_skipped: [], passwords_unreadable: [], recategorize_shares: 0 };
+    const none = { shares_added: [], shares_updated: ['a'], shares_removed: [], file_types_changed: 0, preferences_applied: 0, preferences_skipped: [], passwords_unreadable: [], recategorize_shares: 0,
+      notification_targets: 0, notifications_unreadable: [] };
     expect(b.changesNothing(none)).toBe(true);                    // updating a share with its own settings is not a change worth confirming
     expect(b.changesNothing({ ...none, shares_removed: ['x'] })).toBe(false);
     expect(b.changesNothing({ ...none, file_types_changed: 1 })).toBe(false);
+    expect(b.changesNothing({ ...none, notification_targets: 2 })).toBe(false);
     expect(b.changesNothing(none, true)).toBe(true);
   });
   it('formats sizes and seconds for the reader', async () => {

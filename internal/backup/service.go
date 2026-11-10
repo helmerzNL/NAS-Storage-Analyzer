@@ -19,6 +19,7 @@ import (
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 )
 
@@ -47,6 +48,7 @@ type Service struct {
 	pool    *pgxpool.Pool
 	shares  *shares.Service
 	auth    *auth.Service
+	notify  *notify.Service
 	audit   Auditor
 	queue   *jobs.Queue
 	log     *slog.Logger
@@ -60,11 +62,11 @@ type Service struct {
 }
 
 // New builds the service on a read-write pool. version is the version of this build, written into every file.
-func New(pool *pgxpool.Pool, sh *shares.Service, au *auth.Service, q *jobs.Queue, log *slog.Logger, version string) *Service {
+func New(pool *pgxpool.Pool, sh *shares.Service, au *auth.Service, nt *notify.Service, q *jobs.Queue, log *slog.Logger, version string) *Service {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Service{pool: pool, shares: sh, auth: au, audit: au, queue: q, log: log, version: version}
+	return &Service{pool: pool, shares: sh, auth: au, notify: nt, audit: au, queue: q, log: log, version: version}
 }
 
 func (s *Service) now() time.Time {
@@ -90,8 +92,12 @@ func (s *Service) Export(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	nt, err := s.notify.Export(ctx)
+	if err != nil {
+		return nil, err
+	}
 	f := File{Format: Format, FormatVersion: FormatVersion, AppVersion: s.version, CreatedAt: s.now().UTC().Truncate(time.Second),
-		Shares: sh, FileTypes: ft, Preferences: pr}
+		Shares: sh, FileTypes: ft, Preferences: pr, Notifications: nt}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
@@ -121,13 +127,19 @@ type Changes struct {
 	PasswordsUnreadable []string `json:"passwords_unreadable"` // shares restored without their SMB password
 	// RecategorizeShares is how many shares are re-categorised in the background because the file-type map changed.
 	RecategorizeShares int `json:"recategorize_shares"`
+	// NotificationTargets is how many notification targets the file puts in place of the ones here: 0 when the file has no such section, or
+	// when its targets are exactly the ones here.
+	NotificationTargets int `json:"notification_targets"`
+	// NotificationsUnreadable are targets left out because their address does not open with this installation's key.
+	NotificationsUnreadable []string `json:"notifications_unreadable"`
 }
 
 // Counts is how many entries each section of the file has.
 type Counts struct {
-	Shares      int `json:"shares"`
-	FileTypes   int `json:"file_types"`
-	Preferences int `json:"preferences"`
+	Shares        int `json:"shares"`
+	FileTypes     int `json:"file_types"`
+	Preferences   int `json:"preferences"`
+	Notifications int `json:"notifications"`
 }
 
 // Summary describes a staged file.
@@ -153,7 +165,7 @@ func nonNil(s []string) []string {
 // describe works out what restoring c would do now, without changing anything.
 func (s *Service) describe(ctx context.Context, q auth.Querier, c *Checked) (Changes, []string, error) {
 	ch := Changes{SharesAdded: []string{}, SharesUpdated: []string{}, SharesRemoved: []string{}, PreferencesSkipped: []string{},
-		PasswordsUnreadable: nonNil(c.Unreadable)}
+		PasswordsUnreadable: nonNil(c.Unreadable), NotificationsUnreadable: nonNil(c.TargetsUnreadable)}
 	var missing []string
 	if c.File.Shares != nil {
 		p, err := s.shares.PlanFor(ctx, c.File.Shares)
@@ -188,6 +200,17 @@ func (s *Service) describe(ctx context.Context, q auth.Querier, c *Checked) (Cha
 		}
 	} else {
 		missing = append(missing, "preferences")
+	}
+	if c.File.Notifications != nil {
+		differs, err := notify.Differs(ctx, s.pool, c.File.Notifications)
+		if err != nil {
+			return ch, nil, err
+		}
+		if differs {
+			ch.NotificationTargets = len(c.File.Notifications)
+		}
+	} else {
+		missing = append(missing, "notifications")
 	}
 	return ch, nonNil(missing), nil
 }
@@ -255,7 +278,8 @@ func (s *Service) summarize(ctx context.Context, c *Checked) (Summary, error) {
 		return Summary{}, err
 	}
 	return Summary{FormatVersion: c.File.FormatVersion, AppVersion: c.File.AppVersion, CreatedAt: c.File.CreatedAt,
-		Counts:  Counts{Shares: len(c.File.Shares), FileTypes: len(c.File.FileTypes), Preferences: len(c.File.Preferences)},
+		Counts: Counts{Shares: len(c.File.Shares), FileTypes: len(c.File.FileTypes), Preferences: len(c.File.Preferences),
+			Notifications: len(c.File.Notifications) + len(c.TargetsUnreadable)},
 		Missing: missing, Changes: ch, ScansActive: active}, nil
 }
 

@@ -18,8 +18,8 @@ import (
 
 const rekeyUsage = `Usage: nasa rekey [-check] [-db ...]
 
-Replaces the key that encrypts what the database stores encrypted: the SMB passwords of shares and the authenticator
-secrets of users. Use it when the key may have been seen by somebody else, or as routine.
+Replaces the key that encrypts what the database stores encrypted: the SMB passwords of shares, the authenticator secrets
+of users and the addresses of notification targets. Use it when the key may have been seen by somebody else, or as routine.
 
   The current key   NASSA_ENCRYPTION_KEY       or the file named by NASSA_ENCRYPTION_KEY_FILE
   The new key       NASSA_NEW_ENCRYPTION_KEY   or the file named by NASSA_NEW_ENCRYPTION_KEY_FILE   (make one: nasa genkey)
@@ -70,7 +70,7 @@ func runRekey(args []string, out io.Writer) error {
 		if len(problems) > 0 {
 			return fmt.Errorf("%d of %d stored secrets do not open with NASSA_ENCRYPTION_KEY: %s", len(problems), res.Total(), strings.Join(problems, "; "))
 		}
-		fmt.Fprintf(out, "All stored secrets open with NASSA_ENCRYPTION_KEY (%s).\n", describe(res))
+		fmt.Fprintf(out, "All stored secrets open with NASSA_ENCRYPTION_KEY (%s).\n", res)
 		return nil
 	}
 
@@ -79,22 +79,11 @@ func runRekey(args []string, out io.Writer) error {
 		return err
 	}
 	if already {
-		fmt.Fprintf(out, "The stored secrets are already under the new key (%s): nothing was changed.\n", describe(res))
+		fmt.Fprintf(out, "The stored secrets are already under the new key (%s): nothing was changed.\n", res)
 	} else {
-		fmt.Fprintf(out, "Re-encrypted with the new key: %s.\n", describe(res))
+		fmt.Fprintf(out, "Re-encrypted with the new key: %s.\n", res)
 	}
 	fmt.Fprint(out, "Now set NASSA_ENCRYPTION_KEY to the new key and start the app and the worker; with the old key they can open none of this.\n"+
 		"A backup file made in the app before this holds SMB passwords under the old key: make a new one.\n")
 	return nil
-}
-
-// describe says what was counted, in the words of rekey.Columns' order: shares, then users.
-func describe(r rekey.Result) string {
-	n := func(i int) int {
-		if i < len(r.Counts) {
-			return r.Counts[i]
-		}
-		return 0
-	}
-	return fmt.Sprintf("%d SMB password(s) of shares, %d authenticator secret(s) of users", n(0), n(1))
 }

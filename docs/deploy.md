@@ -11,6 +11,7 @@ Dit document hoort bij de [README](../README.md) ([English](../README.en.md)). N
 5. [Back-up en herstel](#5-back-up-en-herstel)
 6. [PostgreSQL afstellen](#6-postgresql-afstellen)
 7. [Monitoring: `/metrics`, logs, health checks](#7-monitoring)
+   * [7b. Meldingen: een bericht als een scan aandacht nodig heeft](#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft)
 8. [Bijwerken](#8-bijwerken)
    * [8b. All-in-one image: Unraid-store en Home Assistant](#8b-all-in-one-image-unraid-store-en-home-assistant)
 9. [Bekende beperkingen](#9-bekende-beperkingen)
@@ -437,7 +438,7 @@ docker compose up -d
 
 `NASSA_ENCRYPTION_KEY` versleutelt wat de database versleuteld bewaart: de SMB-wachtwoorden van shares en de geheimen van
 authenticator-apps. Wissel de sleutel als iemand anders hem gezien kan hebben (een `.env` in een gedeelde back-up, een schermafbeelding),
-of gewoon af en toe. `nasa rekey` versleutelt alles opnieuw met een nieuwe sleutel, in één transactie: daarna staat alles onder de nieuwe
+of gewoon af en toe. `nasa rekey` versleutelt alles opnieuw (ook de adressen van meldingsdoelen) met een nieuwe sleutel, in één transactie: daarna staat alles onder de nieuwe
 sleutel, of er is niets veranderd.
 
 ```bash
@@ -559,6 +560,59 @@ Zet de datadirectory van de database op SSD's. Dat is, meer dan elke parameter, 
   `time() - nasa_share_last_scan_timestamp_seconds > 2 * 86400`.
 * **API:** de volledige OpenAPI-specificatie staat op `/openapi.yaml` ([`api/openapi.yaml`](../api/openapi.yaml)).
   De API gebruikt dezelfde sessie en CSRF-bescherming als de UI.
+
+## 7b. Meldingen: een bericht als een scan aandacht nodig heeft
+
+Een scan die 's nachts mislukt, zie je pas als je het dashboard opent. Onder **Instellingen → Meldingen** voeg je een *doel* toe: een adres
+waar NASSA een bericht heen stuurt als een scan
+
+* **mislukt** (ook: geweigerd omdat de share niet gekoppeld lijkt);
+* **klaar is maar niets vond** (zo ziet een share eruit die niet gekoppeld is);
+* **klaar is maar mappen of bestanden niet kon lezen**;
+* en, als je dat aanvinkt, **klaar is zonder bijzonderheden**.
+
+Zolang er geen doel is, wordt er niets verstuurd. Er kunnen hoogstens vijf doelen zijn.
+
+| Ontvanger | Adres | Vorm |
+|---|---|---|
+| Home Assistant | `https://<jouw-ha>/api/webhook/<id>` (een automatisering met de trigger *Webhook*) | JSON: de titel en de tekst staan in `trigger.json.title` en `trigger.json.message` |
+| ntfy | `https://ntfy.sh/<onderwerp>`, of je eigen server | Tekst: het bericht als platte tekst, met de kopregels `Title`, `Priority` en `Tags` |
+| Gotify | `https://<jouw-gotify>/message?token=<app-token>` | JSON: Gotify leest `title`, `message` en `priority` |
+| Iets anders | elk adres dat een `POST` aanneemt | JSON of Tekst |
+
+**Wat er verstuurd wordt.** De uitkomst van een scan: de naam van de share, wat er gebeurde, de aantallen (bestanden, mappen, bytes,
+leesfouten) en bij een mislukte scan de reden in de woorden van de worker. Nooit een bestandsnaam of een lijst van mappen. Een JSON-bericht
+ziet er zo uit:
+
+```json
+{"app": "NASSA", "event": "scan.failed", "title": "NASSA: scan van Media mislukt",
+ "message": "De scan van Media is mislukt: share path /mnt/shares/media: ... (is the share mounted into the container?)",
+ "priority": 8, "share": "Media", "share_id": 1, "scan_id": 12, "job_id": 34, "trigger": "schedule",
+ "error": "share path /mnt/shares/media: ...", "at": "2026-11-10T03:00:05Z"}
+```
+
+`event` is `scan.failed`, `scan.empty`, `scan.errors`, `scan.finished` of `test`; `priority` loopt van 1 tot 10 (8 vraagt nu aandacht, 5 is
+het bekijken waard, 2 is ter kennisgeving). De titel en de tekst zijn Nederlands of Engels, per doel.
+
+**Het adres is een geheim.** Het bevat meestal het token van de ontvanger. Het wordt versleuteld opgeslagen (`NASSA_ENCRYPTION_KEY`, zoals een
+SMB-wachtwoord), daarna nooit meer getoond (alleen `https://host/…`) en het komt niet in het auditlog of in een logregel. Wil je het
+wijzigen, typ het dan opnieuw.
+
+**Test.** De knop *Test* stuurt nu één testmelding en zegt of die is aangekomen. Het scherm bewaart bij elk doel hoe het laatste bericht ging.
+
+**Wie verstuurt.** Berichten over scans verstuurt de `worker`, de testmelding de `app`: beide containers moeten het adres kunnen bereiken.
+Een bericht dat niet aankomt, wordt drie keer geprobeerd (meteen, na 2 s en na 8 s) en staat daarna in het auditlog als
+`notification.failed`, met de naam van het doel en de reden, zonder het adres. Er is geen wachtrij: is de ontvanger langer weg, dan is dat
+bericht verloren. De scan zelf merkt er niets van. Een scan die stopt omdat de worker zelf wordt afgesloten, wordt niet gemeld.
+
+**Wat de server niet doet.** De server volgt geen doorverwijzing (voer het uiteindelijke adres in), toont het antwoord van de ontvanger
+nooit (alleen de statuscode), wacht hooguit 10 seconden per poging, en weigert adressen die uitkomen op een link-local adres
+(`169.254.0.0/16`, `fe80::/10`: daar bewaren cloudmachines hun inloggegevens). Adressen op je eigen netwerk en op de server zelf mogen wel:
+daar staan Home Assistant en Gotify.
+
+**Back-up.** De doelen zitten in het back-upbestand van de app (§5), het adres alleen versleuteld. Zet je het bestand terug op een
+installatie met een andere sleutel, dan worden de doelen overgeslagen en zegt het scherm welke: voeg ze opnieuw toe. `nasa rekey` neemt de
+adressen mee naar de nieuwe sleutel.
 
 ## 8. Bijwerken
 
@@ -744,6 +798,7 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
 | `/metrics` geeft 401 of 403 | Zet `NASSA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
 | Een melding *Deze verbinding is niet versleuteld* of *De app ziet niet dat je HTTPS gebruikt* | Zet een reverse proxy met https voor de app, of zet de proxy in `NASSA_TRUSTED_PROXIES`: zie [§3](#3-reverse-proxy-en-https). **Instellingen → Systeem → Verbinding** zegt welke van de twee. |
 | Het log van `app` meldt *NASSA_ENCRYPTION_KEY does not open what is stored* | De app is gestart met een andere sleutel dan waarmee de wachtwoorden zijn opgeslagen. Zet de juiste sleutel terug en start opnieuw; zie [De versleutelsleutel wisselen](#de-versleutelsleutel-wisselen). |
+| Een melding komt niet aan | **Instellingen → Meldingen → Test** zegt waarom (statuscode of fout). Berichten over scans verstuurt de `worker`: die moet het adres ook kunnen bereiken. Een bericht dat niet aankwam staat in het auditlog als `notification.failed`. Zie [§7b](#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft). |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
 
 ## 11. English summary
@@ -819,6 +874,15 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
 * **Sessions:** under *Security* in the user menu a person sees every browser they are signed in with (browser and system, the address
   the app saw, since when, last used), signs another one out, or signs out everywhere else. Own sessions only. Audit log:
   `session.revoke`, `session.revoke_others`.
+* **Notifications (§7b):** *Settings → Notifications* holds up to five targets: an address NASSA POSTs to when a scan fails, finds
+  nothing, or could not read everything (and, if ticked, when it simply finishes). `json` sends one object (`app`, `event`, `title`,
+  `message`, `priority` 1-10, `share`, ids, counts, `error`, `at`) for Home Assistant webhooks, Gotify and anything generic; `text` sends
+  the message as plain text with `Title`, `Priority` and `Tags` headers for ntfy. Nothing is sent without a target, and never a file
+  name or a folder listing. The address is a secret: stored sealed with `NASSA_ENCRYPTION_KEY`, shown only as `https://host/…`, never in
+  the audit log. *Test* sends one message now. Scan messages are sent by the `worker` (three attempts: at once, after 2 s, after 8 s;
+  then `notification.failed` in the audit log; there is no queue), the test by the `app`, so both must reach the address. Redirects are
+  not followed, the receiver's answer is never shown, one attempt takes at most 10 s, and link-local addresses are refused. The targets
+  are in the in-app backup (address sealed) and `nasa rekey` moves them to the new key.
 * **Changing the encryption key:** `nasa rekey` re-encrypts the stored SMB passwords and authenticator secrets with a new key in one
   transaction (all of it, or nothing). Stop `app` and `worker`, run
   `NASSA_NEW_ENCRYPTION_KEY="$NEW" docker compose run --rm -e NASSA_NEW_ENCRYPTION_KEY app rekey`, put the new key in `.env`, start again;

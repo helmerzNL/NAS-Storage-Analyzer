@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
 	"github.com/helmerznl/nas-storage-analyzer/internal/store"
@@ -61,7 +62,7 @@ func runWorker(args []string) error {
 	w := worker.New(st,
 		shares.NewService(st.Pool, box, shares.Options{SharesRoot: env("NASSA_SHARES_ROOT", "/mnt/shares")}, loc),
 		mounts.New(env("NASSA_MOUNT_DIR", "/mnt/managed")),
-		worker.Config{ID: id, Parallel: *parallel, Loc: loc}, log)
+		worker.Config{ID: id, Parallel: *parallel, Loc: loc, Notify: notify.NewService(st.Pool, box)}, log)
 	if addr := env("NASSA_WORKER_HEALTH_LISTEN", "127.0.0.1:8081"); addr != "" {
 		go serveHealth(ctx, addr, w.Healthy, log)
 	}
