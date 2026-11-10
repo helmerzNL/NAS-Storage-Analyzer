@@ -50,6 +50,36 @@ const waitForHook = async (what, match) => {
   throw new Error('the receiver never got ' + what + '; it got: ' + JSON.stringify(hooks.map((h) => h.json?.event || h.body.slice(0, 40))));
 };
 
+// The accessibility checker (axe-core, a development dependency of web/): its source is run in the page through the debugging
+// protocol, which the page's Content-Security-Policy does not apply to, so the application needs no exception for it.
+const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+// What axe finds on the page as it is now: every rule of WCAG 2.2 level A and AA it can decide by itself.
+async function axeViolations(pg) {
+  await pg.evaluate(AXE);
+  return pg.evaluate(async (tags) => {
+    const res = await window.axe.run(document, { runOnly: { type: 'tag', values: tags }, resultTypes: ['violations'] });
+    return res.violations.map((v) => ({
+      id: v.id, impact: v.impact, help: v.help, count: v.nodes.length,
+      nodes: v.nodes.slice(0, 4).map((n) => ({ target: n.target.join(' '), html: n.html.replace(/\s+/g, ' ').slice(0, 140), why: (n.failureSummary || '').replace(/\s+/g, ' ').slice(0, 260) })),
+    }));
+  }, AXE_TAGS);
+}
+// What sticks out of a narrow screen: the page itself must not scroll sideways (a table may, inside its own frame).
+async function overflowing(pg) {
+  return pg.evaluate(() => {
+    const wide = document.documentElement.scrollWidth - window.innerWidth;
+    if (wide <= 1) return [];
+    const scrolls = (e) => { for (let p = e.parentElement; p; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden') return true; } return false; };
+    const out = [];
+    for (const e of document.querySelectorAll('body *')) {
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.right > window.innerWidth + 1 && !scrolls(e)) out.push(e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).join('.') : '') + ' right=' + Math.round(r.right));
+    }
+    return ['the page is ' + wide + ' px wider than the screen', ...out.slice(0, 6)];
+  });
+}
+
 let failures = 0;
 const results = [];
 async function step(name, fn) {
@@ -597,13 +627,13 @@ const expectText = async (page, sel, re, msg) => {
       await page.selectOption('[data-testid=units]', 'decimal');
       await page.waitForFunction((b) => document.querySelector('[data-testid=folder-size]').textContent !== b, before);
       if (!/MB/.test(await page.textContent('[data-testid=folder-size]'))) throw new Error('decimal unit');
-      await page.click('button[aria-label=Taal]');
+      await page.click('[data-testid=lang-toggle]');
       await page.waitForSelector('text=Folders');
       await page.reload();
       await page.waitForSelector('text=Folders');
       if (!/MB/.test(await page.textContent('[data-testid=folder-size]'))) throw new Error('units not persisted');
       await shot('09-english-decimal');
-      await page.click('button[aria-label=Language]');
+      await page.click('[data-testid=lang-toggle]');
     });
 
     await step('dark mode', async () => {
@@ -1459,6 +1489,45 @@ const expectText = async (page, sel, re, msg) => {
         const spread = parseFloat((shadow.replace(/\s*inset\s*/, ' ').trim().match(/(-?\d*\.?\d+)px$/) || [])[1]);
         if ((style === 'none' || width < 2) && !(spread >= 2)) throw new Error(sel + ' shows no focus indicator: ' + ring);
       }
+
+      // The first stop of the Tab key goes past the navigation: it is off the screen until then, and it puts the focus on the content.
+      await page.goto(BASE + '/admin/shares');
+      await page.waitForSelector('[data-testid=share-row]');
+      const hidden = await page.evaluate(() => document.querySelector('[data-testid=skip-link]').getBoundingClientRect().bottom);
+      if (hidden > 0) throw new Error('the skip link is on the screen before it is focused (bottom at ' + hidden + ')');
+      await page.keyboard.press('Tab');
+      const first = await page.evaluate(() => { const e = document.activeElement, r = e.getBoundingClientRect(); return [e.getAttribute('data-testid'), e.textContent.trim(), Math.round(r.top)]; });
+      if (first[0] !== 'skip-link' || first[1] !== 'Naar de inhoud' || first[2] < 0) throw new Error('the first Tab stop: ' + JSON.stringify(first));
+      await page.keyboard.press('Enter');
+      if ((await page.evaluate(() => document.activeElement.id)) !== 'main') throw new Error('the skip link did not move the focus to the content');
+      // From there the next stop is inside the content, not back in the navigation.
+      await page.keyboard.press('Tab');
+      if (!(await page.evaluate(() => !!document.activeElement.closest('main')))) throw new Error('after the skip link the next Tab stop is outside the content');
+
+      // A form that opens over the page: it has a name, takes the focus, keeps it, and Escape gives it back to the button that opened it.
+      await page.focus('[data-testid=add-share]');
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('dialog[open]');
+      const dlg = await page.evaluate(() => {
+        const d = document.querySelector('dialog[open]'), title = document.getElementById(d.getAttribute('aria-labelledby'));
+        return [title?.tagName, title?.textContent.trim(), d.contains(document.activeElement)];
+      });
+      if (dlg[0] !== 'H2' || dlg[1] !== 'Share toevoegen' || !dlg[2]) throw new Error('the dialog: ' + JSON.stringify(dlg));
+      for (let i = 0; i < 60; i++) {
+        await page.keyboard.press('Tab');
+        if (!(await page.evaluate(() => document.querySelector('dialog[open]').contains(document.activeElement) || document.activeElement === document.body)))
+          throw new Error('Tab left the open dialog after ' + (i + 1) + ' stops, for ' + (await page.evaluate(() => document.activeElement.outerHTML.slice(0, 80))));
+      }
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.querySelector('dialog[open]'));
+      if ((await page.evaluate(() => document.activeElement.getAttribute('data-testid'))) !== 'add-share') throw new Error('closing the dialog did not give the focus back to the button that opened it');
+
+      // The switch for the language says what is on it: somebody who talks to their computer says what they see.
+      const lang = await page.evaluate(() => { const b = document.querySelector('[data-testid=lang-toggle]'); return [b.textContent.trim(), b.getAttribute('aria-label')]; });
+      if (!lang[1].startsWith(lang[0])) throw new Error('the name of the language switch does not start with its text: ' + JSON.stringify(lang));
+      // And the way home has a name at every width, also where its text is off the screen.
+      const brand = await page.evaluate(() => document.querySelector('a.brand').innerText.trim() + '|' + document.querySelector('a.brand .brand-name').textContent);
+      if (!brand.endsWith('NAS Storage Analyzer')) throw new Error('the brand link has no name: ' + brand);
     });
 
     await step('an update while a page is open: the page says so, and a reload or the next move loads the new version', async () => {
@@ -1519,6 +1588,85 @@ const expectText = async (page, sel, re, msg) => {
       await page.click('.nav a[href="/lists"]');
       await page.waitForFunction(() => !window.__oldPage && location.pathname === '/lists');
       if (await page.$(banner)) throw new Error('the bar is still there on the page that was loaded for the move');
+    });
+
+    await step('accessibility and the phone: every screen passes the WCAG checks in light and dark, and fits a narrow screen', async () => {
+      const shareId = await page.evaluate(async () => (await (await fetch('/api/v1/shares')).json()).items[0].id);
+      // Every screen an administrator has, and the two forms that open over one. `open` brings a screen into the state to check.
+      const screens = [
+        { name: 'dashboard', path: '/' }, { name: 'browse', path: '/browse/' + shareId }, { name: 'lists', path: '/lists' }, { name: 'search', path: '/search?q=film' },
+        { name: 'shares', path: '/admin/shares' }, { name: 'share form', path: '/admin/shares', open: '[data-testid=add-share]' },
+        { name: 'file types', path: '/admin/extensions' }, { name: 'delete scripts', path: '/admin/delete' },
+        { name: 'notifications', path: '/admin/notifications' }, { name: 'notification form', path: '/admin/notifications', open: '[data-testid=add-target]' },
+        { name: 'backup', path: '/admin/backup' }, { name: 'users', path: '/admin/users' }, { name: 'audit log', path: '/admin/audit' }, { name: 'system', path: '/admin/system' },
+        { name: 'appearance', path: '/account' }, { name: 'security', path: '/account/security' }, { name: 'about', path: '/about' },
+      ];
+      const variants = [
+        { name: 'light', theme: 'light', size: { width: 1280, height: 900 } },
+        { name: 'dark', theme: 'dark', size: { width: 1280, height: 900 } },
+        { name: 'phone', theme: 'light', size: { width: 390, height: 844 }, narrow: true },
+      ];
+      const found = [];
+      const check = async (pg, screen, v) => {
+        await pg.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, v.theme);
+        // Let what the screen loads arrive, and what fades in finish: a colour halfway a transition is not the colour to judge.
+        await pg.waitForFunction(() => !/Laden…/.test(document.querySelector('main')?.textContent ?? ''), null, { timeout: 10000 }).catch(() => {});
+        await pg.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: 5000 }).catch(() => {});
+        for (const x of await axeViolations(pg)) found.push({ screen: screen.name, variant: v.name, ...x });
+        if (v.narrow) { const over = await overflowing(pg); if (over.length) found.push({ screen: screen.name, variant: v.name, id: 'sideways-scroll', impact: 'serious', help: over[0], count: over.length - 1, nodes: over.slice(1).map((t) => ({ target: t, html: '', why: '' })) }); }
+        if (v.narrow) {
+          // The buttons of a row are on the screen. As a table their column fell off the right edge and had to be found by swiping; the
+          // page did not scroll sideways then either, so the check above could not see it.
+          const hiddenActions = await pg.evaluate(() => [...document.querySelectorAll('main td.actions .btn')].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1); }).map((b) => b.textContent.trim()));
+          if (hiddenActions.length) found.push({ screen: screen.name, variant: v.name, id: 'row-actions-off-screen', impact: 'serious', help: 'buttons of a row are outside the screen: ' + [...new Set(hiddenActions)].join(', '), count: hiddenActions.length, nodes: [] });
+          // A table that is laid out as a stack here is still a table to a screen reader: its elements say what they are.
+          const stacked = await pg.evaluate(() => [...document.querySelectorAll('main table.rows-sm')].map((t) => {
+            const rows = [...t.querySelectorAll(':scope > tbody > tr')], cells = [...t.querySelectorAll(':scope > tbody > tr > td')];
+            return { stack: rows.every((r) => getComputedStyle(r).display === 'block'), table: t.getAttribute('role'), rows: rows.every((r) => r.getAttribute('role') === 'row'), cells: cells.every((c) => c.getAttribute('role') === 'cell') };
+          }));
+          for (const t of stacked) if (!t.stack || t.table !== 'table' || !t.rows || !t.cells)
+            found.push({ screen: screen.name, variant: v.name, id: 'stacked-table', impact: 'serious', help: 'a table with row buttons is not a stack on a phone, or lost its roles: ' + JSON.stringify(t), count: 1, nodes: [] });
+        }
+        // A frame that scrolls sideways can be reached and scrolled with the keyboard, and one that does not scroll is no stop of the Tab key.
+        const frames = await pg.evaluate(() => [...document.querySelectorAll('main .table-wrap')].map((w) => ({ scrolls: w.scrollWidth > w.clientWidth + 1, stop: w.tabIndex === 0, role: w.getAttribute('role'), name: w.getAttribute('aria-label') })));
+        for (const f of frames) if (f.scrolls !== f.stop || (f.scrolls && (f.role !== 'region' || !f.name)))
+          found.push({ screen: screen.name, variant: v.name, id: 'scrolling-frame', impact: 'serious', help: 'a table frame that ' + (f.scrolls ? 'scrolls cannot be reached by keyboard or has no name' : 'does not scroll is a Tab stop') + ': ' + JSON.stringify(f), count: 1, nodes: [] });
+        // What a phone shows, kept to look at: a check cannot say whether a screen is pleasant to use.
+        if (v.narrow) await pg.screenshot({ path: path.join(SHOTS, 'phone-' + screen.name.replace(/\s+/g, '-') + '.png'), fullPage: true });
+      };
+      try {
+        for (const v of variants) {
+          await page.setViewportSize(v.size);
+          for (const s of screens) {
+            await page.goto(BASE + s.path);
+            await page.waitForSelector('main h1');
+            if (s.open) { await page.click(s.open); await page.waitForSelector('dialog[open]'); }
+            await check(page, s, v);
+          }
+        }
+        // The screen before signing in, for somebody who is nobody yet.
+        const anon = await browser.newContext({ locale: 'nl-NL' });
+        try {
+          const p = await anon.newPage();
+          for (const v of variants) {
+            await p.setViewportSize(v.size);
+            await p.goto(BASE + '/');
+            await p.waitForSelector('[data-testid=login-username]');
+            await check(p, { name: 'sign in' }, v);
+          }
+        } finally { await anon.close(); }
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+      }
+      fs.writeFileSync(path.join(SHOTS, 'a11y.json'), JSON.stringify(found, null, 2));
+      if (found.length) {
+        // One line per rule, with where it was found and the first element, so the log alone says what to fix.
+        const byRule = new Map();
+        for (const f of found) { const k = f.id; if (!byRule.has(k)) byRule.set(k, { help: f.help, impact: f.impact, where: new Set(), first: f.nodes[0] }); byRule.get(k).where.add(f.screen + ' (' + f.variant + ')'); }
+        const lines = [...byRule].map(([id, r]) => `${id} [${r.impact}] ${r.help}: ${[...r.where].join(', ')}${r.first ? ' | first: ' + r.first.target + ' ' + r.first.html : ''}`);
+        throw new Error(found.length + ' accessibility findings (details in a11y.json):\n     ' + lines.join('\n     '));
+      }
     });
 
     await step('screenshots: light and dark in two accents', async () => {

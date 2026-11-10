@@ -396,7 +396,7 @@ NASSA_TEST_DSN='postgres://user@host/postgres' NASSA_REQUIRE_DB=1 go test -race 
 cd web && npm run check && npx vitest run      # type check and unit tests of the interface
 ```
 
-The **browser test** (`web/e2e`) starts a database, `serve` and `worker` and walks through the whole application with a real Chromium: setup wizard, authenticator app, recovery codes, passkeys (virtual authenticator), adding a share, scanning by the worker, browsing, filters, treemap, lists, search, CSV, users and audit log:
+The **browser test** (`web/e2e`) starts a database, `serve` and `worker` and walks through the whole application with a real Chromium: setup wizard, authenticator app, recovery codes, passkeys (virtual authenticator), adding a share, scanning by the worker, browsing, filters, treemap, lists, search, CSV, users and audit log. It also checks every screen for accessibility (axe-core, the WCAG 2.2 level A and AA rules a program can decide) in light, dark and at phone width, and walks through the keyboard operation:
 
 ```bash
 npm install -g playwright && playwright install chromium     # once; the test uses the global install
@@ -450,6 +450,7 @@ NASSA is built with Go 1.27 and Svelte 5, on PostgreSQL 16. The direct dependenc
 | [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto), [x/sys](https://pkg.go.dev/golang.org/x/sys), [x/time](https://pkg.go.dev/golang.org/x/time) | Argon2id, system calls, rate limiting | BSD-3-Clause |
 | [Svelte](https://svelte.dev), [Vite](https://vite.dev), [TypeScript](https://www.typescriptlang.org), [Vitest](https://vitest.dev) | The interface and its tests | MIT, MIT, Apache-2.0, MIT |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | The QR code for the authenticator app | MIT |
+| [axe-core](https://github.com/dequelabs/axe-core) | The accessibility check in the browser test; it is not part of the application | MPL-2.0 |
 | [Material Design Icons](https://pictogrammers.com/library/mdi/) (Pictogrammers) | The icons; they ship with the application, nothing is loaded from a third party | Apache-2.0 |
 | [PostgreSQL](https://www.postgresql.org) | The database (image `postgres:16-alpine`) | PostgreSQL License |
 

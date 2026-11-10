@@ -1,3 +1,7 @@
+<script module lang="ts">
+  let dialogs = 0;   // every dialog names itself by its own title
+</script>
+
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import { t } from '../lib/i18n.svelte';
@@ -6,6 +10,7 @@
     open: boolean; title: string; children: Snippet; footer?: Snippet; wide?: boolean;
   } = $props();
   let el: HTMLDialogElement;
+  const titleId = 'dlg-title-' + ++dialogs;
 
   $effect(() => {
     if (open && !el.open) el.showModal();
@@ -13,9 +18,9 @@
   });
 </script>
 
-<dialog class="sheet" bind:this={el} onclose={() => (open = false)} style:width={wide ? 'min(900px, calc(100vw - 24px))' : undefined}>
+<dialog class="sheet" bind:this={el} onclose={() => (open = false)} aria-labelledby={titleId} style:width={wide ? 'min(900px, calc(100vw - 24px))' : undefined}>
   <div class="dlg-head">
-    <span>{title}</span>
+    <h2 id={titleId}>{title}</h2>
     <button class="btn ghost small" type="button" onclick={() => (open = false)} aria-label={t('common.close')}>✕</button>
   </div>
   <div class="dlg-body">{@render children()}</div>

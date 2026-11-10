@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   import { get, qs, type Child, type ChildPage, type DirDetail, type FileRow, type ShareInfo, type TreeNode } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatBytes, formatNumber, formatDate, formatPct } from '../lib/format';
@@ -150,7 +151,7 @@
   {#if error}<div class="notice error" role="alert">{error}</div>{/if}
 
   {#if view === 'folders'}
-    <div class="card table-wrap flush" aria-busy={loading}>
+    <div class="card table-wrap flush" aria-busy={loading} use:scrollRegion={t('nav.browse')}>
       <table data-testid="folder-table">
         <thead><tr>
           {#if showDirBoxes}<th class="sel"><label class="selcell" title={t('sel.dir.all')}>
@@ -213,7 +214,7 @@
         {#each [['size', 'desc'], ['name', 'asc'], ['mtime', 'desc'], ['used', 'asc'], ['ext', 'asc']] as [s, o]}<option value="{s}:{o}">{t('sort.' + s)}</option>{/each}
       </select>
     </div>
-    <div class="card table-wrap flush" aria-busy={loading}>
+    <div class="card table-wrap flush" aria-busy={loading} use:scrollRegion={t('browse.view.files')}>
       <table data-testid="file-table">
         <thead><tr>
           {#if isAdmin()}<th class="sel"><label class="selcell" title={t('sel.all')}>

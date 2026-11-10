@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   import { onMount } from 'svelte';
   import { get, post, patch, del, type User, type Invitation, type InvitationCreated } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
@@ -7,6 +8,7 @@
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
   import { inviteLink } from '../lib/invite.svelte';
+  import { tableRoles } from '../lib/tableRoles';
   import Dialog from '../components/Dialog.svelte';
 
   let users = $state<User[]>([]), invitations = $state<Invitation[]>([]);
@@ -85,8 +87,8 @@
 </section>
 
 {#if invitations.length}
-  <section class="card table-wrap flush" data-testid="open-invitations">
-    <table>
+  <section class="card table-wrap flush" data-testid="open-invitations" use:scrollRegion={t('invite.open')}>
+    <table class="rows-sm" use:tableRoles>
       <caption class="table-title">{t('invite.open')}</caption>
       <thead><tr><th>{t('invite.kind')}</th><th>{t('auth.username')}</th><th class="hide-sm">{t('users.role')}</th><th class="hide-sm">{t('invite.by')}</th><th>{t('invite.expires.col')}</th><th></th></tr></thead>
       <tbody>
@@ -102,8 +104,8 @@
   </section>
 {/if}
 
-<div class="card table-wrap flush">
-  <table data-testid="user-table">
+<div class="card table-wrap flush" use:scrollRegion={t('nav.users')}>
+  <table class="rows-sm" use:tableRoles data-testid="user-table">
     <caption class="table-title">{t('users.all')}</caption>
     <thead><tr><th>{t('auth.username')}</th><th>{t('users.role')}</th><th class="hide-sm">{t('users.mfa')}</th><th class="hide-sm">{t('users.lastlogin')}</th><th></th></tr></thead>
     <tbody>

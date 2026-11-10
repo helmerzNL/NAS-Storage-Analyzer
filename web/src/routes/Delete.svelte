@@ -46,7 +46,9 @@
   {#each examples as [label, text] (label)}
     <div class="field">
       <span>{t(label)}</span>
-      <code class="codeblock mono">{text}</code>
+      <!-- A long command scrolls sideways on a narrow screen, so the block can be reached and scrolled with the keyboard. -->
+      <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+      <code class="codeblock mono" tabindex="0" role="region" aria-label={t(label)}>{text}</code>
     </div>
   {/each}
 </section>

@@ -17,6 +17,7 @@ permissions:
 jobs:
   only-from-beta:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Require beta of this repository as the source branch
         env:

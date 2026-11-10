@@ -146,7 +146,7 @@
         </div>
         <div>
           <h3 class="muted small" style="font-weight:600">{t('dash.growth')}</h3>
-          {#if (hist[s.id]?.length ?? 0) > 1}<LineChart series={series(s)} stacked />
+          {#if (hist[s.id]?.length ?? 0) > 1}<LineChart series={series(s)} label={t('dash.growth.chart', { name: s.name })} stacked />
           {:else}<p class="muted small">{t('dash.growth.empty')}</p>{/if}
         </div>
       </div>

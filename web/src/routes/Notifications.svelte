@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   // Settings, Notifications: where a message goes when a scan needs attention. The address of a target is typed here once and never
   // shown again: the server stores it sealed and gives back only its scheme and host.
   import { onMount } from 'svelte';
@@ -8,6 +9,7 @@
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
   import { eventKeys, lastDelivery, sendsNothing } from '../lib/notify';
+  import { tableRoles } from '../lib/tableRoles';
   import Dialog from '../components/Dialog.svelte';
 
   interface Form {
@@ -74,8 +76,8 @@
 <p class="muted small">{t('notify.privacy')}</p>
 {#if loadError}<div class="notice error" role="alert">{loadError}</div>{/if}
 
-<div class="card table-wrap flush">
-  <table data-testid="target-table">
+<div class="card table-wrap flush" use:scrollRegion={t('nav.notifications')}>
+  <table class="rows-sm" use:tableRoles data-testid="target-table">
     <thead><tr><th>{t('col.name')}</th><th>{t('notify.col.address')}</th><th class="hide-sm">{t('notify.col.events')}</th><th>{t('notify.col.last')}</th><th></th></tr></thead>
     <tbody>
       {#each items as x (x.id)}
