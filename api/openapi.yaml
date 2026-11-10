@@ -771,6 +771,37 @@ paths:
       responses:
         "204": {description: Removed.}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/auth/sessions:
+    get:
+      tags: [auth]
+      operationId: listSessions
+      summary: Where the user is signed in
+      description: "The user's own sessions that are fully signed in and still alive, the one that asks first. Never anybody else's."
+      responses:
+        "200":
+          description: Sessions.
+          content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: "#/components/schemas/SessionInfo"}}}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      tags: [auth]
+      operationId: revokeOtherSessions
+      summary: Sign out everywhere else
+      description: "Ends every other session of the user, sign-ins that stopped at the second factor included. The session that asks stays."
+      responses:
+        "200":
+          description: How many sessions ended.
+          content: {application/json: {schema: {type: object, required: [revoked], properties: {revoked: {type: integer}}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/auth/sessions/{id}:
+    parameters: [{name: id, in: path, required: true, schema: {type: string}, description: "The `id` of a session from the list."}]
+    delete:
+      tags: [auth]
+      operationId: revokeSession
+      summary: Sign out one other session
+      description: "404 for a session that does not exist or belongs to somebody else. 409 `conflict` for the session that asks: end that one with `POST /auth/logout`."
+      responses:
+        "204": {description: Signed out.}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/auth/recovery-codes:
     post:
       tags: [auth]
@@ -1851,6 +1882,18 @@ components:
         created_at: {type: string, format: date-time}
         last_used_at: {type: string, format: date-time, nullable: true}
         synced: {type: boolean, description: "Backed up to a password manager or cloud keychain."}
+    SessionInfo:
+      type: object
+      description: "One browser in which the user is signed in. `id` is a reference to name the session by; it is not the session's token and opens nothing."
+      required: [id, created_at, last_seen_at, expires_at, ip, user_agent, current]
+      properties:
+        id: {type: string}
+        created_at: {type: string, format: date-time, description: "When this sign-in was completed."}
+        last_seen_at: {type: string, format: date-time, description: "Last use, recorded at most once a minute."}
+        expires_at: {type: string, format: date-time, description: "When the session ends if it is not used again (idle), or at the latest (absolute)."}
+        ip: {type: string, description: "The client address the server saw at sign-in (the proxy's, unless the proxy is trusted)."}
+        user_agent: {type: string, description: "The browser's User-Agent at sign-in, at most 300 characters."}
+        current: {type: boolean, description: "The session this request came with."}
     AuditEntry:
       type: object
       required: [id, at, user_id, username, ip, action, target, detail]

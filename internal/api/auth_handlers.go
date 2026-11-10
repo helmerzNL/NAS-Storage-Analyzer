@@ -37,6 +37,10 @@ func (s *Server) authRoutes(h routeFn, v string) {
 	h("DELETE "+a+"/passkeys/{id}", lvViewer, s.passkeyDelete)
 	h("POST "+a+"/recovery-codes", lvViewer, s.recoveryCodes)
 	h("POST "+a+"/password", lvViewer, s.changePassword)
+	// A person's own sessions: where they are signed in, and a way to end the others.
+	h("GET "+a+"/sessions", lvViewer, s.sessionList)
+	h("DELETE "+a+"/sessions", lvViewer, s.sessionRevokeOthers)
+	h("DELETE "+a+"/sessions/{id}", lvViewer, s.sessionRevoke)
 
 	h("GET "+v+"/users", lvAdmin, s.listUsers)
 	s.invitationRoutes(h, v) // a new account comes from an invitation link: no route lets an administrator choose a password for someone
@@ -264,6 +268,40 @@ func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) error {
 	s.clearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// sessionList returns where the person is signed in: their own sessions and nobody else's.
+func (s *Server) sessionList(w http.ResponseWriter, r *http.Request) error {
+	sess := sessionOf(r)
+	items, err := s.auth.ListSessions(r.Context(), sess.User.ID, sess)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, map[string]any{"items": items})
+}
+
+// sessionRevoke signs out one other session of the person. The session the request came with is refused (409): ending that one is
+// signing out.
+func (s *Server) sessionRevoke(w http.ResponseWriter, r *http.Request) error {
+	sess := sessionOf(r)
+	gone, err := s.auth.RevokeSession(r.Context(), sess.User.ID, r.PathValue("id"), sess)
+	if err != nil {
+		return err
+	}
+	s.audit(r, "session.revoke", sess.User.Username, map[string]any{"ip": gone.IP, "user_agent": gone.UserAgent, "signed_in_at": gone.CreatedAt})
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// sessionRevokeOthers signs the person out everywhere but here.
+func (s *Server) sessionRevokeOthers(w http.ResponseWriter, r *http.Request) error {
+	sess := sessionOf(r)
+	n, err := s.auth.RevokeOtherSessions(r.Context(), sess.User.ID, sess)
+	if err != nil {
+		return err
+	}
+	s.audit(r, "session.revoke_others", sess.User.Username, map[string]any{"sessions": n})
+	return writeJSON(w, map[string]any{"revoked": n})
 }
 
 func (s *Server) authMe(w http.ResponseWriter, r *http.Request) error {

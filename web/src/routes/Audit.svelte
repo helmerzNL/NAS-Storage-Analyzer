@@ -11,7 +11,7 @@
   // Coming from the error of a scan (?scan=N) the log opens at the entry that says how that scan ended, which is marked and shows its detail.
   const focusScan = $derived(Number(route.query.get('scan')) || 0);
   let focusId = $state(0), missing = $state(false), seq = 0;
-  const groups = ['login.', 'mfa.', 'share.', 'scan.', 'script.', 'user.', 'extension.', 'setup.'];
+  const groups = ['login.', 'session.', 'mfa.', 'share.', 'scan.', 'script.', 'user.', 'extension.', 'setup.'];
 
   async function load(more = false) {
     const my = ++seq; // a newer request (another filter, another entry) makes this answer stale

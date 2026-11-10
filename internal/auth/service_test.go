@@ -207,6 +207,85 @@ func TestSessionsLifecycle(t *testing.T) {
 	}
 }
 
+func TestListAndRevokeSessions(t *testing.T) {
+	s, st := newService(t)
+	u, bob := mustAdmin(t, s, "alice"), mustAdmin(t, s, "bob")
+	here, _, _ := s.CreateSession(ctx, u.ID, auth.StageActive, "10.0.0.1", "Here")
+	_, _, _ = s.CreateSession(ctx, u.ID, auth.StageActive, "10.0.0.2", "Older")
+	_, _, _ = s.CreateSession(ctx, u.ID, auth.StageActive, "10.0.0.3", "Newer")
+	_, _, _ = s.CreateSession(ctx, u.ID, auth.StageActive, "10.0.0.4", "Expired")
+	_, _, _ = s.CreateSession(ctx, u.ID, auth.StagePending, "10.0.0.5", "Half")
+	bobTok, _, _ := s.CreateSession(ctx, bob.ID, auth.StageActive, "10.0.0.9", "Bob")
+	for agent, sql := range map[string]string{
+		"Older":   `UPDATE sessions SET last_seen_at = now() - interval '2 hours' WHERE user_agent = $1`,
+		"Newer":   `UPDATE sessions SET last_seen_at = now() - interval '5 minutes' WHERE user_agent = $1`,
+		"Expired": `UPDATE sessions SET idle_expires_at = now() - interval '1 second' WHERE user_agent = $1`,
+		"Here":    `UPDATE sessions SET last_seen_at = now() - interval '1 day' WHERE user_agent = $1`, // the current one leads whatever its age
+	} {
+		if _, err := st.Pool.Exec(ctx, sql, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cur, err := s.LookupSession(ctx, here)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.ListSessions(ctx, u.ID, cur)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var agents []string
+	for _, i := range list {
+		agents = append(agents, i.UserAgent)
+		if i.Current != (i.UserAgent == "Here") || i.ID == "" || i.IP == "" || !i.ExpiresAt.After(time.Now()) {
+			t.Errorf("session %+v", i)
+		}
+	}
+	if got := strings.Join(agents, ","); got != "Here,Newer,Older" {
+		t.Fatalf("live sessions of alice, this one first and then by last use: %s", got)
+	}
+
+	// Bob's session is not alice's to end, and neither is the one she asks with.
+	bobSess, _ := s.LookupSession(ctx, bobTok)
+	bobList, _ := s.ListSessions(ctx, bob.ID, bobSess)
+	if len(bobList) != 1 {
+		t.Fatalf("bob has one session: %+v", bobList)
+	}
+	if _, err := s.RevokeSession(ctx, u.ID, bobList[0].ID, cur); !errors.Is(err, auth.ErrNotFound) {
+		t.Errorf("ending somebody else's session: %v", err)
+	}
+	if _, err := s.RevokeSession(ctx, u.ID, list[0].ID, cur); !errors.Is(err, auth.ErrConflict) {
+		t.Errorf("ending the session that asks: %v", err)
+	}
+	for _, bad := range []string{"", "x", "' OR 1=1 --", "00000000-0000-0000-0000-000000000000"} {
+		if _, err := s.RevokeSession(ctx, u.ID, bad, cur); !errors.Is(err, auth.ErrNotFound) {
+			t.Errorf("reference %q: %v", bad, err)
+		}
+	}
+	gone, err := s.RevokeSession(ctx, u.ID, list[2].ID, cur)
+	if err != nil || gone.UserAgent != "Older" || gone.IP != "10.0.0.2" {
+		t.Fatalf("revoked %+v, %v", gone, err)
+	}
+	if left, _ := s.ListSessions(ctx, u.ID, cur); len(left) != 2 {
+		t.Errorf("after ending one: %+v", left)
+	}
+
+	// Everywhere else: the other live one, the expired one and the half sign-in go; this one and bob's stay.
+	if _, err := s.RevokeOtherSessions(ctx, u.ID, nil); err == nil {
+		t.Error("ending the others needs the session to keep")
+	}
+	n, err := s.RevokeOtherSessions(ctx, u.ID, cur)
+	if err != nil || n != 3 {
+		t.Fatalf("revoked %d, %v", n, err)
+	}
+	if _, err := s.LookupSession(ctx, here); err != nil {
+		t.Errorf("the session that asked is gone: %v", err)
+	}
+	if _, err := s.LookupSession(ctx, bobTok); err != nil {
+		t.Errorf("bob's session is gone: %v", err)
+	}
+}
+
 func TestTOTPEnrolmentAndReplayProtection(t *testing.T) {
 	s, st := newService(t)
 	u := mustAdmin(t, s, "alice")

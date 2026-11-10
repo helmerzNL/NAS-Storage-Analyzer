@@ -1,30 +1,33 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { get, post, put, del, patch, type Passkey, type SessionResponse } from '../lib/api';
+  import { get, post, put, del, patch, type Passkey, type SessionInfo, type SessionResponse } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatDateTime, ago } from '../lib/format';
   import { session, refreshSession } from '../lib/session.svelte';
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
+  import { describeAgent } from '../lib/agent';
   import Enroll from '../components/Enroll.svelte';
   import RecoveryCodes from '../components/RecoveryCodes.svelte';
   import Dialog from '../components/Dialog.svelte';
   import FoldHead from '../components/FoldHead.svelte';
 
   let passkeys = $state<Passkey[]>([]);
+  let sessions = $state<SessionInfo[]>([]);
   let cur = $state(''), next = $state(''), again = $state(''), pwErr = $state('');
   let adding = $state<'' | 'totp' | 'passkey'>('');
   let codes = $state<string[]>([]), codesOpen = $state(false);
   let reauthOpen = $state(false), reauthFor = $state<'totp' | 'codes'>('totp'), reauthPw = $state(''), reauthErr = $state('');
   const user = $derived(session.user);
 
-  async function load() { passkeys = (await get<{ items: Passkey[] }>('/auth/passkeys')).items; await refreshSession(); }
+  async function loadSessions() { sessions = (await get<{ items: SessionInfo[] }>('/auth/sessions')).items; }
+  async function load() { passkeys = (await get<{ items: Passkey[] }>('/auth/passkeys')).items; await loadSessions(); await refreshSession(); }
   onMount(() => { void load().catch((e) => toast(errMessage(e), true)); });
 
   async function changePw(e: Event) {
     e.preventDefault(); pwErr = '';
     if (next !== again) { pwErr = t('auth.nomatch'); return; }
-    try { await post('/auth/password', { current: cur, new: next }); toast(t('account.pw.changed')); cur = next = again = ''; }
+    try { await post('/auth/password', { current: cur, new: next }); toast(t('account.pw.changed')); cur = next = again = ''; await loadSessions(); }
     catch (err) { pwErr = errMessage(err); }
   }
   async function enrolled(r: SessionResponse) {
@@ -41,6 +44,23 @@
   async function remove(p: Passkey) {
     if (!confirm(t('account.passkey.confirm', { name: p.name }))) return;
     try { await del(`/auth/passkeys/${p.id}`); toast(t('account.passkey.removed')); await load(); } catch (e) { toast(errMessage(e), true); }
+  }
+  /** The browser and system of a session, as far as its User-Agent tells; the full string is the tooltip. */
+  function agentName(s: SessionInfo): string {
+    const a = describeAgent(s.user_agent);
+    if (a.browser && a.os) return t('account.sessions.agent', { browser: a.browser, os: a.os });
+    return a.browser || a.os || t('account.sessions.unknown');
+  }
+  async function revoke(s: SessionInfo) {
+    try { await del(`/auth/sessions/${encodeURIComponent(s.id)}`); toast(t('account.sessions.revoked')); }
+    catch (e) { toast(errMessage(e), true); }
+    await loadSessions().catch(() => {});
+  }
+  async function revokeOthers() {
+    if (!confirm(t('account.sessions.others.confirm'))) return;
+    try { const r = await del<{ revoked: number }>('/auth/sessions'); toast(t('account.sessions.others.done', { n: r.revoked })); }
+    catch (e) { toast(errMessage(e), true); }
+    await loadSessions().catch(() => {});
   }
   function reauth(kind: 'totp' | 'codes') { reauthFor = kind; reauthPw = ''; reauthErr = ''; reauthOpen = true; }
   async function doReauth(e: Event) {
@@ -97,6 +117,23 @@
       <button class="btn ghost small" onclick={() => (adding = '')}>{t('common.cancel')}</button>
     {:else}
       <div><button class="btn" onclick={() => (adding = 'passkey')} data-testid="passkey-add">{t('enroll.passkey.add')}</button></div>
+    {/if}
+  </section>
+
+  <section class="card stack">
+    <h2>{t('account.sessions')}</h2>
+    <p class="muted">{t('account.sessions.intro')}</p>
+    <div class="stack tight" data-testid="session-list">
+      {#each sessions as s (s.id)}
+        <div class="row between list-item" data-testid="session-item" data-current={s.current}>
+          <div><b title={s.user_agent}>{agentName(s)}</b> {#if s.current}<span class="badge ok">{t('account.sessions.current')}</span>{/if}
+            <div class="muted small">{s.ip || t('account.sessions.noip')} · {t('account.sessions.since', { when: formatDateTime(s.created_at, i18n.lang) })} · {t('account.sessions.seen', { when: ago(s.last_seen_at, i18n.lang) })}</div></div>
+          {#if !s.current}<div class="row"><button class="btn small danger" onclick={() => revoke(s)} data-testid="session-revoke">{t('account.sessions.revoke')}</button></div>{/if}
+        </div>
+      {/each}
+    </div>
+    {#if sessions.length > 1}
+      <div><button class="btn danger" onclick={revokeOthers} data-testid="sessions-revoke-others">{t('account.sessions.others')}</button></div>
     {/if}
   </section>
 
