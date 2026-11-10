@@ -15,7 +15,8 @@
 # If one of the three processes stops, the others are stopped and the container exits non-zero, so its restart policy (or the
 # Home Assistant watchdog) starts it again. SIGTERM stops serve and the worker first, then PostgreSQL with a fast shutdown.
 #
-# Arguments: none starts the stack; a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize) runs that.
+# Arguments: none starts the stack; a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize) runs that, and
+# rekey runs `nasa rekey` against the database of the running container (docker exec <container> nasa-aio rekey).
 # The variables AIO_* only exist for the tests (deploy/aio/test_nasa_aio.sh).
 set -eu
 
@@ -38,7 +39,14 @@ fail() { printf '[nasa-aio] ERROR: %s\n' "$*" >&2; exit 1; }
 case "${1:-}" in
   "") ;;
   genkey|version|-version|--version|healthcheck|migrate|scan|recategorize|help|-h|--help) exec "$NASA" "$@" ;;
-  *) fail "unknown argument '$1': start without arguments, or give a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize)" ;;
+  rekey)
+    # For the running container: docker exec -e NASSA_NEW_ENCRYPTION_KEY <container> nasa-aio rekey. The database is the one this
+    # container runs, reachable on its socket only; a new container has none, and `nasa rekey` alone would not know where it is.
+    [ -S "$SOCKET/.s.PGSQL.5432" ] || fail "rekey works on the database of the running container: docker exec -e NASSA_NEW_ENCRYPTION_KEY <container> nasa-aio rekey"
+    NASSA_DB_DSN="postgres://nasa@/nasa?host=$SOCKET&sslmode=disable"
+    export NASSA_DB_DSN
+    exec "$NASA" "$@" ;;
+  *) fail "unknown argument '$1': start without arguments, or give a subcommand of nasa (genkey, version, healthcheck, migrate, scan, recategorize, rekey)" ;;
 esac
 
 # util-linux's setpriv, not the busybox applet of the same name, which cannot change users. Its place is looked up and not assumed:

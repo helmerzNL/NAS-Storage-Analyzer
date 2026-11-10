@@ -156,6 +156,8 @@ export interface ShareInfo {
   day_start_hour: number; day_end_hour: number; retention_scans: number; retention_days: number; snapshot_depth: number;
   last_scan: ScanInfo | null; latest_scan: ScanInfo | null; active_job: ActiveJob | null;
 }
+/** One browser in which the person is signed in. `id` names the session; it is not its token. */
+export interface SessionInfo { id: string; created_at: string; last_seen_at: string; expires_at: string; ip: string; user_agent: string; current: boolean }
 /** A connection test of a share: can the worker reach it and list its top folder? `entries` counts that folder, up to a limit (`more`). */
 export interface ShareProbe {
   id: number; share_id: number; state: 'queued' | 'running' | 'ok' | 'failed'; requested_by: string; requested_at: string;

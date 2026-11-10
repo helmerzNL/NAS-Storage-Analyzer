@@ -639,6 +639,106 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=user-menu]');
     });
 
+    await step('sessions: the account lists where you are signed in; one can be signed out, and so can all the others', async () => {
+      // The same person signs in from two more browsers, each with a recovery code.
+      const signInElsewhere = async (code, userAgent) => {
+        const c = await browser.newContext({ locale: 'nl-NL', userAgent });
+        const p = await c.newPage();
+        await p.goto(BASE + '/');
+        await p.fill('[data-testid=login-username]', 'helmer');
+        await p.fill('[data-testid=login-password]', PASSWORD);
+        await p.click('[data-testid=login-submit]');
+        await p.waitForSelector('[data-testid=mfa-use-recovery]');
+        await p.click('[data-testid=mfa-use-recovery]');
+        await p.fill('[data-testid=mfa-code]', code);
+        await p.click('[data-testid=mfa-submit]');
+        await p.waitForSelector('[data-testid=user-menu]');
+        return { c, p };
+      };
+      const phone = await signInElsewhere(codes[1], 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1');
+      const laptop = await signInElsewhere(codes[2], 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0');
+      // In those browsers the next request finds out: it gets no data and the sign-in screen appears.
+      const signedOutThere = async (other, what) => {
+        await other.p.goto(BASE + '/');
+        await other.p.waitForSelector('[data-testid=login-username]', { timeout: 15000 }).catch(() => { throw new Error(what + ' is still signed in'); });
+      };
+      try {
+        await page.goto(BASE + '/account/security');
+        const items = '[data-testid=session-item]';
+        await page.waitForFunction((s) => document.querySelectorAll(s).length === 3, items);
+        const texts = async () => (await page.$$eval(items, (els) => els.map((e) => e.textContent.replace(/\s+/g, ' ').trim())));
+        let list = await texts();
+        if (!/Deze sessie/.test(list[0]) || list.slice(1).some((x) => /Deze sessie/.test(x))) throw new Error('this session comes first and is the only one marked: ' + list.join(' | '));
+        if (!list.some((x) => /Safari op iPhone/.test(x)) || !list.some((x) => /Firefox op Linux/.test(x))) throw new Error('the other browsers by a name people know: ' + list.join(' | '));
+        if (!list.every((x) => /aangemeld/.test(x) && /laatst actief/.test(x))) throw new Error('every session says since when and when it was last used: ' + list.join(' | '));
+        if (await page.$(items + '[data-current=true] [data-testid=session-revoke]')) throw new Error('this session has no "sign out" of its own: that is the menu');
+        await shot('12b-sessions');
+
+        // One of them.
+        await page.click(items + ':has-text("Safari op iPhone") [data-testid=session-revoke]');
+        await page.waitForFunction((s) => document.querySelectorAll(s).length === 2, items);
+        await signedOutThere(phone, 'the phone');
+        await laptop.p.goto(BASE + '/');
+        await laptop.p.waitForSelector('[data-testid=user-menu]');
+
+        // And all the others at once, after a question.
+        page.once('dialog', (d) => d.accept());
+        await page.click('[data-testid=sessions-revoke-others]');
+        await page.waitForFunction((s) => document.querySelectorAll(s).length === 1, items);
+        if (await page.$('[data-testid=sessions-revoke-others]')) throw new Error('with one session left there is nothing else to sign out');
+        await signedOutThere(laptop, 'the laptop');
+        // This browser is still signed in.
+        await page.goto(BASE + '/account/security');
+        await page.waitForSelector(items + '[data-current=true]');
+      } finally { await phone.c.close(); await laptop.c.close(); }
+    });
+
+    await step('connection: over http from another machine an administrator is warned, can put the banner away, and Settings says what to do', async () => {
+      // On this computer itself (localhost) there is nothing to warn about, and Settings says why.
+      await page.goto(BASE + '/admin/system');
+      await page.waitForSelector('[data-testid=connection-card][data-state=local]');
+      if (await page.$('[data-testid=connection-banner]')) throw new Error('http on localhost is not something to warn about');
+
+      // The same server under a name that is not this computer: a second browser in which nas.test leads to it.
+      const far = await chromium.launch({ args: ['--host-resolver-rules=MAP nas.test 127.0.0.1'] });
+      try {
+        const c = await far.newContext({ locale: 'nl-NL', viewport: { width: 1280, height: 900 } });
+        const p = await c.newPage();
+        const jsErrors = []; p.on('pageerror', (e) => jsErrors.push(e.message));
+        await p.goto('http://nas.test:' + new URL(BASE).port + '/');
+        await p.fill('[data-testid=login-username]', 'helmer');
+        await p.fill('[data-testid=login-password]', PASSWORD);
+        await p.click('[data-testid=login-submit]');
+        await p.waitForSelector('[data-testid=mfa-use-recovery]');
+        await p.click('[data-testid=mfa-use-recovery]');
+        await p.fill('[data-testid=mfa-code]', codes[3]);
+        await p.click('[data-testid=mfa-submit]');
+        await p.waitForSelector('[data-testid=user-menu]');
+
+        const banner = '[data-testid=connection-banner]';
+        await p.waitForSelector(banner + '[data-state=plain_http]');
+        const said = (await p.textContent(banner)).replace(/\s+/g, ' ');
+        if (!/niet versleuteld/.test(said) || !/wachtwoord/.test(said)) throw new Error('the banner does not say what is wrong: ' + said);
+        await p.screenshot({ path: path.join(SHOTS, '12c-connection-banner.png'), fullPage: true });
+
+        // "What can I do?" leads to the card, which names what to set.
+        await p.click('[data-testid=connection-view]');
+        await p.waitForSelector('[data-testid=connection-card][data-state=plain_http]');
+        const card = (await p.textContent('[data-testid=connection-card]')).replace(/\s+/g, ' ');
+        for (const want of ['NASSA_REQUIRE_HTTPS', 'NASSA_TRUSTED_PROXIES', 'reverse proxy']) if (!card.includes(want)) throw new Error('the card does not name ' + want + ': ' + card);
+        if (!(await p.$('[data-testid=connection-card] .badge.warn'))) throw new Error('an unencrypted connection has the amber status');
+        await p.screenshot({ path: path.join(SHOTS, '12d-connection-card.png'), fullPage: true });
+
+        // Put away: gone on every screen and after a reload. The card stays.
+        await p.click('[data-testid=connection-hide]');
+        await p.waitForSelector(banner, { state: 'detached' });
+        await p.reload();
+        await p.waitForSelector('[data-testid=connection-card][data-state=plain_http]');
+        if (await p.$(banner)) throw new Error('a banner that was put away came back after a reload');
+        if (jsErrors.length) throw new Error('JavaScript errors over plain http: ' + jsErrors.join('; '));
+      } finally { await far.close(); }
+    });
+
     await step('users: add a viewer who must enrol a second factor; viewers cannot administer', async () => {
       await page.goto(BASE + '/admin/users');
       // The administrator makes a link; the guest opens it and chooses their own password, so the administrator never learns it.
@@ -708,7 +808,7 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'share.test', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'session.revoke', 'share.create', 'share.test', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
       for (const name of ['film.mkv', 'report.pdf', 'notes.txt']) if (text.includes(name)) throw new Error('a file name in the audit log: ' + name);
     });

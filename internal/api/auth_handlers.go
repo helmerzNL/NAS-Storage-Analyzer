@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/auth"
+	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 )
 
 type routeFn = func(string, level, func(http.ResponseWriter, *http.Request) error)
@@ -37,6 +38,10 @@ func (s *Server) authRoutes(h routeFn, v string) {
 	h("DELETE "+a+"/passkeys/{id}", lvViewer, s.passkeyDelete)
 	h("POST "+a+"/recovery-codes", lvViewer, s.recoveryCodes)
 	h("POST "+a+"/password", lvViewer, s.changePassword)
+	// A person's own sessions: where they are signed in, and a way to end the others.
+	h("GET "+a+"/sessions", lvViewer, s.sessionList)
+	h("DELETE "+a+"/sessions", lvViewer, s.sessionRevokeOthers)
+	h("DELETE "+a+"/sessions/{id}", lvViewer, s.sessionRevoke)
 
 	h("GET "+v+"/users", lvAdmin, s.listUsers)
 	s.invitationRoutes(h, v) // a new account comes from an invitation link: no route lets an administrator choose a password for someone
@@ -58,6 +63,15 @@ func (s *Server) authFail(w http.ResponseWriter, r *http.Request, err error) boo
 		secs := int(time.Until(locked.Until).Seconds()) + 1
 		w.Header().Set("Retry-After", strconv.Itoa(max(secs, 1)))
 		s.problemCode(w, r, http.StatusTooManyRequests, "too many failed attempts", "Try again in "+strconv.Itoa(max(secs/60, 1))+" minute(s).", "locked")
+		return true
+	case errors.Is(err, secrets.ErrCannotOpen):
+		// The installation's key does not fit what is stored (a wrong NASSA_ENCRYPTION_KEY, or the old one after `nasa rekey`). It is
+		// the server's fault and stays a 500, but one that says what is wrong and what still works, instead of "internal error".
+		s.log.Error("a stored secret does not open with NASSA_ENCRYPTION_KEY: start with the key it was stored with (see `nasa rekey -check`)",
+			"method", r.Method, "path", r.URL.Path)
+		s.problemCode(w, r, http.StatusInternalServerError, "encryption key does not fit",
+			"The server cannot read a stored secret: its encryption key does not match what is stored. A recovery code or a passkey still signs you in; an administrator finds the cause in the application log.",
+			"encryption_key")
 		return true
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		return pc(http.StatusUnauthorized, "invalid username or password", "invalid_credentials")
@@ -264,6 +278,40 @@ func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) error {
 	s.clearSessionCookie(w, r)
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// sessionList returns where the person is signed in: their own sessions and nobody else's.
+func (s *Server) sessionList(w http.ResponseWriter, r *http.Request) error {
+	sess := sessionOf(r)
+	items, err := s.auth.ListSessions(r.Context(), sess.User.ID, sess)
+	if err != nil {
+		return err
+	}
+	return writeJSON(w, map[string]any{"items": items})
+}
+
+// sessionRevoke signs out one other session of the person. The session the request came with is refused (409): ending that one is
+// signing out.
+func (s *Server) sessionRevoke(w http.ResponseWriter, r *http.Request) error {
+	sess := sessionOf(r)
+	gone, err := s.auth.RevokeSession(r.Context(), sess.User.ID, r.PathValue("id"), sess)
+	if err != nil {
+		return err
+	}
+	s.audit(r, "session.revoke", sess.User.Username, map[string]any{"ip": gone.IP, "user_agent": gone.UserAgent, "signed_in_at": gone.CreatedAt})
+	w.WriteHeader(http.StatusNoContent)
+	return nil
+}
+
+// sessionRevokeOthers signs the person out everywhere but here.
+func (s *Server) sessionRevokeOthers(w http.ResponseWriter, r *http.Request) error {
+	sess := sessionOf(r)
+	n, err := s.auth.RevokeOtherSessions(r.Context(), sess.User.ID, sess)
+	if err != nil {
+		return err
+	}
+	s.audit(r, "session.revoke_others", sess.User.Username, map[string]any{"sessions": n})
+	return writeJSON(w, map[string]any{"revoked": n})
 }
 
 func (s *Server) authMe(w http.ResponseWriter, r *http.Request) error {

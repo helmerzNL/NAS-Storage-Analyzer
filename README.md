@@ -253,6 +253,8 @@ NASSA_RP_ORIGINS=https://nas.example.com
 
 Voorbeelden voor nginx en Traefik en uitleg over `X-Forwarded-*`: [`docs/deploy.md`](docs/deploy.md#3-reverse-proxy-en-https).
 
+Gebruik je de app zonder https vanaf een ander apparaat, dan krijgt een beheerder daar een melding over. Onder **Instellingen → Systeem → Verbinding** staat altijd hoe de verbinding beveiligd is en wat je kunt instellen.
+
 ## Beheer
 
 | Taak | Commando |
@@ -262,6 +264,7 @@ Voorbeelden voor nginx en Traefik en uitleg over `X-Forwarded-*`: [`docs/deploy.
 | Bijwerken | `docker compose pull && docker compose up -d` |
 | Terug naar de vorige versie | zet `NASSA_TAG` op het vorige versienummer, dan `docker compose pull && docker compose up -d` (zie [Bijwerken](#bijwerken)) |
 | Logboek | `docker compose logs -f app worker` |
+| De versleutelsleutel wisselen | `nasa rekey`: zie [`docs/deploy.md`](docs/deploy.md#de-versleutelsleutel-wisselen) |
 | Status | `docker compose ps` toont `(healthy)` voor `app`, `worker` en `db` |
 
 - **Health check:** `GET /healthz` antwoordt `200` met `ok` zodra `app` draait; `GET /readyz` antwoordt `200` met `ready` als ook de database antwoordt (dat gebruikt de Compose-health-check). De `worker` heeft een eigen `/healthz` op poort 8081 binnen de container. Alle endpoints: [`docs/operations.md`](docs/operations.md#2-health-check-endpoints).
@@ -414,6 +417,7 @@ Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media
 
 - **Alles staat op je eigen server**: geen account bij ons, geen analytics, geen tracking. De enige verbinding naar buiten is de update-check: die vraagt aan `github.com` of er een nieuwere release is, met alleen een vaste `User-Agent` (geen versie, geen installatie-id, geen gebruikersgegevens), en werkt niets bij.
 - **Lokale accounts** met Argon2id, lockout na mislukte pogingen en CSRF-bescherming. Een **tweede factor is verplicht**: een authenticator-app (met herstelcodes) of een passkey, die ook wachtwoordloos inloggen kan.
+- **Sessies:** onder *Beveiliging* in het gebruikersmenu zie je in welke browsers je bent aangemeld, en meld je een andere sessie af of alle andere in één keer.
 - **Rollen:** Admin en Viewer. Alleen beheerders maken verwijderscripts, beheren shares, gebruikers en bestandstypes en zien het auditlog.
 - **Auditlog** van aanmeldingen, wijzigingen aan de configuratie en de uitkomst van elke scan (gelukt, mislukt of niets gevonden).
 - **Alleen-lezen.** De containers draaien zonder rechten (`read_only`, `cap_drop: ALL`, `no-new-privileges`) en de shares zijn read-only gemount. Alleen route a geeft de worker meer rechten.

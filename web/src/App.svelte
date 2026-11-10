@@ -26,6 +26,8 @@
   import { invite } from './lib/invite.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
   import BuildBanner from './components/BuildBanner.svelte';
+  import ConnectionBanner from './components/ConnectionBanner.svelte';
+  import { loadConnection, resetConnection } from './lib/connection.svelte';
   import { loadUpdate, resetUpdate } from './lib/updates.svelte';
   import SettingsLayout from './components/SettingsLayout.svelte';
 
@@ -38,6 +40,8 @@
   $effect(() => { if (isActive()) { startLive(); return () => stopLive(); } });
   // An update is the administrator's business: ask once after an administrator signs in (the server remembers the answer), nobody else.
   $effect(() => { if (isAdmin()) void loadUpdate(); else resetUpdate(); });
+  // So is a connection that is not encrypted: the administrator is the one who can put a proxy with https in front.
+  $effect(() => { if (isAdmin()) void loadConnection(); else resetConnection(); });
 
   // Settings are the application's own (shares, file types, backup, users, audit log, system): administrators only. What belongs to the signed-in
   // person (appearance and language, security) and About live in the user menu, so a viewer has no Settings entry at all.
@@ -92,6 +96,7 @@
       </div>
     </header>
     <main>
+      {#if isAdmin()}<ConnectionBanner />{/if}
       <UpdateBanner />
       {#if route.path === '/'}<Dashboard />
       {:else if browse}<Browse shareId={browse.share} dirId={browse.dir} />
