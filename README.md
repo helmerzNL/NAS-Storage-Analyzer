@@ -414,7 +414,7 @@ Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media
 - **Rollen:** Admin en Viewer. Alleen beheerders maken verwijderscripts, beheren shares, gebruikers en bestandstypes en zien het auditlog.
 - **Auditlog** van aanmeldingen, wijzigingen aan de configuratie en de uitkomst van elke scan (gelukt, mislukt of niets gevonden).
 - **Alleen-lezen.** De containers draaien zonder rechten (`read_only`, `cap_drop: ALL`, `no-new-privileges`) en de shares zijn read-only gemount. Alleen route a geeft de worker meer rechten.
-- Meld een kwetsbaarheid vertrouwelijk via een [beveiligingsadvies](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), nooit in een openbaar issue.
+- Meld een kwetsbaarheid vertrouwelijk via een [beveiligingsadvies](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), nooit in een openbaar issue. Wat ondersteund wordt en hoe het project zijn afhankelijkheden en images bewaakt, staat in [`SECURITY.md`](SECURITY.md).
 
 ## Steun NASSA
 

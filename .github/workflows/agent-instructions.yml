@@ -13,7 +13,7 @@ jobs:
   agent-instructions-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # The validator's own tests first: if the script fails, you want to know whether the script
       # is broken or the documents are.
       - name: Test the agent-instructions validator
