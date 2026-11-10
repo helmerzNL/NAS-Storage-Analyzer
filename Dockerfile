@@ -29,7 +29,10 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION} 
 # 3. Runtime. nfs-utils and cifs-utils are only used by the worker, and only
 #    when a share is mounted from inside the container (see docs/deploy.md).
 FROM ${RUNTIME_IMAGE}
-RUN apk add --no-cache ca-certificates tzdata nfs-utils cifs-utils \
+# `apk upgrade` first: `apk add` installs what is asked for but leaves the packages of the base layer as they were, and the
+# official image can be days behind a fix (seen: zlib, a critical advisory with a fix that the base layer did not have yet).
+RUN apk upgrade --no-cache \
+ && apk add --no-cache ca-certificates tzdata nfs-utils cifs-utils \
  && addgroup -S -g 10001 nasa \
  && adduser -S -u 10001 -G nasa -H -h /nonexistent -s /sbin/nologin nasa \
  && mkdir -p /mnt/shares /mnt/managed \

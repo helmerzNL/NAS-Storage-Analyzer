@@ -414,7 +414,7 @@ Scanning without the interface works too: `nasa scan -path /mnt/shares/media -na
 - **Roles:** Admin and Viewer. Only administrators make delete scripts, manage shares, users and file types and see the audit log.
 - **Audit log** of sign-ins, configuration changes and the outcome of every scan (succeeded, failed or found nothing).
 - **Read-only.** The containers run without privileges (`read_only`, `cap_drop: ALL`, `no-new-privileges`) and the shares are mounted read-only. Only route a gives the worker more privileges.
-- Report a vulnerability privately through a [security advisory](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), never in a public issue.
+- Report a vulnerability privately through a [security advisory](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), never in a public issue. What is supported, and how the project watches its dependencies and images, is in [`SECURITY.md`](SECURITY.md).
 
 ## Support NASSA
 

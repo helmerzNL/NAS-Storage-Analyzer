@@ -84,12 +84,18 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
   | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASSA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
   | `delete-script-shells` | that the delete scripts of `internal/delscript` really delete exactly the selected files: `sh`, `dash` and `bash` on Linux and macOS, `cmd.exe` and PowerShell (5.1 and 7) on Windows, with no skipped test (suffixed with the operating system on the pull request) |
+  | `supply-chain` | that no known vulnerability is reachable from the Go code (`govulncheck`), no npm package has a high or critical advisory (`npm audit`), no secret is in the repository or its history (`gitleaks`, exceptions in `.gitleaks.toml`), and `go.mod` and the Dockerfile name the same Go line |
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped test, and with every shell the delete-script tests need present |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
   | `browser-e2e` | the whole application in a real browser, including passkeys and the worker |
-  | `docker-build` | the image builds for `linux/amd64` and `linux/arm64` and the Compose files are valid for `.env.example` |
-  | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, and takes over the database folder of the Compose stack |
+  | `docker-build` | the image builds for `linux/amd64` and `linux/arm64`, has no vulnerability of high or critical severity that has a fix, and the Compose files are valid for `.env.example` |
+  | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, takes over the database folder of the Compose stack, and has no vulnerability of high or critical severity that has a fix |
 
+- What changes without a push is checked on a schedule: the workflow `supply-chain-weekly` repeats the `supply-chain` checks every
+  Monday, scans the published `latest` and `beta` images, and fails when the Alpine or Go release line the image is built on has
+  reached its end of life (`scripts/check_base_images.py`). A red run there is work, like a red pull request.
+- GitHub Actions are pinned to a commit (`uses: owner/action@<sha> # vN`) and the scanner image to a digest; Dependabot moves the
+  pins (`.github/dependabot.yml`, pull requests against `beta`). A new action is added by commit, never by tag.
 - A control has to be findable on the pull request under the name a document cites it by. Renaming a job without
   renaming its citations breaks the control as surely as deleting it.
 
