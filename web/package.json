@@ -14,7 +14,7 @@
     "axe-core": "4.14.0",
     "svelte": "^5.20.0",
     "svelte-check": "^4.7.7",
-    "typescript": "^5.7.0",
+    "typescript": "^7.0.2",
     "vite": "^6.4.0",
     "vitest": "^5.1.0"
   },
