@@ -166,7 +166,7 @@ NASSA_SHARES_MOUNT=/mnt/user
 
 Do the folder picker or the scan report *permission denied* for a folder with `drwxrwx---` for `nobody:users`? Set `NASSA_SHARES_GID=100`.
 
-**Route a: the worker mounts itself**, with `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. That gives only the worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` (SMB needs all three: without one of them, `mount.cifs` stops with *Unable to set current process capabilities*); in the interface you enter the server, export or share, version and optionally SMB credentials (stored encrypted). This route was tested up to the privileges and with a simulated mount runner, but not against a real NFS or SMB server. Test a new share with *Scan now*.
+**Route a: the worker mounts itself**, with `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. That gives only the worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` (SMB needs all three: without one of them, `mount.cifs` stops with *Unable to apply new capability set* (older versions: *Unable to set current process capabilities*)); in the interface you enter the server, export or share, version and optionally SMB credentials (stored encrypted). This route was tested up to the privileges and with a simulated mount runner, but not against a real NFS or SMB server. Test a new share with *Scan now*.
 
 Only what you add as a share is scanned. A share that is no longer mounted leaves an empty folder behind; a scan that then finds nothing where the previous one saw more than 100 files is refused and keeps the old data. Details, SMB examples, AppArmor, single Unraid disks and Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken) (in Dutch, with an English summary at the end).
 
@@ -429,7 +429,7 @@ No licence has been chosen yet: all rights reserved.
 
 ### Components
 
-NASSA is built with Go 1.24 and Svelte 5, on PostgreSQL 16. The direct dependencies:
+NASSA is built with Go 1.27 and Svelte 5, on PostgreSQL 16. The direct dependencies:
 
 | Component | What for | Licence |
 |---|---|---|

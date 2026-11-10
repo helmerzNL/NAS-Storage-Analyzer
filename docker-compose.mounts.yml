@@ -13,7 +13,8 @@ services:
       - SYS_ADMIN
       # mount.cifs (SMB) sets its own capabilities at start-up and asks for all three of SYS_ADMIN,
       # DAC_READ_SEARCH and DAC_OVERRIDE. When the container lacks one it stops before mounting, with
-      # "Unable to set current process capabilities: Operation not permitted". Docker's default set has
+      # "Unable to apply new capability set." (older cifs-utils: "Unable to set current process
+      # capabilities: Operation not permitted"). Docker's default set has
       # DAC_OVERRIDE but not DAC_READ_SEARCH, and the worker drops every capability (cap_drop: ALL in
       # docker-compose.yml), so both are added here. NFS needs neither.
       - DAC_READ_SEARCH
