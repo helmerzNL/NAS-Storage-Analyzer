@@ -88,7 +88,7 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped test, and with every shell the delete-script tests need present |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
   | `browser-e2e` | the whole application in a real browser, including passkeys and the worker; every screen against the WCAG 2.2 A and AA rules that can be decided by a machine (axe-core), in light and dark and at phone width, where a page may not scroll sideways and the buttons of a row are on the screen; and the keyboard: the skip link, a dialog that takes the focus and gives it back, the focus ring |
-  | `docker-build` | the image builds for `linux/amd64` and `linux/arm64`, has no vulnerability of high or critical severity that has a fix, and the Compose files are valid for `.env.example` |
+  | `docker-build` | the image builds for `linux/amd64` and `linux/arm64`, the arm64 image holds an arm64 binary that starts, the image has no vulnerability of high or critical severity that has a fix, and the Compose files are valid for `.env.example` |
   | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, takes over the database folder of the Compose stack, and has no vulnerability of high or critical severity that has a fix |
 
 - What changes without a push is checked on a schedule: the workflow `supply-chain-weekly` repeats the `supply-chain` checks every
@@ -198,6 +198,11 @@ A pull request that raises a size, rate or timeout limit states the new value as
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
   the installation; it never updates anything; and `NASSA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.
+- **Nothing that compiles runs emulated.** An arm64 image is built on an amd64 machine. The stages of the `Dockerfile` that make something
+  (`web`, `build`) carry `--platform=$BUILDPLATFORM`, and the binary is compiled for the target with `GOOS` and `GOARCH` from `TARGETOS` and
+  `TARGETARCH`; only the runtime stage runs as the target. Built emulated, `npm ci` stopped moving more than once and held the publish of a
+  build for as long as the time limit allowed. A stage that is added follows this. `deploy-layout` reads the `Dockerfile` for it, and
+  `docker-build` reads the header of the binary in the arm64 image: a binary for the wrong machine starts on the runner, so starting it proves nothing.
 - **Reuse before writing new code.** The shared `query` and `store` packages, the `testsupport` helpers and the existing UI
   components come first; a second implementation of the same thing is the bug (baseline §10).
 

@@ -286,5 +286,22 @@ jobs:
           context: .
           platforms: linux/arm64
           push: false
+          load: true    # into the local daemon, for the step below
+          tags: nas-storage-analyzer:ci-arm64
+          build-args: VERSION=ci
           cache-from: type=gha,scope=ci-arm64
           cache-to: type=gha,scope=ci-arm64,mode=max
+      - name: The arm64 image holds an arm64 binary, and it starts
+        run: |
+          # The binary is compiled on this amd64 machine for arm64 (see the Dockerfile). Left to itself that step makes an amd64 binary,
+          # which starts fine here, in an image that says arm64, and nowhere it is meant for. So "it starts" proves nothing by itself:
+          # the header of the file says which machine it is for (e_machine, two bytes at offset 18: 183 is AArch64, 62 is x86-64).
+          id="$(docker create --platform linux/arm64 nas-storage-analyzer:ci-arm64)"
+          docker cp "$id":/usr/local/bin/nasa nasa-arm64
+          docker rm "$id" >/dev/null
+          machine="$(od -An -tu2 -j18 -N2 nasa-arm64 | tr -d ' ')"
+          rm -f nasa-arm64
+          if [ "$machine" != 183 ]; then echo "::error::the binary in the arm64 image is for machine $machine, not 183 (AArch64)"; exit 1; fi
+          # And it runs, emulated: a moment, not a build.
+          out="$(timeout 120 docker run --rm --platform linux/arm64 nas-storage-analyzer:ci-arm64 version)"
+          if [ "$out" != "nasa ci" ]; then echo "::error::the arm64 binary did not report its version, it said: $out"; exit 1; fi
