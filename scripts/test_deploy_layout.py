@@ -120,6 +120,25 @@ class ComposeLayout(unittest.TestCase):
         self.assertIn("GIT_COMMIT: ${NASSA_COMMIT:-}", build)
         self.assertIn("ARG GIT_COMMIT", (ROOT / "Dockerfile").read_text(encoding="utf-8"))
 
+    def test_only_the_runtime_stage_is_built_for_the_target(self):
+        """An arm64 image is built on an amd64 machine. The interface and the binary are made on that machine itself (the binary
+        compiled for the target), so only the runtime stage runs emulated. Built emulated, `npm ci` stopped moving more than once
+        (36 minutes without a line, on a step of 20 seconds). And a binary built there without GOARCH is one for the wrong machine:
+        it starts on the build machine and nowhere else."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        stages = re.findall(r"(?m)^FROM\s+(--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?\s*$", dockerfile)
+        self.assertEqual([name for _, _, name in stages], ["web", "build", ""], "the stages of the Dockerfile changed: say here where each one runs")
+        for platform, _, name in stages[:2]:
+            self.assertEqual(platform.strip(), "--platform=$BUILDPLATFORM", f"stage {name} must run on the machine that builds")
+        self.assertEqual(stages[2][0], "", "the runtime stage is the image itself: it must be the target's, not the build machine's")
+        build = dockerfile.split(" AS build\n", 1)[1].split("\nFROM ", 1)[0]
+        for arg in ("TARGETOS", "TARGETARCH"):  # set by BuildKit, and visible in a stage only when the stage names it
+            self.assertRegex(build, rf"(?m)^ARG {arg}$")
+        go_build = re.search(r"(?m)^RUN (.*\bgo build\b.*)$", build).group(1)
+        self.assertIn("CGO_ENABLED=0", go_build)  # without cgo Go needs no compiler for the other architecture
+        self.assertRegex(go_build, r'GOOS="\$\{TARGETOS:-linux\}"')
+        self.assertRegex(go_build, r'GOARCH="\$\{TARGETARCH:-\$\(go env GOHOSTARCH\)\}"')
+
     def test_the_shell_scripts_parse(self):
         for script in ("scripts/init-env.sh", "scripts/migrate_data.sh"):
             self.assertEqual(subprocess.run(["sh", "-n", str(ROOT / script)]).returncode, 0, script)
