@@ -26,6 +26,7 @@ jobs:
   # `supply-chain` repeats all of this without a push, because an advisory or an end-of-life date arrives on its own schedule.
   supply-chain:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -47,6 +48,7 @@ jobs:
 
   go-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -75,6 +77,7 @@ jobs:
 
   web-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
@@ -92,6 +95,7 @@ jobs:
 
   browser-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -135,10 +139,13 @@ jobs:
   # read as text, init-env.sh and migrate_data.sh are driven with a fake docker. Fast, needs no database.
   deploy-layout:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Compose layout, init-env.sh and migrate_data.sh
         run: python -m unittest discover -s scripts -p "test_deploy_layout.py" -v
+      - name: Every job of every workflow has a time limit
+        run: python -m unittest discover -s scripts -p "test_workflows.py" -v
 
   # The delete scripts (internal/delscript) are run for real, in the shell they are written for, against files with the
   # names that break scripts. cmd.exe and Windows PowerShell 5.1 only exist on Windows, and the BSD stat of macOS is
@@ -147,6 +154,7 @@ jobs:
   delete-script-shells:
     name: delete-script-shells (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -174,6 +182,7 @@ jobs:
 
   aio-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: The start script passes shellcheck
@@ -198,6 +207,7 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build the image

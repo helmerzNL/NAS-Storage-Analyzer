@@ -39,6 +39,21 @@ export const LIGHT_TEXT = '#ffffff';
  * mid-green button at 4.2:1 with white text; this picks the better of the two for every colour.) */
 export const onAccent = (hex: string) => (contrast(hex, LIGHT_TEXT) >= contrast(hex, DARK_TEXT) ? LIGHT_TEXT : DARK_TEXT);
 
+/**
+ * A fill with a text colour that can be read on it. Small text needs 4.5:1 (WCAG 1.4.3), and a mid-tone fill gives that to neither
+ * white nor near-black (indigo #6366f1: 4.46 and 4.1). The fill is then moved away from its text, a little at a time, until the text
+ * is legible: the colour stays the category's own, a shade darker or lighter. A fill that is fine is returned unchanged.
+ */
+export function legibleFill(hex: string, min = 4.5): { background: string; color: string } {
+  let background = hex;
+  for (let i = 0; i < 25; i++) {
+    const color = onAccent(background);
+    if (contrast(background, color) >= min) return { background, color };
+    background = mixSrgb(background, 94, color === LIGHT_TEXT ? '#000000' : '#ffffff');
+  }
+  return { background, color: onAccent(background) };
+}
+
 /** `color-mix(in srgb, <hex> <pct>%, <other>)` for a fully opaque colour, as #rrggbb (rounded like a browser). Used by the contrast tests. */
 export function mixSrgb(hex: string, pct: number, other: string): string {
   const a = channels(hex), b = channels(other);

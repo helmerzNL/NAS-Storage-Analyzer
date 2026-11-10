@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   import { onDestroy, onMount } from 'svelte';
   import { get, post, patch, del, ApiError, type ShareInfo, type ShareProbe } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
@@ -8,6 +9,7 @@
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
   import { followProbe, probeView } from '../lib/probe';
+  import { tableRoles } from '../lib/tableRoles';
   import Dialog from '../components/Dialog.svelte';
   import FolderPicker from '../components/FolderPicker.svelte';
 
@@ -120,8 +122,8 @@
   <button class="btn primary" onclick={() => edit()} data-testid="add-share">{t('shares.add')}</button></div>
 <p class="muted intro">{t('shares.intro')}</p>
 
-<div class="card table-wrap flush">
-  <table data-testid="share-table">
+<div class="card table-wrap flush" use:scrollRegion={t('nav.shares')}>
+  <table class="rows-sm" use:tableRoles data-testid="share-table">
     <thead><tr><th>{t('col.name')}</th><th>{t('shares.target')}</th><th class="hide-sm">{t('shares.schedule')}</th><th class="hide-sm">{t('dash.lastscan')}</th><th></th></tr></thead>
     <tbody>
       {#each sharesStore.items as s (s.id)}

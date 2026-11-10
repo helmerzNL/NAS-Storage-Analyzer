@@ -70,11 +70,13 @@
   <Auth onfinished={() => navigate(route.path === '/' ? '/' : route.path)} />
 {:else}
   <div class="shell">
+    <!-- The first stop of the Tab key: past the navigation, to what the page is about. -->
+    <a class="skip-link" href="#main" onclick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }} data-testid="skip-link">{t('nav.skip')}</a>
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/" use:link>
           <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f766e"/><path d="M16 16V5.5a10.5 10.5 0 0 1 9.4 5.8z" fill="#5eead4"/><path d="M16 16l9.4-4.7A10.5 10.5 0 1 1 16 5.5z" fill="#ccfbf1" opacity=".55"/><circle cx="16" cy="16" r="4" fill="#0f766e"/></svg>
-          <span class="hide-md">NAS Storage Analyzer</span>
+          <span class="brand-name">NAS Storage Analyzer</span>
           <BetaBadge />
         </a>
         <nav class="nav" aria-label={t('nav.main')}>
@@ -85,7 +87,8 @@
         <select aria-label={t('pref.units')} value={prefs.units} onchange={(e) => setPref('units', e.currentTarget.value)} class="auto" data-testid="units">
           <option value="binary">{t('pref.units.binary')}</option><option value="decimal">{t('pref.units.decimal')}</option>
         </select>
-        <button class="btn small ghost" onclick={() => setPref('language', i18n.lang === 'nl' ? 'en' : 'nl')} aria-label={t('pref.language')}>{i18n.lang === 'nl' ? 'EN' : 'NL'}</button>
+        <!-- The name a screen reader says starts with what is on the button, so somebody who talks to their computer can say what they see. -->
+        <button class="btn small ghost" onclick={() => setPref('language', i18n.lang === 'nl' ? 'en' : 'nl')} aria-label={(i18n.lang === 'nl' ? 'EN' : 'NL') + ': ' + t('pref.language')} data-testid="lang-toggle">{i18n.lang === 'nl' ? 'EN' : 'NL'}</button>
         <button class="btn small ghost" onclick={toggleTheme} aria-label={t('pref.theme')} title={t('pref.theme')} data-testid="theme-toggle">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             {#if prefs.theme === 'dark'}<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
@@ -96,7 +99,7 @@
         </div>
       </div>
     </header>
-    <main>
+    <main id="main" tabindex="-1">
       {#if isAdmin()}<ConnectionBanner />{/if}
       <UpdateBanner />
       {#if route.path === '/'}<Dashboard />

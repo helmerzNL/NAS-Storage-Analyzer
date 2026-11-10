@@ -11,6 +11,7 @@ jobs:
   # baseline section 18 cites it as `[Control: app-engineering-conformance]`.
   app-engineering-conformance:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # The checker's own tests first: if the script fails, you want to know whether the script

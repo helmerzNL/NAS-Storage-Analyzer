@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onAccent } from '../lib/appearance';
+  import { legibleFill } from '../lib/appearance';
   import { onMount } from 'svelte';
   import { get, put, del, type Category } from '../lib/api';
   import { t } from '../lib/i18n.svelte';
@@ -49,7 +49,7 @@
 <div class="grid cols-2">
   {#each byCat as { c, items }}
     <section class="card">
-      <h3><span class="badge cat" style:background={categoryColor(c.key)} style:color={onAccent(categoryColor(c.key))}>{t('cat.' + c.key)}</span> <span class="muted small">{items.length}</span></h3>
+      <h3><span class="badge cat" style:background={legibleFill(categoryColor(c.key)).background} style:color={legibleFill(categoryColor(c.key)).color}>{t('cat.' + c.key)}</span> <span class="muted small">{items.length}</span></h3>
       <div class="chips">
         {#each items as m (m.ext)}
           <span class="chip" style="cursor:default" data-testid={'ext-' + m.ext}>

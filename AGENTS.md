@@ -82,12 +82,12 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `app-engineering-conformance` | that every one of the 111 engineering topics in [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is answered, with evidence or a reason, and that the measured gates are filled in |
   | `enforce-version-bump` | that a pull request does not change `VERSION` |
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
-  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASSA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
+  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASSA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise; and that every job of every workflow has a time limit (`scripts/test_workflows.py`) |
   | `delete-script-shells` | that the delete scripts of `internal/delscript` really delete exactly the selected files: `sh`, `dash` and `bash` on Linux and macOS, `cmd.exe` and PowerShell (5.1 and 7) on Windows, with no skipped test (suffixed with the operating system on the pull request) |
   | `supply-chain` | that no known vulnerability is reachable from the Go code (`govulncheck`), no npm package has a high or critical advisory (`npm audit`), no secret is in the repository or its history (`gitleaks`, exceptions in `.gitleaks.toml`), and `go.mod` and the Dockerfile name the same Go line |
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped test, and with every shell the delete-script tests need present |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
-  | `browser-e2e` | the whole application in a real browser, including passkeys and the worker |
+  | `browser-e2e` | the whole application in a real browser, including passkeys and the worker; every screen against the WCAG 2.2 A and AA rules that can be decided by a machine (axe-core), in light and dark and at phone width, where a page may not scroll sideways and the buttons of a row are on the screen; and the keyboard: the skip link, a dialog that takes the focus and gives it back, the focus ring |
   | `docker-build` | the image builds for `linux/amd64` and `linux/arm64`, has no vulnerability of high or critical severity that has a fix, and the Compose files are valid for `.env.example` |
   | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, takes over the database folder of the Compose stack, and has no vulnerability of high or critical severity that has a fix |
 
@@ -166,7 +166,13 @@ A pull request that raises a size, rate or timeout limit states the new value as
   [`web/src/design/README.md`](web/src/design/README.md)). A colour in a component is a token, never a hex; a status uses `--tone-*` and never the
   accent; the accent as text is `--accent-ink`; a new token goes in `tokens.css` for light *and* dark; targets are 44 px. `design/components.css` stays
   a copy of the starter (changes go in `app.css`). `lib/design.test.ts` and `lib/appearance.test.ts` hold what a test can; look at a screen in light and
-  dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots).
+  dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots, `phone-<screen>.png` among them).
+- **Every screen is in the accessibility step of the browser test** (`web/e2e/e2e.cjs`, the `screens` list): a new screen or a form that opens
+  over one is added there, in the same change, and the step stays at zero findings. What it cannot see is done by hand and by rule: a table whose
+  rows carry buttons has `class="rows-sm"` and `use:tableRoles` (a stack on a phone, still a table to a screen reader); a frame that can scroll
+  sideways has `use:scrollRegion`; a label on a colour that is data goes through `legibleFill`; a dialog is `components/Dialog.svelte` (named by its
+  title, focus in and back); and nothing that is not the thing the person asked for is scrolled into view with `scrollIntoView()`, because a browser
+  continues the Tab key from there (scroll the container).
 - **User management follows App-Guidance's [`user-management.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/user-management.md)**
   (`internal/auth/invitations.go`, [ADR 0006](docs/adr/0006-invitation-links.md)): no route lets an administrator choose or learn a credential; an invitation is a 32-byte token of which
   only the SHA-256 is stored, shown once, usable once, valid seven days, carried in the URL fragment and never logged or audited; every bad token is one and the same answer; a reset replaces credentials only

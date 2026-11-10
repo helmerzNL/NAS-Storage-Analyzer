@@ -1,7 +1,8 @@
+import { categoryColors } from './colors';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ACCENTS, DARK_TEXT, DEFAULT_ACCENT, LIGHT_TEXT, contrast, isAccent, mixSrgb, onAccent } from './appearance';
+import { ACCENTS, DARK_TEXT, DEFAULT_ACCENT, LIGHT_TEXT, contrast, isAccent, mixSrgb, onAccent, legibleFill } from './appearance';
 import { en } from './i18n/en';
 import { nl } from './i18n/nl';
 
@@ -127,5 +128,32 @@ describe('the boot script and the module choose the same colours', () => {
     expect(at).toBeLessThan(html.indexOf('type="module"'));
     expect(html.indexOf('</head>')).toBeGreaterThan(at);
     expect(html).toContain('name="theme-color"');
+  });
+});
+
+describe('legibleFill', () => {
+  it('gives every category a label that can be read on its own colour (4.5:1 for small text)', () => {
+    for (const [key, hex] of Object.entries(categoryColors)) {
+      const f = legibleFill(hex);
+      expect(contrast(f.background, f.color), key).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+  it('leaves a fill alone when its label is already legible', () => {
+    // Amber with near-black text and a dark red with white text are fine as they are.
+    expect(legibleFill('#f59e0b')).toEqual({ background: '#f59e0b', color: DARK_TEXT });
+    expect(legibleFill('#b91c1c')).toEqual({ background: '#b91c1c', color: LIGHT_TEXT });
+  });
+  it('moves a mid-tone fill only as far as it has to', () => {
+    // Indigo gives 4.46 to white and less to near-black: neither is enough, so the fill goes a shade darker and stays indigo.
+    expect(contrast('#6366f1', LIGHT_TEXT)).toBeLessThan(4.5);
+    expect(contrast('#6366f1', DARK_TEXT)).toBeLessThan(4.5);
+    const f = legibleFill('#6366f1');
+    expect(f.color).toBe(LIGHT_TEXT);
+    expect(f.background).not.toBe('#6366f1');
+    expect(contrast(f.background, '#6366f1')).toBeLessThan(1.25);   // close to the colour it was
+  });
+  it('does what is asked for any colour a person can pick', () => {
+    for (const [hex] of ACCENTS) expect(contrast(legibleFill(hex).background, legibleFill(hex).color), hex).toBeGreaterThanOrEqual(4.5);
+    for (const hex of ['#000000', '#ffffff', '#808080', '#777777', '#ff0000', '#00ff00', '#0000ff']) expect(contrast(legibleFill(hex).background, legibleFill(hex).color), hex).toBeGreaterThanOrEqual(4.5);
   });
 });

@@ -396,7 +396,7 @@ NASSA_TEST_DSN='postgres://user@host/postgres' NASSA_REQUIRE_DB=1 go test -race 
 cd web && npm run check && npx vitest run      # typecontrole en unit tests van de interface
 ```
 
-De **browsertest** (`web/e2e`) start een database, `serve` en `worker` en doorloopt met een echte Chromium de hele applicatie: setup-wizard, authenticator-app, herstelcodes, passkeys (virtuele authenticator), share toevoegen, scannen door de worker, bladeren, filters, treemap, lijsten, zoeken, CSV, gebruikers en auditlog:
+De **browsertest** (`web/e2e`) start een database, `serve` en `worker` en doorloopt met een echte Chromium de hele applicatie: setup-wizard, authenticator-app, herstelcodes, passkeys (virtuele authenticator), share toevoegen, scannen door de worker, bladeren, filters, treemap, lijsten, zoeken, CSV, gebruikers en auditlog. Hij controleert ook elk scherm op toegankelijkheid (axe-core, de WCAG 2.2-regels van niveau A en AA die een programma kan beoordelen) in licht, donker en op telefoonbreedte, en loopt de bediening met het toetsenbord na:
 
 ```bash
 npm install -g playwright && playwright install chromium     # eenmalig; de test gebruikt de globale installatie
@@ -450,6 +450,7 @@ NASSA is gebouwd met Go 1.27 en Svelte 5, op PostgreSQL 16. De directe afhankeli
 | [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto), [x/sys](https://pkg.go.dev/golang.org/x/sys), [x/time](https://pkg.go.dev/golang.org/x/time) | Argon2id, systeemaanroepen, snelheidsbegrenzing | BSD-3-Clause |
 | [Svelte](https://svelte.dev), [Vite](https://vite.dev), [TypeScript](https://www.typescriptlang.org), [Vitest](https://vitest.dev) | De interface en de tests | MIT, MIT, Apache-2.0, MIT |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | De QR-code voor de authenticator-app | MIT |
+| [axe-core](https://github.com/dequelabs/axe-core) | De toegankelijkheidscontrole in de browsertest; zit niet in de applicatie | MPL-2.0 |
 | [Material Design Icons](https://pictogrammers.com/library/mdi/) (Pictogrammers) | De pictogrammen; ze zitten in de applicatie, er wordt niets bij een derde partij geladen | Apache-2.0 |
 | [PostgreSQL](https://www.postgresql.org) | De database (image `postgres:16-alpine`) | PostgreSQL License |
 

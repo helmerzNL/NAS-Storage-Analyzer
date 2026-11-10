@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   import { get, qs, type DirRow, type FileRow } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatBytes, formatDate, formatNumber, ago } from '../lib/format';
@@ -96,7 +97,7 @@
 </div>
 
 {#if error}<div class="notice error" role="alert">{error}</div>{/if}
-<div class="card table-wrap flush" aria-busy={loading}>
+<div class="card table-wrap flush" aria-busy={loading} use:scrollRegion={t('nav.lists')}>
   {#if isFiles}
     <table data-testid="list-table">
       <thead><tr>

@@ -150,7 +150,8 @@
       </div>
       <div class="field">
         <span>{t('script.run')}</span>
-        <code class="codeblock mono" data-testid="script-command">{runCommand(made.type, made.d.filename)}</code>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <code class="codeblock mono" tabindex="0" role="region" aria-label={t('script.run')} data-testid="script-command">{runCommand(made.type, made.d.filename)}</code>
         <span class="hint" data-testid="script-run-hint">{t('script.run.hint', { n: formatNumber(made.d.items || made.d.files, i18n.lang) })}</span>
       </div>
       <div class="row"><a class="btn" href={made.url} download={made.d.filename} data-testid="script-again">{t('script.again')}</a></div>
