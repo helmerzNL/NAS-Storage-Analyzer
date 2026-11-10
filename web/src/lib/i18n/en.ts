@@ -129,6 +129,7 @@ export const en: Record<string, string> = {
   'err.locked': 'Too many failed attempts. Try again in about {minutes} minute(s).', 'err.invalid_credentials': 'Username or password is wrong.',
   'err.invalid_code': 'This code is not valid.', 'err.not_found': 'Not found.', 'err.conflict': 'This already exists.', 'err.last_admin': 'At least one active administrator must remain.',
   'err.last_factor': 'A second factor is required: add another one first.', 'err.setup_done': 'Setup is already complete; sign in.', 'err.invalid_setup_token': 'This setup token is wrong.',
+  'err.encryption_key': 'The server cannot read a stored secret: the encryption key of the installation does not fit. A recovery code or a passkey still works; the administrator finds the cause in the application log.',
   'err.https_required': 'Sign-in is only possible over https.', 'err.already_active': 'A scan is already queued or running.', 'err.busy': 'A scan is queued or running. Cancel it first.',
   'err.no_data': 'This share has not been scanned yet.', 'err.passkey_domain': 'Passkeys do not work on this address ({host}). Open the app through a host name over https (or http://localhost), and have the administrator set NASSA_RP_ID to that host name.', 'err.passkey_known': 'This passkey is already registered on your account.', 'err.passkey_cancelled': 'The passkey request was cancelled or timed out.',
   // Appearance (web-app-design.md): the accent colour, and the settings menu

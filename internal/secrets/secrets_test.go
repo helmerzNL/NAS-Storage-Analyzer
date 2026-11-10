@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -71,5 +72,32 @@ func TestFromEnv(t *testing.T) {
 	t.Setenv("NASSA_ENCRYPTION_KEY", "not base64!!")
 	if _, err := FromEnv(); err == nil {
 		t.Error("invalid base64 accepted")
+	}
+}
+
+func TestNewKeyFromEnvAndSameKey(t *testing.T) {
+	a, b := GenerateKey(), GenerateKey()
+	t.Setenv("NASSA_ENCRYPTION_KEY", a)
+	t.Setenv("NASSA_ENCRYPTION_KEY_FILE", "")
+	t.Setenv("NASSA_NEW_ENCRYPTION_KEY_FILE", "")
+	t.Setenv("NASSA_NEW_ENCRYPTION_KEY", "")
+	if _, err := NewKeyFromEnv(); err == nil || !strings.Contains(err.Error(), "NASSA_NEW_ENCRYPTION_KEY") {
+		t.Fatalf("no new key set: %v", err)
+	}
+	t.Setenv("NASSA_NEW_ENCRYPTION_KEY", b)
+	cur, err := FromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := NewKeyFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cur.SameKey(next) || next.SameKey(cur) || !cur.SameKey(cur) {
+		t.Error("SameKey must tell two keys apart and know a key from itself")
+	}
+	// The new key is its own variable: the current one is not read in its place.
+	if _, err := next.Open(cur.Seal([]byte("x"))); err == nil {
+		t.Error("the new key opened what the current key sealed")
 	}
 }

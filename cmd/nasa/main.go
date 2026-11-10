@@ -22,6 +22,7 @@ Commands:
   serve     run the web interface and REST API
   worker    run queued scans (mounts NFS/SMB shares when needed)
   genkey    print a new encryption key for NASSA_ENCRYPTION_KEY
+  rekey     re-encrypt the stored secrets with a new key (NASSA_NEW_ENCRYPTION_KEY); -check only verifies the current key
   version   print the version
   healthcheck   exit 0 when a URL answers 2xx (the container HEALTHCHECK)
   migrate   apply database migrations and seed default categories
@@ -48,6 +49,8 @@ func main() {
 		err = runWorker(os.Args[2:])
 	case "genkey":
 		err = runGenKey(os.Args[2:])
+	case "rekey":
+		err = runRekey(os.Args[2:], os.Stdout)
 	case "healthcheck":
 		err = runHealthcheck(os.Args[2:])
 	case "serve":

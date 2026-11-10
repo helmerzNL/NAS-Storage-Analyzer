@@ -1,10 +1,12 @@
 package api_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
 	"github.com/helmerznl/nas-storage-analyzer/internal/api"
+	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 )
 
 // signInAgain signs the administrator in once more, in another browser: password, then a recovery code (an authenticator code
@@ -162,5 +164,36 @@ func TestSettingsTellAnAdministratorHowTheConnectionArrived(t *testing.T) {
 	expect(t, r, 200, "")
 	if conn, _ := r.Body["connection"].(map[string]any); conn == nil || conn["scheme"] != "https" || conn["via_trusted_proxy"] != true || conn["require_https"] != false {
 		t.Fatalf("https through a trusted proxy, not enforced: %s", r.Raw)
+	}
+}
+
+// The installation runs with a key that does not open what is stored (a wrong NASSA_ENCRYPTION_KEY, or the old one after
+// `nasa rekey`). Signing in with an authenticator code cannot work then; the answer says so instead of "internal error", it does not
+// count as a wrong code, and a recovery code, which needs no key, still signs the person in.
+func TestAKeyThatDoesNotFitIsSaidAtSignIn(t *testing.T) {
+	e := newAuthEnv(t, nil)
+	_, secret, recovery := e.setupAdmin()
+	other, err := secrets.New(bytes.Repeat([]byte{7}, secrets.KeySize))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.Pool.Exec(t.Context(), `UPDATE users SET totp_secret_enc = $1 WHERE username = 'admin'`, other.Seal([]byte(secret))); err != nil {
+		t.Fatal(err)
+	}
+	c := e.client()
+	expect(t, c.do("POST", "/api/v1/auth/login", map[string]string{"username": "admin", "password": pw}), 200, "")
+	r := c.do("POST", "/api/v1/auth/mfa/totp", map[string]string{"code": codeFor(secret)})
+	expect(t, r, 500, "encryption_key")
+	if detail, _ := r.Body["detail"].(string); !strings.Contains(detail, "encryption key") || !strings.Contains(detail, "recovery code") || strings.Contains(r.Raw, secret) {
+		t.Fatalf("the answer says what is wrong and what still works, and no secret: %s", r.Raw)
+	}
+	var failures int
+	if err := e.st.Pool.QueryRow(t.Context(), `SELECT count(*) FROM audit_log WHERE action = 'login.mfa_failure'`).Scan(&failures); err != nil || failures != 0 {
+		t.Errorf("a key that does not fit was counted as a wrong code: %d entries, %v", failures, err)
+	}
+	r = c.do("POST", "/api/v1/auth/mfa/recovery", map[string]string{"code": recovery[0]})
+	expect(t, r, 200, "")
+	if r.Body["status"] != "ok" {
+		t.Fatalf("a recovery code still signs in: %s", r.Raw)
 	}
 }

@@ -251,6 +251,8 @@ NASSA_RP_ID=nas.example.com
 NASSA_RP_ORIGINS=https://nas.example.com
 ```
 
+If you use the app without https from another device, an administrator gets a warning about it. **Settings → System → Connection** always shows how the connection is protected and what to set.
+
 Examples for nginx and Traefik and an explanation of `X-Forwarded-*`: [`docs/deploy.md`](docs/deploy.md#3-reverse-proxy-en-https).
 
 ## Running it
@@ -262,6 +264,7 @@ Examples for nginx and Traefik and an explanation of `X-Forwarded-*`: [`docs/dep
 | Update | `docker compose pull && docker compose up -d` |
 | Roll back | set `NASSA_TAG` to the previous version, then `docker compose pull && docker compose up -d` (see [Updating](#updating)) |
 | Logs | `docker compose logs -f app worker` |
+| Change the encryption key | `nasa rekey`: see [`docs/deploy.md`](docs/deploy.md#de-versleutelsleutel-wisselen) |
 | Status | `docker compose ps` shows `(healthy)` for `app`, `worker` and `db` |
 
 - **Health check:** `GET /healthz` answers `200` with `ok` as soon as `app` runs; `GET /readyz` answers `200` with `ready` when the database answers too (the Compose health check uses it). The `worker` has its own `/healthz` on port 8081 inside the container. Every endpoint: [`docs/operations.md`](docs/operations.md#2-health-check-endpoints).
@@ -414,6 +417,7 @@ Scanning without the interface works too: `nasa scan -path /mnt/shares/media -na
 
 - **Everything is stored on your own server**: no account with us, no analytics, no tracking. The only outgoing connection is the update check: it asks `github.com` whether a newer release exists, with only a fixed `User-Agent` (no version, no installation id, no user data), and updates nothing.
 - **Local accounts** with Argon2id, lockout after failed attempts and CSRF protection. A **second factor is mandatory**: an authenticator app (with recovery codes) or a passkey, which can also sign in without a password.
+- **Sessions:** under *Security* in the user menu you see the browsers you are signed in with, and sign another session out, or all the others at once.
 - **Roles:** Admin and Viewer. Only administrators make delete scripts, manage shares, users and file types and see the audit log.
 - **Audit log** of sign-ins, configuration changes and the outcome of every scan (succeeded, failed or found nothing).
 - **Read-only.** The containers run without privileges (`read_only`, `cap_drop: ALL`, `no-new-privileges`) and the shares are mounted read-only. Only route a gives the worker more privileges.

@@ -41,7 +41,7 @@ func checkOldEnv(environ []string) error {
 // takesSettings says whether a command reads its settings from the environment. Printing the version or a new key does not.
 func takesSettings(command string) bool {
 	switch command {
-	case "serve", "worker", "migrate", "scan", "recategorize", "healthcheck":
+	case "serve", "worker", "migrate", "scan", "recategorize", "healthcheck", "rekey":
 		return true
 	}
 	return false

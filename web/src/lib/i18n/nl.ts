@@ -129,6 +129,7 @@ export const nl: Record<string, string> = {
   'err.locked': 'Te veel mislukte pogingen. Probeer het over ongeveer {minutes} minuut/minuten opnieuw.', 'err.invalid_credentials': 'Gebruikersnaam of wachtwoord klopt niet.',
   'err.invalid_code': 'Deze code is niet geldig.', 'err.not_found': 'Niet gevonden.', 'err.conflict': 'Dit bestaat al.', 'err.last_admin': 'Er moet minstens één actieve beheerder overblijven.',
   'err.last_factor': 'Een tweede factor is verplicht: voeg eerst een andere toe.', 'err.setup_done': 'De installatie is al afgerond; log in.', 'err.invalid_setup_token': 'Deze setup-token klopt niet.',
+  'err.encryption_key': 'De server kan een opgeslagen geheim niet lezen: de versleutelsleutel van de installatie klopt niet. Een herstelcode of een passkey werkt nog wel; de beheerder vindt de oorzaak in het applicatielog.',
   'err.https_required': 'Aanmelden kan alleen via https.', 'err.already_active': 'Er staat al een scan in de wachtrij of er loopt er een.', 'err.busy': 'Er staat een scan in de wachtrij of er loopt er een. Annuleer die eerst.',
   'err.no_data': 'Deze share is nog niet gescand.', 'err.passkey_domain': 'Passkeys werken niet op dit adres ({host}). Open de app via een hostnaam met https (of via http://localhost), en laat de beheerder NASSA_RP_ID op die hostnaam zetten.', 'err.passkey_known': 'Deze passkey staat al op je account.', 'err.passkey_cancelled': 'De passkey-aanvraag is geannuleerd of verlopen.',
   // Weergave (web-app-design.md): de accentkleur en het instellingenmenu

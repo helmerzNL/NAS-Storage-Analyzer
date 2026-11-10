@@ -58,6 +58,17 @@ docker exec "$NAME" sh -c 'grep -q "^Uid:[[:space:]]*70" /proc/$(pgrep -o -f "^/
 docker exec "$NAME" sh -c '! awk "\$4 == \"0A\" && \$2 ~ /:1538\$/" /proc/net/tcp /proc/net/tcp6 2>/dev/null | grep -q .' \
   && pass "PostgreSQL has no TCP port" || fail "PostgreSQL listens on TCP"
 
+# Changing the encryption key works on the running container: `nasa-aio rekey` finds the database on its socket. (What it does to the
+# stored secrets is tested in Go against real rows; a new installation has none, so this is about reaching the database.)
+docker exec "$NAME" nasa-aio rekey -check 2>&1 | grep -q "All stored secrets open with NASSA_ENCRYPTION_KEY" \
+  && pass "rekey -check reaches the database of the running container" || fail "rekey -check: $(docker exec "$NAME" nasa-aio rekey -check 2>&1 | tail -3)"
+if out="$(docker exec "$NAME" nasa-aio rekey 2>&1)"; then fail "rekey ran without a new key"; fi
+printf %s "$out" | grep -q "NASSA_NEW_ENCRYPTION_KEY" && pass "rekey asks for the new key by name" || fail "rekey without a new key said: $out"
+if out="$(docker exec -e NASSA_NEW_ENCRYPTION_KEY="$KEY" "$NAME" nasa-aio rekey 2>&1)"; then fail "rekey accepted the current key as the new one"; fi
+printf %s "$out" | grep -q "the new key is the current key" && pass "rekey refuses the current key as the new one" || fail "rekey with the same key said: $out"
+if out="$(docker run --rm -e NASSA_ENCRYPTION_KEY="$KEY" "$IMAGE" rekey -check 2>&1)"; then fail "rekey ran in a container without a database"; fi
+printf %s "$out" | grep -q "running container" && pass "rekey in a new container says where to run it" || fail "rekey in a new container said: $out"
+
 t0="$(date +%s)"
 docker stop -t 60 "$NAME" >/dev/null
 took=$(( $(date +%s) - t0 ))

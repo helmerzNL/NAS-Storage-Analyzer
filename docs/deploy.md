@@ -360,6 +360,13 @@ De app vertrouwt `X-Forwarded-For` alleen als de verbinding van een vertrouwd pr
 het rechtse niet-vertrouwde adres uit de keten (links kan de client vervalsen). Dat adres gebruikt de
 lockout per IP en het auditlog.
 
+**De app zegt het zelf.** Een beheerder die de app via http bereikt vanaf een ander apparaat dan de server zelf, krijgt bovenaan een melding
+(per browser weg te klikken). Dat gebeurt ook als de browser https gebruikt en de app http ziet: de proxy staat dan niet in
+`NASSA_TRUSTED_PROXIES` of stuurt geen `X-Forwarded-Proto`, waardoor de sessiecookie zijn `Secure`-vlag mist en elke bezoeker voor de app het adres
+van de proxy heeft. Onder **Instellingen → Systeem → Verbinding** staat altijd de stand, met wat je kunt instellen: *Versleuteld*,
+*Versleuteld, niet afgedwongen* (zet `NASSA_REQUIRE_HTTPS=true`), *De app ziet niet dat je HTTPS gebruikt*, *Deze verbinding is niet
+versleuteld*, of *Lokaal* (http op de server zelf, via `localhost`).
+
 ## 4. Passkeys: RP-ID en origin
 
 Een passkey is gebonden aan de hostnaam waarop hij is aangemaakt (de *relying party ID*).
@@ -394,6 +401,17 @@ wachtwoord of een passkey. Daardoor kent de beheerder het nooit, en reist het ni
 * **Alleen beheerder en je bent alles kwijt?** Een andere beheerder maakt je een inlog-link. Ben je de enige beheerder en heb je geen enkele manier meer om in te loggen, dan blijft alleen direct ingrijpen in de database
   of een herstel van de back-up over; zorg dus voor minstens twee beheerders en bewaar de herstelcodes.
 
+### Sessies: waar je bent aangemeld
+
+Onder **Beveiliging** in het gebruikersmenu staat bij *Sessies* elke browser waarin je bent aangemeld: de browser en het systeem, het adres
+dat de app zag, sinds wanneer, en wanneer hij voor het laatst is gebruikt. De sessie waarin je kijkt staat bovenaan. Een andere sessie meld
+je daar af; *Overal elders afmelden* beëindigt alle andere in één keer, ook een aanmelding die bij de tweede factor is blijven steken.
+Je ziet alleen je eigen sessies, en een beheerder ziet die van anderen niet.
+
+* Een sessie verloopt vanzelf na 12 uur zonder gebruik en uiterlijk na 7 dagen. Een wachtwoordwijziging beëindigt je andere sessies ook.
+* Het adres is dat van de proxy zolang die niet in `NASSA_TRUSTED_PROXIES` staat (§3).
+* In het auditlog: `session.revoke` (met de browser en het adres van de beëindigde sessie) en `session.revoke_others` (met het aantal).
+
 ## 5. Back-up en herstel
 
 Alles wat de moeite waard is staat in PostgreSQL, plus één sleutel buiten de database.
@@ -414,6 +432,40 @@ docker compose up -d
   scan (*Volledige scan* op het dashboard) bouwt de index desgewenst opnieuw op.
 * Een bestandssysteem-snapshot of kopie van `DATA_PATH/postgres` met de database gestopt werkt ook (`docker compose stop db`).
 * Een grote database (tientallen miljoenen bestanden) dumpt in minuten tot een uur; plan dat buiten de scantijd.
+
+### De versleutelsleutel wisselen
+
+`NASSA_ENCRYPTION_KEY` versleutelt wat de database versleuteld bewaart: de SMB-wachtwoorden van shares en de geheimen van
+authenticator-apps. Wissel de sleutel als iemand anders hem gezien kan hebben (een `.env` in een gedeelde back-up, een schermafbeelding),
+of gewoon af en toe. `nasa rekey` versleutelt alles opnieuw met een nieuwe sleutel, in één transactie: daarna staat alles onder de nieuwe
+sleutel, of er is niets veranderd.
+
+```bash
+NEW="$(docker compose run --rm --no-deps app genkey)"       # de nieuwe sleutel
+docker compose stop app worker                               # de database blijft draaien
+NASSA_NEW_ENCRYPTION_KEY="$NEW" docker compose run --rm -e NASSA_NEW_ENCRYPTION_KEY app rekey
+echo "$NEW"                                                  # zet deze waarde in .env als NASSA_ENCRYPTION_KEY
+docker compose up -d
+docker compose exec app nasa rekey -check                    # alles gaat open met de nieuwe sleutel
+```
+
+* De nieuwe sleutel gaat via een omgevingsvariabele (`NASSA_NEW_ENCRYPTION_KEY`, of een bestand met `NASSA_NEW_ENCRYPTION_KEY_FILE`),
+  nooit als argument: argumenten zijn zichtbaar voor elk proces op de machine.
+* `rekey -check` verandert niets en zegt of alles wat is opgeslagen opengaat met de huidige sleutel.
+* Start je per ongeluk met de oude sleutel, dan staat in het log van `app` *NASSA_ENCRYPTION_KEY does not open what is stored*, met de
+  shares en gebruikers die het betreft. Aanmelden met een code van de authenticator-app geeft dan de melding dat de versleutelsleutel niet
+  klopt (een herstelcode of een passkey werkt nog wel). Er gaat niets verloren: zet de juiste sleutel en start opnieuw.
+* Gaat een opgeslagen waarde met geen van beide sleutels open (hij is ooit met weer een andere sleutel opgeslagen), dan stopt `rekey`
+  zonder iets te wijzigen en noemt hij de share of de gebruiker. Voer dat SMB-wachtwoord opnieuw in, of laat die gebruiker zijn
+  authenticator-app opnieuw instellen, en draai `rekey` daarna nog eens.
+* Een back-upbestand uit de app (*Instellingen → Back-up*) van vóór de wissel bevat de SMB-wachtwoorden nog onder de oude sleutel: maak
+  een nieuw. Een `pg_dump` van vóór de wissel hoort bij de oude sleutel; bewaar die sleutel erbij zolang je die dump bewaart.
+* Docker secrets (`docker-compose.secrets.yml`): geef beide Compose-bestanden mee aan de commando's hierboven en zet de nieuwe sleutel
+  na `rekey` in `secrets/encryption_key`.
+* All-in-one image: `NEW="$(docker run --rm <image> genkey)"`, dan in de draaiende container
+  `NASSA_NEW_ENCRYPTION_KEY="$NEW" docker exec -e NASSA_NEW_ENCRYPTION_KEY <container> nasa-aio rekey`, en maak de container daarna meteen
+  opnieuw aan met `NASSA_ENCRYPTION_KEY` op de nieuwe sleutel. Doe dat op een moment dat niemand de app gebruikt.
+* De wissel staat in het auditlog als `encryption.rekey`, door `nasa rekey`.
 
 ### In de app: een back-up van wat je zelf hebt ingevoerd
 
@@ -690,6 +742,8 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
 | Bij het toevoegen van een share: "must be inside …" | Het pad moet onder `NASSA_SHARES_MOUNT` liggen (standaard `/mnt/shares`). Zet `NASSA_SHARES_MOUNT` op het pad dat je wilt typen, of gebruik het pad dat de melding noemt; herstart daarna `docker compose up -d`. |
 | Scan mislukt met "permission denied" op het share-pad, of de mapkiezer meldt het | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`), zie *Leesrechten*; de melding noemt de uid en gid waarmee de app draait. Of geef die gebruiker leesrechten (`o+rx`), of mount met `uid=`/`gid=` voor SMB. Mappen die niet leesbaar zijn tellen als fout, de scan loopt door. |
 | `/metrics` geeft 401 of 403 | Zet `NASSA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
+| Een melding *Deze verbinding is niet versleuteld* of *De app ziet niet dat je HTTPS gebruikt* | Zet een reverse proxy met https voor de app, of zet de proxy in `NASSA_TRUSTED_PROXIES`: zie [§3](#3-reverse-proxy-en-https). **Instellingen → Systeem → Verbinding** zegt welke van de twee. |
+| Het log van `app` meldt *NASSA_ENCRYPTION_KEY does not open what is stored* | De app is gestart met een andere sleutel dan waarmee de wachtwoorden zijn opgeslagen. Zet de juiste sleutel terug en start opnieuw; zie [De versleutelsleutel wisselen](#de-versleutelsleutel-wisselen). |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
 
 ## 11. English summary
@@ -759,6 +813,20 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
 * **Reverse proxy:** set `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS=true`, `NASSA_RP_ID`, `NASSA_RP_ORIGINS`; turn off
   response buffering for `/api/v1/events`. Examples for Caddy, nginx and Traefik are above. Passkeys need a host
   name (not an IP address) and https.
+* **Connection warning:** an administrator who reaches the app over plain http from another machine gets a banner (it can be put away per
+  browser), and so does one whose browser uses https while the app sees http (the proxy is not in `NASSA_TRUSTED_PROXIES` or sends no
+  `X-Forwarded-Proto`, so the session cookie lacks `Secure`). *Settings → System → Connection* always shows the state and what to set.
+* **Sessions:** under *Security* in the user menu a person sees every browser they are signed in with (browser and system, the address
+  the app saw, since when, last used), signs another one out, or signs out everywhere else. Own sessions only. Audit log:
+  `session.revoke`, `session.revoke_others`.
+* **Changing the encryption key:** `nasa rekey` re-encrypts the stored SMB passwords and authenticator secrets with a new key in one
+  transaction (all of it, or nothing). Stop `app` and `worker`, run
+  `NASSA_NEW_ENCRYPTION_KEY="$NEW" docker compose run --rm -e NASSA_NEW_ENCRYPTION_KEY app rekey`, put the new key in `.env`, start again;
+  `rekey -check` only verifies the current key. The new key comes from the environment or `NASSA_NEW_ENCRYPTION_KEY_FILE`, never from an
+  argument. Started with the wrong key, the app log says `NASSA_ENCRYPTION_KEY does not open what is stored` and names what, and signing in
+  with an authenticator code answers that the key does not fit (a recovery code or a passkey still works). All-in-one
+  image: `docker exec -e NASSA_NEW_ENCRYPTION_KEY <container> nasa-aio rekey` in the running container, then recreate it with the new
+  key. An in-app backup file from before the change holds SMB passwords under the old key: make a new one.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASSA_ENCRYPTION_KEY` stored separately. Without the key the
   stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
 * **Factory reset:** *Settings → System → Factory reset* (administrators; folded by default) deletes **every table** of the database (accounts, including yours, shares with their scan data, edited file types, the audit
