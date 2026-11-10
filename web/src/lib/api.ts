@@ -156,6 +156,11 @@ export interface ShareInfo {
   day_start_hour: number; day_end_hour: number; retention_scans: number; retention_days: number; snapshot_depth: number;
   last_scan: ScanInfo | null; latest_scan: ScanInfo | null; active_job: ActiveJob | null;
 }
+/** A connection test of a share: can the worker reach it and list its top folder? `entries` counts that folder, up to a limit (`more`). */
+export interface ShareProbe {
+  id: number; share_id: number; state: 'queued' | 'running' | 'ok' | 'failed'; requested_by: string; requested_at: string;
+  started_at: string | null; finished_at: string | null; error: string | null; entries: number | null; more: boolean;
+}
 export interface Child {
   id: number; name: string; size: number; alloc: number; files: number; dirs: number; pct: number;
   oldest_mtime: string | null; newest_mtime: string | null; oldest_atime: string | null; newest_atime: string | null;

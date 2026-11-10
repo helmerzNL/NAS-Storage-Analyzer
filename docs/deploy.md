@@ -36,7 +36,8 @@ stelt verplicht een tweede factor in (authenticator-app of passkey) en bewaart d
 standaardwachtwoorden.
 
 Daarna: **Shares → Share toevoegen**, kies het type *Gemount pad (aanbevolen)*, klik op **Bladeren…** en kies de map
-(of typ het pad, bijvoorbeeld `/mnt/shares/media`) en klik op *Scan nu* op het dashboard.
+(of typ het pad, bijvoorbeeld `/mnt/shares/media`). De share wordt meteen getest: eronder staat of de worker hem kan bereiken en
+hoeveel items de hoofdmap heeft. Klik daarna op *Scan nu* op het dashboard.
 
 **Welke image.** De stack haalt `ghcr.io/helmerznl/nas-storage-analyzer:${NASSA_TAG}` op; er wordt op de server niets gebouwd,
 dus een stackmanager heeft alleen `docker-compose.yml` en `.env` nodig. `NASSA_TAG` (in `.env`) is `latest` (stabiel, standaard),
@@ -182,7 +183,24 @@ een tmpfs en verwijdert het na het mounten. Opties komen uit een allow-list en d
   daarbij gemeten is, in een container met Alpine 3.24 en `cifs-utils` 7.5 (het pakket in dit image; hetzelfde gold voor Alpine 3.20 met 7.0): met Docker's standaardrechten plus
   `CAP_SYS_ADMIN` stopt `mount.cifs` op zijn rechten, met `CAP_DAC_READ_SEARCH` erbij komt hij daar voorbij; met `cap_drop: ALL` heeft hij
   alle drie nodig, zoals het override-bestand ze geeft. CI controleert beide bij elke build. Een echte NFS- of SMB-server was er niet beschikbaar (de kernel had geen NFS- of cifs-client); test een nieuwe
-  share dus eerst met *Scan nu* en lees de foutmelding op het dashboard.
+  share dus eerst met *Test verbinding* (zie hieronder): de melding van `mount` staat er binnen enkele seconden onder.
+
+### Test verbinding
+
+Onder **Instellingen → Shares** heeft elke share de knop **Test verbinding** (alleen beheerders). De worker doet dan wat hij aan het
+begin van een scan ook doet, en niets meer: het pad opzoeken (gemount pad) of de share koppelen (NFS, SMB), en de hoofdmap lezen.
+De uitkomst staat binnen enkele seconden onder de share:
+
+* **Bereikbaar**, met het aantal items in de hoofdmap (geteld tot 1000).
+* **Leeg**: de worker kan erbij, maar de hoofdmap is leeg. Zo ziet een share eruit die op de host niet gekoppeld is, of een
+  `NASSA_SHARES_DIR` die naar een andere map wijst dan je denkt.
+* **Niet bereikbaar**, met de melding van de worker of van `mount` zelf (een time-out, een geweigerd wachtwoord, een ontbrekend
+  recht van de container, *permission denied* met de gebruiker waaronder de app draait).
+
+Een share die je net hebt toegevoegd wordt vanzelf getest. Een test is geen scan: er wordt niets geïndexeerd, er wordt geen bestand
+geopend en er komt geen scan in de historie; in het auditlog staat alleen wie de test vroeg (`share.test`). De test wacht niet op een
+vrije plek achter lopende scans, en gebruikt bij NFS en SMB een eigen koppelpunt, zodat een scan van dezelfde share gewoon doorloopt.
+Pakt geen worker de test binnen een minuut op, dan staat er dat de worker niet draait.
 
 ### Route (c): de stack draait op de NAS zelf
 
@@ -228,7 +246,7 @@ Je kunt dan `/mnt/disk1/media`, `/mnt/cache/appdata` en `/mnt/user/documenten` d
 
 Op andere NAS-systemen geef je het pad van het volume of de pool door (Synology bijvoorbeeld `/volume1`); controleer het
 via SSH met `ls`. Controleer na het starten of de share zichtbaar is met `docker compose exec worker ls /mnt/user`
-(of je eigen pad) en doe een eerste *Scan nu*.
+(of je eigen pad). De share wordt bij het toevoegen getest (*Test verbinding*); doe daarna een eerste *Scan nu*.
 
 > Route (c) is getest tot en met de configuratie (`docker compose config`) en de pad-validatie in de unit tests, maar
 > niet op een echte Unraid- of andere NAS-machine, en niet met een draaiende container.
@@ -666,6 +684,8 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
 | De scan vindt niets, of de share-map is leeg | Het auditlog toont dan `scan.empty`. `NASSA_SHARES_DIR` wijst niet naar de map met je mounts (of is relatief en door je stackmanager ergens anders opgelost). Gebruik een absoluut pad op de host. |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASSA_RP_ID` in. |
+| Je weet niet of de worker een share kan bereiken, of waarom een scan mislukt | **Instellingen → Shares → Test verbinding**: de uitkomst staat er binnen enkele seconden onder. Zie [Test verbinding](#test-verbinding). |
+| *Test verbinding* meldt "no worker picked the test up" | De worker draait niet of bereikt de database niet: `docker compose ps` en `docker compose logs worker` (all-in-one image: het log van de container). |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
 | Bij het toevoegen van een share: "must be inside …" | Het pad moet onder `NASSA_SHARES_MOUNT` liggen (standaard `/mnt/shares`). Zet `NASSA_SHARES_MOUNT` op het pad dat je wilt typen, of gebruik het pad dat de melding noemt; herstart daarna `docker compose up -d`. |
 | Scan mislukt met "permission denied" op het share-pad, of de mapkiezer meldt het | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`), zie *Leesrechten*; de melding noemt de uid en gid waarmee de app draait. Of geef die gebruiker leesrechten (`o+rx`), of mount met `uid=`/`gid=` voor SMB. Mappen die niet leesbaar zijn tellen als fout, de scan loopt door. |
@@ -728,6 +748,12 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
   without them, NFS needs none of the last two). This route is verified up to the privileges, including that `mount.cifs` of Alpine
   3.20 gets past its capability step with the override's set and not with `SYS_ADMIN` alone; it could not be tested against a real
   NFS/SMB server in the development sandbox.
+* **Connection test:** *Settings → Shares → Test connection* (administrators) has the worker do what it does at the start of a scan and
+  nothing more: find the path or mount the share, and list the top folder. Within seconds the share shows *Reachable* with the number
+  of items (counted up to 1,000), *Empty* (reachable, but nothing there: what an unmounted share or a wrong `NASSA_SHARES_DIR` looks
+  like) or *Not reachable* with the message of the worker or of `mount`. A share that was just added is tested by itself. A test is
+  not a scan: nothing is indexed, no file is opened, and only who asked is in the audit log (`share.test`). It does not wait behind
+  running scans and mounts on a mount point of its own. "No worker picked the test up" after a minute means the worker is not running.
 * **Missing mounts:** a scan that finds an empty share where the previous one found 100+ files is refused and the
   old data kept (`nasa scan -allow-empty` overrides, for a share that was emptied on purpose).
 * **Reverse proxy:** set `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS=true`, `NASSA_RP_ID`, `NASSA_RP_ORIGINS`; turn off

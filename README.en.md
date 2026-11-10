@@ -134,7 +134,7 @@ A new installation opens a setup wizard; an existing installation does not see i
 1. **Setup token.** Enter the `NASSA_SETUP_TOKEN` from `.env`. If there is none, a random token is in the log: `docker compose logs app | grep setup_token`.
 2. **Administrator.** Choose a name and a password. There are no default passwords.
 3. **Second factor.** Set up an authenticator app (you get recovery codes, shown once) or a passkey. This is mandatory, for every account.
-4. **First share.** Choose **Shares → Add share**, click **Browse…** and pick the folder (or type the path), and click **Scan now** on the dashboard.
+4. **First share.** Choose **Shares → Add share**, click **Browse…** and pick the folder (or type the path). The share is tested at once: below the share it says whether the worker can reach it. Then click **Scan now** on the dashboard.
 
 Passkeys are bound to a host name and only work over https or on `localhost`. In production set `NASSA_RP_ID` and `NASSA_RP_ORIGINS`, see [Reverse proxy and https](#reverse-proxy-and-https).
 
@@ -167,6 +167,8 @@ NASSA_SHARES_MOUNT=/mnt/user
 Do the folder picker or the scan report *permission denied* for a folder with `drwxrwx---` for `nobody:users`? Set `NASSA_SHARES_GID=100`.
 
 **Route a: the worker mounts itself**, with `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. That gives only the worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` (SMB needs all three: without one of them, `mount.cifs` stops with *Unable to apply new capability set* (older versions: *Unable to set current process capabilities*)); in the interface you enter the server, export or share, version and optionally SMB credentials (stored encrypted). This route was tested up to the privileges and with a simulated mount runner, but not against a real NFS or SMB server. Test a new share with *Scan now*.
+
+**Test connection.** Every share has a **Test connection** button under **Settings → Shares**. The worker mounts the share (or looks up the path), reads only the top folder and says within seconds whether that works, how many items are there, or what goes wrong, in the words of `mount` itself. A new share is tested right after it is added. A test is not a scan: nothing is indexed and no file is opened.
 
 Only what you add as a share is scanned. A share that is no longer mounted leaves an empty folder behind; a scan that then finds nothing where the previous one saw more than 100 files is refused and keeps the old data. Details, SMB examples, AppArmor, single Unraid disks and Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken) (in Dutch, with an English summary at the end).
 
@@ -289,6 +291,7 @@ sed -i 's/^NASA_/NASSA_/' .env
 |---|---|
 | `docker compose up` says `NASSA_SHARES_DIR` is missing, or names a variable with `NASA_` | An `.env` from before v0.2.0: `sed -i 's/^NASA_/NASSA_/' .env`. |
 | **Browse…** shows "No folders found", or the scan finds nothing | The shares folder is empty in the container: nothing is mounted, or `NASSA_SHARES_DIR` points somewhere other than you think (or is relative). The audit log then shows `scan.empty`. |
+| You do not know whether the worker can reach a share | **Settings → Shares → Test connection**: the outcome appears below it within seconds, with the message of `mount` when it fails. "No worker picked the test up" means the worker is not running. |
 | Scan fails with "permission denied" | The container runs as uid 10001 and does not own the folder. Set `NASSA_SHARES_GID` to the group that owns the share (Unraid: `100`). |
 | The screen asks for a setup token you do not have | `docker compose logs app \| grep setup_token`, or `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkeys do not work ("Passkeys need a secure address") | Open the app through a host name with https (or `http://localhost`) and set `NASSA_RP_ID`. |

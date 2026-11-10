@@ -55,6 +55,7 @@ func fill(t *testing.T, st *store.Store) {
 		exec(t, st, `INSERT INTO dir_category_agg (share_id, dir_id, category_id) VALUES ($1, 1, 1)`, id)
 		exec(t, st, `INSERT INTO share_ext_agg (share_id, ext, size, alloc, files) VALUES ($1, 'mkv', 10, 10, 1)`, id)
 		exec(t, st, `INSERT INTO jobs (kind, share_id, state, finished_at) VALUES ('scan', $1, 'done', now())`, id)
+		exec(t, st, `INSERT INTO share_probes (share_id, state, finished_at, entries) VALUES ($1, 'ok', now(), 3)`, id)
 		exec(t, st, `INSERT INTO snapshots (scan_id, share_id, taken_at, size, alloc, files, dirs) VALUES ($1, $2, now(), 10, 10, 1, 1)`, 100+id, id)
 		exec(t, st, `INSERT INTO snapshot_category (scan_id, category_id, size, files) VALUES ($1, 1, 10, 1)`, 100+id)
 		exec(t, st, `INSERT INTO snapshot_ext (scan_id, ext, size, files) VALUES ($1, 'mkv', 10, 1)`, 100+id)

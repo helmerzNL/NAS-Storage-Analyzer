@@ -275,5 +275,11 @@ export const en: Record<string, string> = {
   'about.beta.note': 'A beta build gets changes before they reach the stable release. Use a separate data folder for it (DATA_PATH).',
   'about.source': 'Source code and issues on GitHub',
   'about.updates.admin': 'Whether a newer release exists is shown to administrators.',
+  'shares.test': 'Test connection', 'shares.test.close': 'Close the outcome of the test of {name}',
+  'shares.test.label.busy': 'Testing', 'shares.test.label.ok': 'Reachable', 'shares.test.label.warn': 'Empty', 'shares.test.label.bad': 'Not reachable', 'shares.test.label.lost': 'No outcome',
+  'shares.test.starting': 'Asking for the test…', 'shares.test.queued': 'Waiting for the worker to pick the test up…', 'shares.test.running': 'The worker is reading the top folder of the share…',
+  'shares.test.ok': '{n} items in the top folder.', 'shares.test.ok.one': 'One item in the top folder.', 'shares.test.ok.more': 'More than {n} items in the top folder.',
+  'shares.test.empty': 'The worker can reach the share, but its top folder is empty. Is the path right? A share that is not mounted looks like this.',
+  'shares.test.lost': 'The outcome could not be fetched: {error}',
   'about.credits': 'Credits', 'about.credits.body': 'Icons: Material Design Icons by Pictogrammers (Apache-2.0), included with the application; nothing is loaded from a third party.',
 };
