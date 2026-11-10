@@ -70,6 +70,7 @@ A NAS fills up slowly, and on a share with millions of files *where did the spac
 - **Delete scripts**: tick files and folders and get one script (`.ps1`, `.cmd`, `.sh` or a simple `.txt`) that deletes exactly those. **NASSA never deletes anything itself**: it writes the text, you run it. See [Deleting](#deleting).
 - **Secure sign-in, for several users**: local accounts with Argon2id, a **mandatory second factor** (authenticator app or passkey, passwordless with a passkey alone too), recovery codes, lockout, CSRF protection, the roles Admin and Viewer and an audit log. No default passwords. An administrator invites others with a one-time link; nobody chooses anyone else's password.
 - **Settings per person**: Dutch or English, binary or decimal units, light, dark or following your system, and an accent colour of your own.
+- **Notifications**: have a message sent to Home Assistant, ntfy, Gotify or another webhook when a scan fails, finds nothing or could not read everything.
 - **For operators**: an OpenAPI REST API, Prometheus `/metrics`, JSON logs, health checks, a backup of what you entered yourself and a factory reset.
 - **Your data, your server**: everything runs in your own containers. The update check only asks GitHub whether a newer release exists and sends nothing about your installation; switch it off with `NASSA_UPDATE_CHECK=false`.
 
@@ -134,7 +135,7 @@ A new installation opens a setup wizard; an existing installation does not see i
 1. **Setup token.** Enter the `NASSA_SETUP_TOKEN` from `.env`. If there is none, a random token is in the log: `docker compose logs app | grep setup_token`.
 2. **Administrator.** Choose a name and a password. There are no default passwords.
 3. **Second factor.** Set up an authenticator app (you get recovery codes, shown once) or a passkey. This is mandatory, for every account.
-4. **First share.** Choose **Shares → Add share**, click **Browse…** and pick the folder (or type the path), and click **Scan now** on the dashboard.
+4. **First share.** Choose **Shares → Add share**, click **Browse…** and pick the folder (or type the path). The share is tested at once: below the share it says whether the worker can reach it. Then click **Scan now** on the dashboard.
 
 Passkeys are bound to a host name and only work over https or on `localhost`. In production set `NASSA_RP_ID` and `NASSA_RP_ORIGINS`, see [Reverse proxy and https](#reverse-proxy-and-https).
 
@@ -166,7 +167,9 @@ NASSA_SHARES_MOUNT=/mnt/user
 
 Do the folder picker or the scan report *permission denied* for a folder with `drwxrwx---` for `nobody:users`? Set `NASSA_SHARES_GID=100`.
 
-**Route a: the worker mounts itself**, with `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. That gives only the worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` (SMB needs all three: without one of them, `mount.cifs` stops with *Unable to set current process capabilities*); in the interface you enter the server, export or share, version and optionally SMB credentials (stored encrypted). This route was tested up to the privileges and with a simulated mount runner, but not against a real NFS or SMB server. Test a new share with *Scan now*.
+**Route a: the worker mounts itself**, with `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. That gives only the worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` and `CAP_DAC_OVERRIDE` (SMB needs all three: without one of them, `mount.cifs` stops with *Unable to apply new capability set* (older versions: *Unable to set current process capabilities*)); in the interface you enter the server, export or share, version and optionally SMB credentials (stored encrypted). This route was tested up to the privileges and with a simulated mount runner, but not against a real NFS or SMB server. Test a new share with *Scan now*.
+
+**Test connection.** Every share has a **Test connection** button under **Settings → Shares**. The worker mounts the share (or looks up the path), reads only the top folder and says within seconds whether that works, how many items are there, or what goes wrong, in the words of `mount` itself. A new share is tested right after it is added. A test is not a scan: nothing is indexed and no file is opened.
 
 Only what you add as a share is scanned. A share that is no longer mounted leaves an empty folder behind; a scan that then finds nothing where the previous one saw more than 100 files is refused and keeps the old data. Details, SMB examples, AppArmor, single Unraid disks and Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken) (in Dutch, with an English summary at the end).
 
@@ -249,6 +252,8 @@ NASSA_RP_ID=nas.example.com
 NASSA_RP_ORIGINS=https://nas.example.com
 ```
 
+If you use the app without https from another device, an administrator gets a warning about it. **Settings → System → Connection** always shows how the connection is protected and what to set.
+
 Examples for nginx and Traefik and an explanation of `X-Forwarded-*`: [`docs/deploy.md`](docs/deploy.md#3-reverse-proxy-en-https).
 
 ## Running it
@@ -260,6 +265,7 @@ Examples for nginx and Traefik and an explanation of `X-Forwarded-*`: [`docs/dep
 | Update | `docker compose pull && docker compose up -d` |
 | Roll back | set `NASSA_TAG` to the previous version, then `docker compose pull && docker compose up -d` (see [Updating](#updating)) |
 | Logs | `docker compose logs -f app worker` |
+| Change the encryption key | `nasa rekey`: see [`docs/deploy.md`](docs/deploy.md#de-versleutelsleutel-wisselen) |
 | Status | `docker compose ps` shows `(healthy)` for `app`, `worker` and `db` |
 
 - **Health check:** `GET /healthz` answers `200` with `ok` as soon as `app` runs; `GET /readyz` answers `200` with `ready` when the database answers too (the Compose health check uses it). The `worker` has its own `/healthz` on port 8081 inside the container. Every endpoint: [`docs/operations.md`](docs/operations.md#2-health-check-endpoints).
@@ -289,9 +295,11 @@ sed -i 's/^NASA_/NASSA_/' .env
 |---|---|
 | `docker compose up` says `NASSA_SHARES_DIR` is missing, or names a variable with `NASA_` | An `.env` from before v0.2.0: `sed -i 's/^NASA_/NASSA_/' .env`. |
 | **Browse…** shows "No folders found", or the scan finds nothing | The shares folder is empty in the container: nothing is mounted, or `NASSA_SHARES_DIR` points somewhere other than you think (or is relative). The audit log then shows `scan.empty`. |
+| You do not know whether the worker can reach a share | **Settings → Shares → Test connection**: the outcome appears below it within seconds, with the message of `mount` when it fails. "No worker picked the test up" means the worker is not running. |
 | Scan fails with "permission denied" | The container runs as uid 10001 and does not own the folder. Set `NASSA_SHARES_GID` to the group that owns the share (Unraid: `100`). |
 | The screen asks for a setup token you do not have | `docker compose logs app \| grep setup_token`, or `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkeys do not work ("Passkeys need a secure address") | Open the app through a host name with https (or `http://localhost`) and set `NASSA_RP_ID`. |
+| You want to know that a scan failed without opening the dashboard | **Settings → Notifications**: a webhook to Home Assistant, ntfy or Gotify. See [`docs/deploy.md`](docs/deploy.md#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft). |
 | A scan error on the dashboard | Click it (administrator): the audit log shows the cause and the folders that could not be read. |
 | `/metrics` gives 401 or 403 | Set `NASSA_METRICS_TOKEN` and send it; without a token only loopback is answered. |
 | `worker` stays `unhealthy` | `docker compose logs worker`: usually the database cannot be reached. |
@@ -388,7 +396,7 @@ NASSA_TEST_DSN='postgres://user@host/postgres' NASSA_REQUIRE_DB=1 go test -race 
 cd web && npm run check && npx vitest run      # type check and unit tests of the interface
 ```
 
-The **browser test** (`web/e2e`) starts a database, `serve` and `worker` and walks through the whole application with a real Chromium: setup wizard, authenticator app, recovery codes, passkeys (virtual authenticator), adding a share, scanning by the worker, browsing, filters, treemap, lists, search, CSV, users and audit log:
+The **browser test** (`web/e2e`) starts a database, `serve` and `worker` and walks through the whole application with a real Chromium: setup wizard, authenticator app, recovery codes, passkeys (virtual authenticator), adding a share, scanning by the worker, browsing, filters, treemap, lists, search, CSV, users and audit log. It also checks every screen for accessibility (axe-core, the WCAG 2.2 level A and AA rules a program can decide) in light, dark and at phone width, and walks through the keyboard operation:
 
 ```bash
 npm install -g playwright && playwright install chromium     # once; the test uses the global install
@@ -409,12 +417,13 @@ Scanning without the interface works too: `nasa scan -path /mnt/shares/media -na
 
 ## Privacy and security
 
-- **Everything is stored on your own server**: no account with us, no analytics, no tracking. The only outgoing connection is the update check: it asks `github.com` whether a newer release exists, with only a fixed `User-Agent` (no version, no installation id, no user data), and updates nothing.
+- **Everything is stored on your own server**: no account with us, no analytics, no tracking. Of its own accord the app makes one outgoing connection, the update check: it asks `github.com` whether a newer release exists, with only a fixed `User-Agent` (no version, no installation id, no user data), and updates nothing. If you add a target under **Notifications**, NASSA sends the outcome of a scan to the address you chose, and to nothing else: the name of the share, what happened and the counts, never a file name.
 - **Local accounts** with Argon2id, lockout after failed attempts and CSRF protection. A **second factor is mandatory**: an authenticator app (with recovery codes) or a passkey, which can also sign in without a password.
+- **Sessions:** under *Security* in the user menu you see the browsers you are signed in with, and sign another session out, or all the others at once.
 - **Roles:** Admin and Viewer. Only administrators make delete scripts, manage shares, users and file types and see the audit log.
 - **Audit log** of sign-ins, configuration changes and the outcome of every scan (succeeded, failed or found nothing).
 - **Read-only.** The containers run without privileges (`read_only`, `cap_drop: ALL`, `no-new-privileges`) and the shares are mounted read-only. Only route a gives the worker more privileges.
-- Report a vulnerability privately through a [security advisory](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), never in a public issue.
+- Report a vulnerability privately through a [security advisory](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), never in a public issue. What is supported, and how the project watches its dependencies and images, is in [`SECURITY.md`](SECURITY.md).
 
 ## Support NASSA
 
@@ -429,7 +438,7 @@ No licence has been chosen yet: all rights reserved.
 
 ### Components
 
-NASSA is built with Go 1.24 and Svelte 5, on PostgreSQL 16. The direct dependencies:
+NASSA is built with Go 1.27 and Svelte 5, on PostgreSQL 16. The direct dependencies:
 
 | Component | What for | Licence |
 |---|---|---|
@@ -441,6 +450,7 @@ NASSA is built with Go 1.24 and Svelte 5, on PostgreSQL 16. The direct dependenc
 | [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto), [x/sys](https://pkg.go.dev/golang.org/x/sys), [x/time](https://pkg.go.dev/golang.org/x/time) | Argon2id, system calls, rate limiting | BSD-3-Clause |
 | [Svelte](https://svelte.dev), [Vite](https://vite.dev), [TypeScript](https://www.typescriptlang.org), [Vitest](https://vitest.dev) | The interface and its tests | MIT, MIT, Apache-2.0, MIT |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | The QR code for the authenticator app | MIT |
+| [axe-core](https://github.com/dequelabs/axe-core) | The accessibility check in the browser test; it is not part of the application | MPL-2.0 |
 | [Material Design Icons](https://pictogrammers.com/library/mdi/) (Pictogrammers) | The icons; they ship with the application, nothing is loaded from a third party | Apache-2.0 |
 | [PostgreSQL](https://www.postgresql.org) | The database (image `postgres:16-alpine`) | PostgreSQL License |
 

@@ -177,6 +177,44 @@ func TestSMBCapabilityFailureNamesTheMissingCapability(t *testing.T) {
 	}
 }
 
+// A connection test mounts on a mount point of its own. Prepare clears whatever is mounted on its mount point first, so on the
+// mount point of a running scan it would pull the share away from under that scan.
+func TestPrepareAtUsesItsOwnMountPoint(t *testing.T) {
+	r := &fakeRunner{}
+	m := newManager(t, r)
+	scanPath, cleanScan, err := m.Prepare(context.Background(), nfs())
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterScan := len(r.calls)
+	probePath, cleanProbe, err := m.PrepareAt(context.Background(), nfs(), "probe-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scanPath != filepath.Join(m.Dir, "7") || probePath != filepath.Join(m.Dir, "probe-7") {
+		t.Fatalf("mount points: scan %q, test %q", scanPath, probePath)
+	}
+	if len(r.calls) == afterScan {
+		t.Fatal("the test mounted nothing")
+	}
+	// Everything the test did after the scan's mount names only its own mount point: it clears and mounts there, not on the scan's.
+	for _, c := range r.calls[afterScan:] {
+		if got := c.args[len(c.args)-1]; got != probePath {
+			t.Errorf("the test touched %q with %s %v", got, c.name, c.args)
+		}
+	}
+	cleanProbe()
+	if last := r.calls[len(r.calls)-1]; last.name != "umount" || last.args[len(last.args)-1] != probePath {
+		t.Errorf("cleaning up the test unmounted %v", last)
+	}
+	cleanScan()
+	for _, bad := range []string{"", ".", "..", "a/b", `a\b`, "../7"} {
+		if _, _, err := m.PrepareAt(context.Background(), nfs(), bad); err == nil {
+			t.Errorf("mount point name %q was accepted", bad)
+		}
+	}
+}
+
 func TestBindShareChecksThePath(t *testing.T) {
 	dir := t.TempDir()
 	in := shares.Defaults()

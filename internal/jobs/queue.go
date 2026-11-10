@@ -57,6 +57,9 @@ type Queue struct{ pool *pgxpool.Pool }
 
 func NewQueue(pool *pgxpool.Pool) *Queue { return &Queue{pool: pool} }
 
+// Probes returns the connection tests that live next to this queue, on the same database.
+func (q *Queue) Probes() *Probes { return NewProbes(q.pool) }
+
 // Enqueue adds a job. mode "full" forces a full scan, "auto" lets the worker decide.
 //
 // It fails with ErrAlreadyActive when the share already has a waiting or running scan, and when it already has a WAITING re-categorisation.

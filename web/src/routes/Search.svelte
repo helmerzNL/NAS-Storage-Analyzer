@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   import { get, qs, type SearchHit } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatBytes, formatDate } from '../lib/format';
@@ -48,7 +49,7 @@
 {#if error}<div class="notice error" role="alert" style="margin-top:12px">{error}</div>{/if}
 {#if truncated}<div class="notice info" style="margin-top:12px" data-testid="search-truncated">{t('search.truncated')}</div>{/if}
 {#if searched}
-  <div class="card table-wrap flush mt" aria-busy={loading}>
+  <div class="card table-wrap flush mt" aria-busy={loading} use:scrollRegion={t('nav.search')}>
     <table data-testid="search-results">
       <thead><tr><th>{t('col.name')}</th><th>{t('browse.share')}</th><th class="right">{t('col.size')}</th><th class="right hide-sm">{t('col.modified')}</th></tr></thead>
       <tbody>

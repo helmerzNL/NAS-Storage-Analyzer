@@ -69,7 +69,7 @@ export function nameList(names: string[], max = 8): string {
 /** Does the restore change anything at all? A file identical to what is there is said to be, instead of asking for a confirmation of nothing. */
 export function changesNothing(c: BackupChanges, missingAll = false): boolean {
   if (missingAll) return true;
-  return c.shares_added.length === 0 && c.shares_removed.length === 0 && c.file_types_changed === 0 && c.preferences_applied === 0;
+  return c.shares_added.length === 0 && c.shares_removed.length === 0 && c.file_types_changed === 0 && c.preferences_applied === 0 && c.notification_targets === 0;
 }
 
 // ---- transport -----------------------------------------------------------------------------------------------

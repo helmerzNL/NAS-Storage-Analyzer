@@ -1,0 +1,64 @@
+# What changes without a push. An advisory is published, a fix is released, a release line reaches its end of life: none of that
+# shows up in a pull request, so the checks of the `supply-chain` job in ci.yml would stay green on code that has become unsafe.
+# This workflow repeats them every week on the default branch, and adds the two things only time can break:
+#
+#   * are the Alpine and Go lines we build on still supported (scripts/check_base_images.py)?
+#   * do the images people are running, `latest` and `beta` as published, have a vulnerability that has a fix by now? Then it is
+#     time for a release; a rebuild picks the fix up (the Dockerfile upgrades the packages of the base layer).
+#
+# A failed run is the signal; GitHub mails it to whoever watches the repository's Actions. Every step runs even when an earlier one
+# failed, so one run shows everything. Run it by hand from the Actions tab at any time (workflow_dispatch).
+name: supply-chain-weekly
+
+on:
+  schedule:
+    - cron: "23 5 * * 1"          # Mondays 05:23 UTC, away from the top of the hour
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  # The same scanner, by digest, as in ci.yml.
+  GRYPE_IMAGE: ghcr.io/anchore/grype:v0.121.3@sha256:13113eeceab017260370cf540e1d25442c59665fd07d1b09b66d63bb0c282887
+
+jobs:
+  weekly-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: The Alpine and Go lines are still supported
+        run: python scripts/check_base_images.py
+      - name: No known vulnerability is reachable from the Go code (govulncheck)
+        if: ${{ !cancelled() }}
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: No high or critical advisory in the npm packages (npm audit)
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm audit --audit-level=high
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: ${{ !cancelled() }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: The published images have no high or critical vulnerability that has a fix
+        if: ${{ !cancelled() }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          failed=0
+          for ref in "$image:latest" "$image-aio:latest" "$image:beta" "$image-aio:beta"; do
+            echo "::group::$ref"
+            if ! docker pull -q "$ref"; then
+              echo "::error::cannot pull $ref"; failed=1
+            elif ! docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$GRYPE_IMAGE" "docker:$ref" --only-fixed --fail-on high; then
+              echo "::error::$ref has a vulnerability of high or critical severity that has a fix: publish a new build"; failed=1
+            fi
+            echo "::endgroup::"
+          done
+          exit "$failed"

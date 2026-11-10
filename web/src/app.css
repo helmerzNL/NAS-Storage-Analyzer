@@ -28,6 +28,12 @@ h1 { margin: 0 0 .25rem; } h3 { font-size: 1rem; margin: 0 0 .5rem; }
 .brand { display: flex; align-items: center; gap: 8px; flex: none; font-weight: 700; letter-spacing: -.01em; color: var(--text); margin-right: 8px; }
 .brand:hover { text-decoration: none; }
 .brand svg { width: 28px; height: 28px; }
+/* The name leaves the screen where the bar gets tight, and stays the name of the link for a screen reader (display: none would take that too). */
+@media (max-width: 1560px) { .brand-name { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; } }
+/* Off the screen until the Tab key reaches it. */
+.skip-link { position: absolute; left: 12px; top: -80px; z-index: 100; padding: 10px 16px; border-radius: var(--radius-sm); background: var(--accent); color: var(--on-accent); font-weight: 650; }
+.skip-link:focus { top: 8px; text-decoration: none; }
+main:focus { outline: none; }   /* focused by the skip link only: the page itself needs no ring */
 .nav { display: flex; gap: 2px; flex: 1 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .nav::-webkit-scrollbar { display: none; }
 .nav a { display: inline-flex; align-items: center; min-height: 44px; padding: 6px 12px; border-radius: 10px; white-space: nowrap; color: var(--text-muted); font-weight: 550;
@@ -120,6 +126,7 @@ td .bar { height: 6px; background: var(--lijn); border-radius: 3px; overflow: hi
 /* Pop-ups: the starter's dialog.sheet, wider by default for the share form; the header, body and footer are the app's */
 dialog.sheet { width: min(calc(100vw - 24px), 720px); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); }
 dialog.sheet .dlg-head { padding: 14px 18px; border-bottom: 1px solid var(--lijn); font-weight: 700; display: flex; justify-content: space-between; align-items: center; }
+dialog.sheet .dlg-head h2 { margin: 0; font: inherit; letter-spacing: inherit; }
 dialog.sheet .dlg-body { padding: 16px 18px; overflow: auto; max-height: calc(100vh - 190px); }
 dialog.sheet .dlg-foot { padding: 12px 18px; border-top: 1px solid var(--lijn); display: flex; justify-content: flex-end; gap: 8px; }
 .toasts { position: fixed; right: 14px; bottom: 14px; display: flex; flex-direction: column; gap: 8px; z-index: 50; max-width: min(380px, calc(100vw - 28px)); }
@@ -181,6 +188,21 @@ tbody tr.audit-focus { background: color-mix(in srgb, var(--accent) 12%, transpa
 }
 @media (max-width: 1560px) { .hide-md { display: none; } }
 @media (max-width: 640px) { main { padding: 14px 12px 40px; } .hide-sm { display: none; } th, td { padding: 7px 6px; } }
+/* Phone: a table whose rows carry buttons becomes a stack. As a table its last column, the buttons, fell off the right edge and had to be
+   found by swiping the table sideways. Stacked, a row is its cells under each other with the buttons last, where a thumb reaches them.
+   The column headings go: a stacked cell is not under one. lib/tableRoles.ts keeps the table a table for a screen reader. */
+@media (max-width: 640px) {
+  table.rows-sm, table.rows-sm > tbody, table.rows-sm > tbody > tr, table.rows-sm > tbody > tr > td { display: block; }
+  table.rows-sm > thead { display: none; }
+  table.rows-sm > tbody > tr { padding: 10px 12px; border-bottom: 1px solid var(--lijn); }
+  table.rows-sm > tbody > tr:last-child { border-bottom: 0; }
+  table.rows-sm > tbody > tr > td { border: 0; padding: 3px 0; max-width: none !important; white-space: normal; overflow-wrap: anywhere; }
+  table.rows-sm > tbody > tr > td.hide-sm { display: none; }
+  table.rows-sm > tbody > tr > td.actions { text-align: left; padding-top: 8px; }
+  table.rows-sm > tbody > tr > td.actions > .btn { margin: 0 8px 6px 0; }
+  table.rows-sm > tbody > tr.probe-row { padding-top: 0; }
+  tr:has(+ tr.probe-row) { border-bottom: 0 !important; }
+}
 @media (prefers-reduced-transparency: reduce) { .topbar { background: var(--surface-solid); -webkit-backdrop-filter: none; backdrop-filter: none; } }
 
 /* Small helpers that replace one-off inline styles */
@@ -188,6 +210,15 @@ tbody tr.audit-focus { background: color-mix(in srgb, var(--accent) 12%, transpa
 .badge.cat { border-color: transparent; }   /* the fill is a category colour (data); the label colour is chosen for contrast in the component */
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 .intro-row { margin-bottom: 14px; }
+/* The outcome of a connection test sits under its share and reads as part of it: no line between the two, no hover of its own. */
+tr:has(+ tr.probe-row) > td { border-bottom-color: transparent; }
+tbody tr.probe-row:hover { background: none; } tr.probe-row > td { padding-top: 0; }
+.probe-line { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.probe-line .badge { flex: none; } .probe-line .btn { flex: none; margin-left: auto; }
+.probe-text { flex: 1 1 28ch; min-width: 0; font-size: .875rem; overflow-wrap: anywhere; align-self: center; }
+/* A group of checkboxes with its question as the legend, without the browser's frame; and the examples under a form. */
+fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; } fieldset.plain > legend { padding: 0; font-size: .82rem; font-weight: 600; letter-spacing: .01em; color: var(--text-muted); }
+ul.examples { margin: 0; padding-left: 1.2em; display: grid; gap: 6px; overflow-wrap: anywhere; }
 td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }   /* the row's actions wrap instead of pushing the table wider than the screen */
 
 /* The update check: a banner at the top of the page for administrators, and a dot on the entries that lead to Settings > System. The dot is not

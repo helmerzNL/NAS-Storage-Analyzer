@@ -1,0 +1,46 @@
+# Dependency updates (docs/app-engineering-conformance.md, topic 108). Dependabot opens its pull requests against `beta`, like every
+# other change (AGENTS.md section 5); they go through the same checks and are merged like any pull request, never straight to `main`.
+#
+# Minor and patch updates of one ecosystem come as one pull request a week; a major version comes on its own, because it needs reading.
+#
+# Not here, on purpose:
+#   * the base images in the Dockerfile. They are build arguments (`ARG GO_IMAGE=...`), which Dependabot does not update, and they
+#     are release lines (`alpine:3.24`, `golang:1.27-alpine`) that pick up patch releases on every build. What needs a person is the
+#     move to a new line before the old one ends: `scripts/check_base_images.py`, run weekly by the workflow `supply-chain-weekly`.
+#   * `postgres:16-alpine`. A new major version of PostgreSQL cannot open an existing data folder; that move is a migration with
+#     its own instructions, never a version bump.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    target-branch: beta
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      go-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    target-branch: beta
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The actions are pinned to a commit (`uses: owner/action@<sha> # vN`); Dependabot moves the commit and the comment together.
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: beta
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]

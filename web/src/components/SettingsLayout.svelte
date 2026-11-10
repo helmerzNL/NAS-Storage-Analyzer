@@ -23,6 +23,7 @@
       { href: '/admin/shares', label: 'nav.shares', icon: 'shares', admin: true, on: (p) => p.startsWith('/admin/shares') },
       { href: '/admin/extensions', label: 'nav.extensions', icon: 'types', admin: true, on: (p) => p.startsWith('/admin/extensions') },
       { href: '/admin/delete', label: 'nav.delete', icon: 'delete', admin: true, on: (p) => p.startsWith('/admin/delete') },
+      { href: '/admin/notifications', label: 'nav.notifications', icon: 'bell', admin: true, on: (p) => p.startsWith('/admin/notifications') },
       { href: '/admin/backup', label: 'nav.backup', icon: 'backup', admin: true, on: (p) => p.startsWith('/admin/backup') },
     ] },
     { title: 'settings.admin', scope: 'settings', parts: [
@@ -34,9 +35,17 @@
   const visible = $derived(groups.filter((g) => g.scope === scope).map((g) => ({ ...g, parts: g.parts.filter((p) => !p.admin || isAdmin()) })).filter((g) => g.parts.length > 0));
 
   let nav: HTMLElement | undefined = $state();
-  // On a phone the menu is a row you swipe: scroll the open part into view, or a part further along is open and not visible.
-  $effect(() => { route.path; nav?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' }); });
-  onMount(() => nav?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest', inline: 'center' }));
+  // On a phone the menu is a row you swipe: bring the open part into view, or a part further along is open and not visible. The row itself
+  // is scrolled, and not the part with scrollIntoView(): a browser takes an element that was scrolled into view as the place the Tab key
+  // goes on from, so on every settings screen the first Tab would land in the middle of this menu, past the skip link and the top bar.
+  function showCurrent() {
+    const part = nav?.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!nav || !part || nav.scrollWidth <= nav.clientWidth) return;
+    const left = part.getBoundingClientRect().left - nav.getBoundingClientRect().left + nav.scrollLeft;
+    nav.scrollTo({ left: left - (nav.clientWidth - part.offsetWidth) / 2 });
+  }
+  $effect(() => { route.path; showCurrent(); });
+  onMount(showCurrent);
 </script>
 
 <div class="settings-layout">

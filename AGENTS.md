@@ -82,14 +82,20 @@ Design: [`docs/ontwerp.md`](docs/ontwerp.md); operation: [`docs/deploy.md`](docs
   | `app-engineering-conformance` | that every one of the 111 engineering topics in [`docs/app-engineering-conformance.md`](docs/app-engineering-conformance.md) is answered, with evidence or a reason, and that the measured gates are filled in |
   | `enforce-version-bump` | that a pull request does not change `VERSION` |
   | `only-from-beta` | that a pull request into `main` comes from `beta` |
-  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASSA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise |
+  | `deploy-layout` | that the Compose file keeps the database in `${DATA_PATH}/postgres` with no Docker volume, requires an absolute `DATA_PATH` and shares folder, and picks the image with one `NASSA_TAG` that is passed into the container; that `.env.example` agrees; and that `init-env.sh` and `scripts/migrate_data.sh` do what they promise; and that every job of every workflow has a time limit (`scripts/test_workflows.py`) |
   | `delete-script-shells` | that the delete scripts of `internal/delscript` really delete exactly the selected files: `sh`, `dash` and `bash` on Linux and macOS, `cmd.exe` and PowerShell (5.1 and 7) on Windows, with no skipped test (suffixed with the operating system on the pull request) |
+  | `supply-chain` | that no known vulnerability is reachable from the Go code (`govulncheck`), no npm package has a high or critical advisory (`npm audit`), no secret is in the repository or its history (`gitleaks`, exceptions in `.gitleaks.toml`), and `go.mod` and the Dockerfile name the same Go line |
   | `go-tests` | `go vet` and `go test -race` against PostgreSQL 16, with no skipped test, and with every shell the delete-script tests need present |
   | `web-checks` | `svelte-check`, the interface unit tests and the production build |
-  | `browser-e2e` | the whole application in a real browser, including passkeys and the worker |
-  | `docker-build` | the image builds for `linux/amd64` and `linux/arm64` and the Compose files are valid for `.env.example` |
-  | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, and takes over the database folder of the Compose stack |
+  | `browser-e2e` | the whole application in a real browser, including passkeys and the worker; every screen against the WCAG 2.2 A and AA rules that can be decided by a machine (axe-core), in light and dark and at phone width, where a page may not scroll sideways and the buttons of a row are on the screen; and the keyboard: the skip link, a dialog that takes the focus and gives it back, the focus ring |
+  | `docker-build` | the image builds for `linux/amd64` and `linux/arm64`, the arm64 image holds an arm64 binary that starts, the image has no vulnerability of high or critical severity that has a fix, and the Compose files are valid for `.env.example` |
+  | `aio-image` | that the all-in-one image of `deploy/aio` (PostgreSQL, serve and worker in one container, for Unraid and Home Assistant; ADR 0013) builds for both channels, refuses to start without the encryption key, starts, stops cleanly, keeps its data, exits when a process dies, takes over the database folder of the Compose stack, and has no vulnerability of high or critical severity that has a fix |
 
+- What changes without a push is checked on a schedule: the workflow `supply-chain-weekly` repeats the `supply-chain` checks every
+  Monday, scans the published `latest` and `beta` images, and fails when the Alpine or Go release line the image is built on has
+  reached its end of life (`scripts/check_base_images.py`). A red run there is work, like a red pull request.
+- GitHub Actions are pinned to a commit (`uses: owner/action@<sha> # vN`) and the scanner image to a digest; Dependabot moves the
+  pins (`.github/dependabot.yml`, pull requests against `beta`). A new action is added by commit, never by tag.
 - A control has to be findable on the pull request under the name a document cites it by. Renaming a job without
   renaming its citations breaks the control as surely as deleting it.
 
@@ -160,7 +166,13 @@ A pull request that raises a size, rate or timeout limit states the new value as
   [`web/src/design/README.md`](web/src/design/README.md)). A colour in a component is a token, never a hex; a status uses `--tone-*` and never the
   accent; the accent as text is `--accent-ink`; a new token goes in `tokens.css` for light *and* dark; targets are 44 px. `design/components.css` stays
   a copy of the starter (changes go in `app.css`). `lib/design.test.ts` and `lib/appearance.test.ts` hold what a test can; look at a screen in light and
-  dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots).
+  dark, in two accents and at phone width before you ship it (`SHOTS=<dir> sh web/e2e/run.sh ...` takes the screenshots, `phone-<screen>.png` among them).
+- **Every screen is in the accessibility step of the browser test** (`web/e2e/e2e.cjs`, the `screens` list): a new screen or a form that opens
+  over one is added there, in the same change, and the step stays at zero findings. What it cannot see is done by hand and by rule: a table whose
+  rows carry buttons has `class="rows-sm"` and `use:tableRoles` (a stack on a phone, still a table to a screen reader); a frame that can scroll
+  sideways has `use:scrollRegion`; a label on a colour that is data goes through `legibleFill`; a dialog is `components/Dialog.svelte` (named by its
+  title, focus in and back); and nothing that is not the thing the person asked for is scrolled into view with `scrollIntoView()`, because a browser
+  continues the Tab key from there (scroll the container).
 - **User management follows App-Guidance's [`user-management.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/user-management.md)**
   (`internal/auth/invitations.go`, [ADR 0006](docs/adr/0006-invitation-links.md)): no route lets an administrator choose or learn a credential; an invitation is a 32-byte token of which
   only the SHA-256 is stored, shown once, usable once, valid seven days, carried in the URL fragment and never logged or audited; every bad token is one and the same answer; a reset replaces credentials only
@@ -169,6 +181,12 @@ A pull request that raises a size, rate or timeout limit states the new value as
   (`internal/backup`, [ADR 0007](docs/adr/0007-in-app-backup-restore.md)): the file never holds anything that unlocks the application (no credential, session, invitation, account or role; an SMB password
   only as the ciphertext sealed with the key in the environment), and a file is refused whole rather than partly accepted; the restore is one transaction run by the server as a job; and **a new table
   or a new `shares` column is classified in `backup.Tables` / `backup.ShareColumns` in the same change**, with a seed and a round-trip test if the owner enters it (a test fails when it is not).
+- **The address of a notification target is a secret of another service** (`internal/notify`: its token is in the path or the query). It is stored sealed,
+  leaves the server only as scheme and host (`notify.Hint`), and is never written to the audit log, a log line or an error message. What a message says is the
+  outcome of a scan, never a file name or a folder listing. The request itself keeps its limits (no redirect followed, the answer never shown, link-local
+  addresses refused): they are what stands between an administrator's typo and a request the server should not make.
+- **A column that stores a sealed value** (`secrets.Box`: a `bytea` whose name ends in `_enc`) **is added to `rekey.Columns` in the same change**, or `nasa rekey` would leave it under the old key and
+  it would be lost with that key (`TestEverySealedColumnIsKnown` fails when it is not).
 - **The factory reset follows App-Guidance's [`factory-reset.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/factory-reset.md)**
   (`internal/reset`, [ADR 0008](docs/adr/0008-factory-reset.md)): administrators only; the request carries the typed word **and** a fresh proof (a passkey, or the password with a code; never a password alone), wrong proofs
   count against the sign-in lockout; it empties **every table** found in the catalog (not a list), in one transaction, refused while a scan runs; the only record is one log line with counts and no contents.
@@ -180,6 +198,11 @@ A pull request that raises a size, rate or timeout limit states the new value as
 - **The update check follows App-Guidance's [`update-check.md`](https://github.com/Flux76HQ/App-Guidance/blob/main/shared/guidelines/update-check.md)**
   (`internal/updates`): it reads the redirect of `github.com/<repo>/releases/latest`, never `api.github.com`; it tells administrators only; it sends nothing about
   the installation; it never updates anything; and `NASSA_UPDATE_CHECK=false` switches it off. A change to it keeps those five properties and their tests.
+- **Nothing that compiles runs emulated.** An arm64 image is built on an amd64 machine. The stages of the `Dockerfile` that make something
+  (`web`, `build`) carry `--platform=$BUILDPLATFORM`, and the binary is compiled for the target with `GOOS` and `GOARCH` from `TARGETOS` and
+  `TARGETARCH`; only the runtime stage runs as the target. Built emulated, `npm ci` stopped moving more than once and held the publish of a
+  build for as long as the time limit allowed. A stage that is added follows this. `deploy-layout` reads the `Dockerfile` for it, and
+  `docker-build` reads the header of the binary in the arm64 image: a binary for the wrong machine starts on the runner, so starting it proves nothing.
 - **Reuse before writing new code.** The shared `query` and `store` packages, the `testsupport` helpers and the existing UI
   components come first; a second implementation of the same thing is the bug (baseline §10).
 

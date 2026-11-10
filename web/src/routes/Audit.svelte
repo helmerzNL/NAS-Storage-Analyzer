@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { scrollRegion } from '../lib/scrollRegion';
   import { tick } from 'svelte';
   import { get, qs, type AuditEntry } from '../lib/api';
   import { route, setQuery, link } from '../lib/router.svelte';
@@ -11,7 +12,7 @@
   // Coming from the error of a scan (?scan=N) the log opens at the entry that says how that scan ended, which is marked and shows its detail.
   const focusScan = $derived(Number(route.query.get('scan')) || 0);
   let focusId = $state(0), missing = $state(false), seq = 0;
-  const groups = ['login.', 'mfa.', 'share.', 'scan.', 'script.', 'user.', 'extension.', 'setup.'];
+  const groups = ['login.', 'session.', 'mfa.', 'share.', 'scan.', 'notification.', 'script.', 'user.', 'extension.', 'setup.'];
 
   async function load(more = false) {
     const my = ++seq; // a newer request (another filter, another entry) makes this answer stale
@@ -56,7 +57,7 @@
 {#if error}<div class="notice error" role="alert">{error}</div>{/if}
 {#if focusScan && focusId}<div class="notice info small" role="status" data-testid="audit-focus-note">{t('audit.focus', { scan: focusScan })} <a href="/admin/audit" use:link>{t('audit.focus.all')}</a></div>{/if}
 {#if focusScan && missing}<div class="notice warn small" role="status" data-testid="audit-focus-missing">{t('audit.focus.none', { scan: focusScan })} <a href="/admin/audit" use:link>{t('audit.focus.all')}</a></div>{/if}
-<div class="card table-wrap flush" aria-busy={loading}>
+<div class="card table-wrap flush" aria-busy={loading} use:scrollRegion={t('nav.audit')}>
   <table data-testid="audit-table">
     <thead><tr><th>{t('audit.when')}</th><th>{t('audit.who')}</th><th>{t('audit.action')}</th><th class="hide-sm">{t('audit.target')}</th><th class="hide-sm">IP</th></tr></thead>
     <tbody>

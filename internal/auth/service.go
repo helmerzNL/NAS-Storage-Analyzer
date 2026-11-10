@@ -409,6 +409,85 @@ func (s *Service) DeleteUserSessions(ctx context.Context, userID int64, keep *Se
 	return err
 }
 
+// SessionInfo is one signed-in browser of a person, as the account screen lists it. ID is the session's reference, never its token.
+type SessionInfo struct {
+	ID         string    `json:"id"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	IP         string    `json:"ip"`
+	UserAgent  string    `json:"user_agent"`
+	Current    bool      `json:"current"`
+}
+
+// ListSessions returns the person's sessions that are fully signed in and still alive: the one asking first, then the most recently
+// used. A session that stopped halfway (password given, second factor not yet) is not one: it opens nothing.
+func (s *Service) ListSessions(ctx context.Context, userID int64, current *Session) ([]SessionInfo, error) {
+	var cur []byte
+	if current != nil {
+		cur = current.hash
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT ref::text, created_at, last_seen_at, least(idle_expires_at, absolute_expires_at), ip, user_agent, token_hash = $2
+		FROM sessions
+		WHERE user_id = $1 AND stage = 'active' AND idle_expires_at > now() AND absolute_expires_at > now()
+		ORDER BY (token_hash = $2) DESC, last_seen_at DESC, created_at DESC`, userID, cur)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []SessionInfo{}
+	for rows.Next() {
+		var i SessionInfo
+		if err := rows.Scan(&i.ID, &i.CreatedAt, &i.LastSeenAt, &i.ExpiresAt, &i.IP, &i.UserAgent, &i.Current); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, rows.Err()
+}
+
+// RevokeSession signs out one other session of the person, named by its reference, and returns what it was. A reference of
+// somebody else's session is ErrNotFound, exactly like one that does not exist. The session that asks is ErrConflict: ending that
+// one is signing out, which also takes the cookie away.
+func (s *Service) RevokeSession(ctx context.Context, userID int64, ref string, current *Session) (*SessionInfo, error) {
+	var cur []byte
+	if current != nil {
+		cur = current.hash
+	}
+	// The reference is compared as text, so anything that is not a reference simply matches nothing.
+	var i SessionInfo
+	err := s.pool.QueryRow(ctx, `
+		DELETE FROM sessions WHERE ref::text = $1 AND user_id = $2 AND token_hash IS DISTINCT FROM $3
+		RETURNING ref::text, created_at, last_seen_at, least(idle_expires_at, absolute_expires_at), ip, user_agent`, ref, userID, cur).
+		Scan(&i.ID, &i.CreatedAt, &i.LastSeenAt, &i.ExpiresAt, &i.IP, &i.UserAgent)
+	if errors.Is(err, pgx.ErrNoRows) {
+		var own bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM sessions WHERE ref::text = $1 AND user_id = $2 AND token_hash = $3)`,
+			ref, userID, cur).Scan(&own); err != nil {
+			return nil, err
+		}
+		if own {
+			return nil, ErrConflict
+		}
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &i, nil
+}
+
+// RevokeOtherSessions signs the person out everywhere except in the session that asks, half-finished sign-ins included, and returns
+// how many sessions that ended.
+func (s *Service) RevokeOtherSessions(ctx context.Context, userID int64, keep *Session) (int, error) {
+	if keep == nil {
+		return 0, errors.New("revoking the other sessions needs the session to keep")
+	}
+	tag, err := s.pool.Exec(ctx, `DELETE FROM sessions WHERE user_id = $1 AND token_hash <> $2`, userID, keep.hash)
+	return int(tag.RowsAffected()), err
+}
+
 // TouchLogin records the time of a completed sign-in.
 func (s *Service) TouchLogin(ctx context.Context, userID int64) {
 	_, _ = s.pool.Exec(ctx, `UPDATE users SET last_login_at = now() WHERE id = $1`, userID)

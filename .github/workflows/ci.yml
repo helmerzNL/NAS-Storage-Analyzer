@@ -13,9 +13,42 @@ on:
 permissions:
   contents: read
 
+env:
+  # The vulnerability scanner for the images (Anchore grype), by digest: a tag can be moved, a digest cannot. Raised by hand; its
+  # database of advisories is downloaded fresh on every run, so an older scanner still knows today's advisories.
+  GRYPE_IMAGE: ghcr.io/anchore/grype:v0.121.3@sha256:13113eeceab017260370cf540e1d25442c59665fd07d1b09b66d63bb0c282887
+
 jobs:
+  # What we build on (docs/app-engineering-conformance.md, topics 67 and 108): no known vulnerability that our code can reach, no
+  # high or critical advisory in the npm packages, no secret in the repository or its history, and a Go line that go.mod and the
+  # Dockerfile agree on. The tools are Go modules run at a fixed version, so the Go checksum database vouches for them and no extra
+  # action is trusted. The images themselves are scanned where they are built (`docker-build`, `aio-image`), and the weekly workflow
+  # `supply-chain` repeats all of this without a push, because an advisory or an end-of-life date arrives on its own schedule.
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0          # the secret scan reads every commit, not only the last one
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: No known vulnerability is reachable from the Go code (govulncheck)
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+      - name: No high or critical advisory in the npm packages, build tools included (npm audit)
+        working-directory: web
+        run: npm audit --audit-level=high
+      - name: No secret in the repository or its history (gitleaks)
+        run: go run github.com/zricethezav/gitleaks/v8@v8.30.1 git --redact --no-banner --log-level warn .
+      - name: The base-image check itself, and that go.mod and the Dockerfile name the same Go line
+        run: |
+          python -m unittest discover -s scripts -p "test_check_base_images.py" -v
+          python scripts/check_base_images.py --offline
+
   go-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -30,8 +63,8 @@ jobs:
       NASSA_REQUIRE_DB: "1"      # a database test that cannot run fails instead of skipping
       NASSA_REQUIRE_SHELLS: sh,dash,bash,bash-posix   # same for the shells the delete-script tests run scripts in
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - run: go vet ./...
@@ -44,12 +77,13 @@ jobs:
 
   web-checks:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -61,6 +95,7 @@ jobs:
 
   browser-e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16-alpine
@@ -71,11 +106,11 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
@@ -94,7 +129,7 @@ jobs:
         run: sh web/e2e/run.sh ./nasa postgres://postgres:test@127.0.0.1:5432
       - name: Keep the screenshots of a failed run
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-screenshots
           path: ${{ runner.temp }}/e2e-shots
@@ -104,10 +139,13 @@ jobs:
   # read as text, init-env.sh and migrate_data.sh are driven with a fake docker. Fast, needs no database.
   deploy-layout:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Compose layout, init-env.sh and migrate_data.sh
         run: python -m unittest discover -s scripts -p "test_deploy_layout.py" -v
+      - name: Every job of every workflow has a time limit
+        run: python -m unittest discover -s scripts -p "test_workflows.py" -v
 
   # The delete scripts (internal/delscript) are run for real, in the shell they are written for, against files with the
   # names that break scripts. cmd.exe and Windows PowerShell 5.1 only exist on Windows, and the BSD stat of macOS is
@@ -116,6 +154,7 @@ jobs:
   delete-script-shells:
     name: delete-script-shells (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -129,8 +168,8 @@ jobs:
     env:
       NASSA_REQUIRE_SHELLS: ${{ matrix.shells }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
       - run: go vet ./internal/delscript/
@@ -143,8 +182,9 @@ jobs:
 
   aio-image:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: The start script passes shellcheck
         run: shellcheck deploy/aio/nasa-aio deploy/aio/smoke-test.sh
       - name: Build the image and the all-in-one image on it
@@ -154,6 +194,8 @@ jobs:
           docker build --build-arg BASE=nas-storage-analyzer:ci --build-arg CHANNEL=latest -t nas-storage-analyzer-aio:ci-latest deploy/aio
       - name: The all-in-one image starts, stops, keeps and takes over its data (beta channel)
         run: sh deploy/aio/smoke-test.sh nas-storage-analyzer-aio:ci-beta beta
+      - name: The all-in-one image has no known vulnerability of high or critical severity that has a fix
+        run: docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$GRYPE_IMAGE" docker:nas-storage-analyzer-aio:ci-beta --only-fixed --fail-on high
       - name: The stable all-in-one image reports the stable channel
         run: |
           key="$(docker run --rm nas-storage-analyzer-aio:ci-latest genkey)"
@@ -165,12 +207,18 @@ jobs:
 
   docker-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build the image
         run: docker build --build-arg VERSION=ci -t nas-storage-analyzer:ci .
       - name: The binary in the image starts and reports its version
         run: docker run --rm nas-storage-analyzer:ci version
+      - name: The image has no known vulnerability of high or critical severity that has a fix
+        run: |
+          # Operating-system packages, the Go standard library and the Go modules in the binary. "That has a fix" (--only-fixed): a
+          # finding nobody can act on yet does not block a pull request; the weekly workflow lists those too.
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$GRYPE_IMAGE" docker:nas-storage-analyzer:ci --only-fixed --fail-on high
       - name: The binary refuses to start with an old NASA_ variable
         run: |
           # Compose does not forward an old name to the container, but a process started without Compose (docker run, systemd) can still have one.
@@ -205,7 +253,7 @@ jobs:
       - name: mount.cifs gets past its capability step with what the mounts override gives the worker
         run: |
           # mount.cifs sets its own capabilities at start-up and asks for SYS_ADMIN, DAC_READ_SEARCH and DAC_OVERRIDE; when the container lacks
-          # one it stops before mounting, with "Unable to set current process capabilities: Operation not permitted". The worker drops every
+          # one it stops before mounting, with "Unable to apply new capability set." (older cifs-utils: "Unable to set current process capabilities"). The worker drops every
           # capability, so the override must add all three back. The flags are read from the merged Compose file, so this proves the override as
           # shipped. There is no SMB server here: the question is only whether mount.cifs gets past that step, so what it says after that
           # (no cifs support, AppArmor, connection refused) does not matter.
@@ -230,13 +278,30 @@ jobs:
           sh scripts/init-env.sh --secrets
           docker compose -f docker-compose.yml -f docker-compose.secrets.yml config -q
       # Last, on purpose: setting up buildx makes `docker build` stop loading images into the local daemon.
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
       - name: The image also builds for arm64 (Raspberry Pi, Apple silicon); publishing builds both
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           platforms: linux/arm64
           push: false
+          load: true    # into the local daemon, for the step below
+          tags: nas-storage-analyzer:ci-arm64
+          build-args: VERSION=ci
           cache-from: type=gha,scope=ci-arm64
           cache-to: type=gha,scope=ci-arm64,mode=max
+      - name: The arm64 image holds an arm64 binary, and it starts
+        run: |
+          # The binary is compiled on this amd64 machine for arm64 (see the Dockerfile). Left to itself that step makes an amd64 binary,
+          # which starts fine here, in an image that says arm64, and nowhere it is meant for. So "it starts" proves nothing by itself:
+          # the header of the file says which machine it is for (e_machine, two bytes at offset 18: 183 is AArch64, 62 is x86-64).
+          id="$(docker create --platform linux/arm64 nas-storage-analyzer:ci-arm64)"
+          docker cp "$id":/usr/local/bin/nasa nasa-arm64
+          docker rm "$id" >/dev/null
+          machine="$(od -An -tu2 -j18 -N2 nasa-arm64 | tr -d ' ')"
+          rm -f nasa-arm64
+          if [ "$machine" != 183 ]; then echo "::error::the binary in the arm64 image is for machine $machine, not 183 (AArch64)"; exit 1; fi
+          # And it runs, emulated: a moment, not a build.
+          out="$(timeout 120 docker run --rm --platform linux/arm64 nas-storage-analyzer:ci-arm64 version)"
+          if [ "$out" != "nasa ci" ]; then echo "::error::the arm64 binary did not report its version, it said: $out"; exit 1; fi

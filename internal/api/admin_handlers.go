@@ -22,12 +22,16 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("DELETE "+v+"/shares/{share}/scan", lvAdmin, s.cancelScan)
 		h("POST "+v+"/shares/{share}/recategorize", lvAdmin, s.recategorize)
 		h("GET "+v+"/shares/{share}/jobs", lvViewer, s.listJobs)
+		// A connection test: asked for here, run by a worker (only a worker can mount), read back here.
+		h("POST "+v+"/shares/{share}/probe", lvAdmin, s.startProbe)
+		h("GET "+v+"/shares/{share}/probe", lvAdmin, s.getProbe)
 		h("PUT "+v+"/extension-map/{ext}", lvAdmin, s.putExtension)
 		h("DELETE "+v+"/extension-map/{ext}", lvAdmin, s.deleteExtension)
 		h("GET "+v+"/settings", lvViewer, s.getSettings)
 		h("GET "+v+"/fs/dirs", lvAdmin, s.browseFolders)
 	}
 	s.backupRoutes(h, v)
+	s.notificationRoutes(h, v)
 	s.resetRoutes(h, v)
 	if s.opts.Updates != nil {
 		// The administrator is told that a newer release exists; nobody else, and nothing is updated or downloaded.
@@ -193,6 +197,44 @@ func (s *Server) recategorize(w http.ResponseWriter, r *http.Request) error {
 	return writeJSONStatus(w, http.StatusAccepted, job)
 }
 
+// startProbe asks a worker to test whether it can reach the share and list its top folder. Asking twice while one is under way
+// returns the one that is under way.
+func (s *Server) startProbe(w http.ResponseWriter, r *http.Request) error {
+	id, err := shareID(r)
+	if err != nil {
+		return err
+	}
+	info, err := s.q.ShareByID(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	probe, err := s.opts.Queue.Probes().Request(r.Context(), id, sessionOf(r).User.Username)
+	if err != nil {
+		return err
+	}
+	s.audit(r, "share.test", info.Name, map[string]any{"probe": probe.ID})
+	return writeJSONStatus(w, http.StatusAccepted, probe)
+}
+
+// getProbe returns the latest connection test of a share: under way, or how it ended.
+func (s *Server) getProbe(w http.ResponseWriter, r *http.Request) error {
+	id, err := shareID(r)
+	if err != nil {
+		return err
+	}
+	if _, err := s.q.ShareByID(r.Context(), id); err != nil {
+		return err
+	}
+	probe, err := s.opts.Queue.Probes().Latest(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	if probe == nil {
+		return query.ErrNotFound
+	}
+	return writeJSON(w, probe)
+}
+
 func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) error {
 	id, err := shareID(r)
 	if err != nil {
@@ -295,12 +337,22 @@ func (s *Server) browseFolders(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) error {
-	return writeJSON(w, map[string]any{
+	out := map[string]any{
 		"shares_root":     s.opts.SharesRoot,
 		"version":         "1",
 		"server_time":     time.Now().UTC(),
 		"mount_supported": true,
-	})
+	}
+	// How this request reached the app, for an administrator: the interface warns when the connection is not encrypted, or when it
+	// is and the app cannot tell (a proxy it does not trust), which leaves the session cookie without its Secure flag.
+	if sess := sessionOf(r); sess != nil && sess.User.Role == "admin" {
+		out["connection"] = map[string]any{
+			"scheme":            s.scheme(r),
+			"require_https":     s.opts.RequireHTTPS,
+			"via_trusted_proxy": s.isTrusted(r),
+		}
+	}
+	return writeJSON(w, out)
 }
 
 // ---- history -------------------------------------------------------------------------

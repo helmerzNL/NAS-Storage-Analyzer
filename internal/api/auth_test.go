@@ -30,6 +30,7 @@ import (
 	"github.com/helmerznl/nas-storage-analyzer/internal/backup"
 	"github.com/helmerznl/nas-storage-analyzer/internal/jobs"
 	"github.com/helmerznl/nas-storage-analyzer/internal/mounts"
+	"github.com/helmerznl/nas-storage-analyzer/internal/notify"
 	"github.com/helmerznl/nas-storage-analyzer/internal/reset"
 	"github.com/helmerznl/nas-storage-analyzer/internal/secrets"
 	"github.com/helmerznl/nas-storage-analyzer/internal/shares"
@@ -134,8 +135,10 @@ func newAuthEnv(t *testing.T, mut func(*api.Options)) *authEnv {
 	logger := slog.New(slog.NewTextHandler(logs, nil))
 	queue := jobs.NewQueue(st.Pool)
 	sharesSvc := shares.NewService(st.Pool, box, shares.Options{}, time.UTC)
+	targets := notify.NewService(st.Pool, box)
 	opts := api.Options{Auth: svc, SetupToken: "setup-token-123", Queue: queue, Shares: sharesSvc,
-		Backup: backup.New(st.Pool, sharesSvc, svc, queue, nil, "0.0.0"), Reset: reset.New(st.Pool, logger),
+		Backup: backup.New(st.Pool, sharesSvc, svc, targets, queue, nil, "0.0.0"), Reset: reset.New(st.Pool, logger),
+		Notify:  targets,
 		Updates: updates.New("0.0.0", false, nil)} // switched off: no test reaches out to GitHub unless it brings its own checker
 	if mut != nil {
 		mut(&opts)

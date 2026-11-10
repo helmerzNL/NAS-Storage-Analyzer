@@ -25,6 +25,61 @@ function totp(secret, stepOffset = 0) {
   return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0');
 }
 
+// A webhook receiver for the notification targets: it keeps what it is sent and answers with the status the test sets.
+const http = require('node:http');
+const HOOK_PORT = Number(process.env.HOOK_PORT || 8099);
+const hooks = [];
+let hookStatus = 200;
+const hookServer = http.createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => { body += c; });
+  req.on('end', () => {
+    let json = null;
+    try { json = JSON.parse(body); } catch { /* a text target */ }
+    hooks.push({ path: req.url, type: req.headers['content-type'], title: req.headers.title, body, json });
+    res.statusCode = hookStatus;
+    res.end('the answer of the receiver');
+  });
+});
+const waitForHook = async (what, match) => {
+  for (let i = 0; i < 150; i++) {
+    const found = hooks.find(match);
+    if (found) return found;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error('the receiver never got ' + what + '; it got: ' + JSON.stringify(hooks.map((h) => h.json?.event || h.body.slice(0, 40))));
+};
+
+// The accessibility checker (axe-core, a development dependency of web/): its source is run in the page through the debugging
+// protocol, which the page's Content-Security-Policy does not apply to, so the application needs no exception for it.
+const AXE = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
+const AXE_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'];
+// What axe finds on the page as it is now: every rule of WCAG 2.2 level A and AA it can decide by itself.
+async function axeViolations(pg) {
+  await pg.evaluate(AXE);
+  return pg.evaluate(async (tags) => {
+    const res = await window.axe.run(document, { runOnly: { type: 'tag', values: tags }, resultTypes: ['violations'] });
+    return res.violations.map((v) => ({
+      id: v.id, impact: v.impact, help: v.help, count: v.nodes.length,
+      nodes: v.nodes.slice(0, 4).map((n) => ({ target: n.target.join(' '), html: n.html.replace(/\s+/g, ' ').slice(0, 140), why: (n.failureSummary || '').replace(/\s+/g, ' ').slice(0, 260) })),
+    }));
+  }, AXE_TAGS);
+}
+// What sticks out of a narrow screen: the page itself must not scroll sideways (a table may, inside its own frame).
+async function overflowing(pg) {
+  return pg.evaluate(() => {
+    const wide = document.documentElement.scrollWidth - window.innerWidth;
+    if (wide <= 1) return [];
+    const scrolls = (e) => { for (let p = e.parentElement; p; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll' || o === 'hidden') return true; } return false; };
+    const out = [];
+    for (const e of document.querySelectorAll('body *')) {
+      const r = e.getBoundingClientRect();
+      if (r.width > 0 && r.right > window.innerWidth + 1 && !scrolls(e)) out.push(e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/).join('.') : '') + ' right=' + Math.round(r.right));
+    }
+    return ['the page is ' + wide + ' px wider than the screen', ...out.slice(0, 6)];
+  });
+}
+
 let failures = 0;
 const results = [];
 async function step(name, fn) {
@@ -47,6 +102,7 @@ const expectText = async (page, sel, re, msg) => {
   w('media/photos/img.CR2', 9_000_000); w('media/docs/report.pdf', 700_000); w('media/docs/notes.txt', 50_000);
   const old = new Date('2015-01-01'); fs.utimesSync(path.join(SHARE_DIR, 'media/video/film.mkv'), old, old);
 
+  await new Promise((resolve) => hookServer.listen(HOOK_PORT, '127.0.0.1', resolve));
   const browser = await chromium.launch();
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'nl-NL' });
   const page = await ctx.newPage();
@@ -171,6 +227,49 @@ const expectText = async (page, sel, re, msg) => {
       await page.fill('[data-testid=f-cron]', '0 3 * * *');
       await page.click('[data-testid=f-save]');
       await page.waitForSelector('[data-testid=share-row]');
+    });
+
+    await step('connection test: a new share is tested at once, the button tests again, and a failure says what is wrong', async () => {
+      const outcome = '[data-testid=probe-Media]';
+      const ended = async (tone) => {
+        await page.waitForSelector(outcome + '[data-done=true]', { timeout: 20000 });
+        const got = await page.getAttribute(outcome, 'data-tone');
+        const text = (await page.textContent(outcome)).replace(/\s+/g, ' ').trim();
+        if (got !== tone) throw new Error('the test ended ' + got + ', expected ' + tone + ': ' + text);
+        return text;
+      };
+      // Nobody pressed anything: adding the share asked for the test. The worker lists the top folder (video, audio, photos, docs).
+      let text = await ended('ok');
+      if (!/Bereikbaar/.test(text) || !/4 items in de hoofdmap/.test(text)) throw new Error('the outcome of a new share: ' + text);
+      if (!(await page.$(outcome + ' .badge.ok'))) throw new Error('a reachable share has the green status');
+      if (await page.isDisabled('[data-testid=test-Media]')) throw new Error('the button is free again once the test has ended');
+      await shot('04c-connection-test-ok');
+      // The outcome stands under its share and is not a share of its own.
+      if ((await page.$$('[data-testid=share-row]')).length !== 1) throw new Error('the outcome was counted as a share');
+      await page.click('[data-testid=probe-close-Media]');
+      await page.waitForSelector(outcome, { state: 'detached' });
+
+      // The folder is gone, as with a disk that is not mounted or a typo in the path: the test says so, in the words of the worker.
+      fs.renameSync(path.join(SHARE_DIR, 'media'), path.join(SHARE_DIR, 'media-weg'));
+      try {
+        await page.click('[data-testid=test-Media]');
+        text = await ended('bad');
+        if (!/Niet bereikbaar/.test(text) || !/mounted into the container/.test(text)) throw new Error('the outcome of a share whose folder is gone: ' + text);
+        if (!(await page.$(outcome + ' .badge.bad'))) throw new Error('an unreachable share has the red status');
+        await shot('04d-connection-test-failed');
+      } finally { fs.renameSync(path.join(SHARE_DIR, 'media-weg'), path.join(SHARE_DIR, 'media')); }
+
+      // With the folder back the next test replaces the outcome, and a screen reader is told.
+      await page.click('[data-testid=test-Media]');
+      text = await ended('ok');
+      if (!/4 items in de hoofdmap/.test(text)) throw new Error('the outcome after the folder came back: ' + text);
+      const said = await page.textContent('[data-testid=probe-announce]');
+      if (!/^Media: Bereikbaar\. 4 items/.test(said)) throw new Error('the outcome for a screen reader: ' + said);
+      // A test is not a scan: the share still has none.
+      const row = (await page.textContent('[data-testid=share-row]')).replace(/\s+/g, ' ');
+      if (!row.includes('–')) throw new Error('the share has a last scan after a test: ' + row);
+      await page.click('[data-testid=probe-close-Media]');
+      await page.waitForSelector(outcome, { state: 'detached' });
     });
 
     await step('scan now: the worker scans and the dashboard shows the result', async () => {
@@ -528,13 +627,13 @@ const expectText = async (page, sel, re, msg) => {
       await page.selectOption('[data-testid=units]', 'decimal');
       await page.waitForFunction((b) => document.querySelector('[data-testid=folder-size]').textContent !== b, before);
       if (!/MB/.test(await page.textContent('[data-testid=folder-size]'))) throw new Error('decimal unit');
-      await page.click('button[aria-label=Taal]');
+      await page.click('[data-testid=lang-toggle]');
       await page.waitForSelector('text=Folders');
       await page.reload();
       await page.waitForSelector('text=Folders');
       if (!/MB/.test(await page.textContent('[data-testid=folder-size]'))) throw new Error('units not persisted');
       await shot('09-english-decimal');
-      await page.click('button[aria-label=Language]');
+      await page.click('[data-testid=lang-toggle]');
     });
 
     await step('dark mode', async () => {
@@ -594,6 +693,106 @@ const expectText = async (page, sel, re, msg) => {
       await page.fill('[data-testid=login-username]', 'helmer');
       await page.click('[data-testid=login-passkey]');
       await page.waitForSelector('[data-testid=user-menu]');
+    });
+
+    await step('sessions: the account lists where you are signed in; one can be signed out, and so can all the others', async () => {
+      // The same person signs in from two more browsers, each with a recovery code.
+      const signInElsewhere = async (code, userAgent) => {
+        const c = await browser.newContext({ locale: 'nl-NL', userAgent });
+        const p = await c.newPage();
+        await p.goto(BASE + '/');
+        await p.fill('[data-testid=login-username]', 'helmer');
+        await p.fill('[data-testid=login-password]', PASSWORD);
+        await p.click('[data-testid=login-submit]');
+        await p.waitForSelector('[data-testid=mfa-use-recovery]');
+        await p.click('[data-testid=mfa-use-recovery]');
+        await p.fill('[data-testid=mfa-code]', code);
+        await p.click('[data-testid=mfa-submit]');
+        await p.waitForSelector('[data-testid=user-menu]');
+        return { c, p };
+      };
+      const phone = await signInElsewhere(codes[1], 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1');
+      const laptop = await signInElsewhere(codes[2], 'Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/144.0');
+      // In those browsers the next request finds out: it gets no data and the sign-in screen appears.
+      const signedOutThere = async (other, what) => {
+        await other.p.goto(BASE + '/');
+        await other.p.waitForSelector('[data-testid=login-username]', { timeout: 15000 }).catch(() => { throw new Error(what + ' is still signed in'); });
+      };
+      try {
+        await page.goto(BASE + '/account/security');
+        const items = '[data-testid=session-item]';
+        await page.waitForFunction((s) => document.querySelectorAll(s).length === 3, items);
+        const texts = async () => (await page.$$eval(items, (els) => els.map((e) => e.textContent.replace(/\s+/g, ' ').trim())));
+        let list = await texts();
+        if (!/Deze sessie/.test(list[0]) || list.slice(1).some((x) => /Deze sessie/.test(x))) throw new Error('this session comes first and is the only one marked: ' + list.join(' | '));
+        if (!list.some((x) => /Safari op iPhone/.test(x)) || !list.some((x) => /Firefox op Linux/.test(x))) throw new Error('the other browsers by a name people know: ' + list.join(' | '));
+        if (!list.every((x) => /aangemeld/.test(x) && /laatst actief/.test(x))) throw new Error('every session says since when and when it was last used: ' + list.join(' | '));
+        if (await page.$(items + '[data-current=true] [data-testid=session-revoke]')) throw new Error('this session has no "sign out" of its own: that is the menu');
+        await shot('12b-sessions');
+
+        // One of them.
+        await page.click(items + ':has-text("Safari op iPhone") [data-testid=session-revoke]');
+        await page.waitForFunction((s) => document.querySelectorAll(s).length === 2, items);
+        await signedOutThere(phone, 'the phone');
+        await laptop.p.goto(BASE + '/');
+        await laptop.p.waitForSelector('[data-testid=user-menu]');
+
+        // And all the others at once, after a question.
+        page.once('dialog', (d) => d.accept());
+        await page.click('[data-testid=sessions-revoke-others]');
+        await page.waitForFunction((s) => document.querySelectorAll(s).length === 1, items);
+        if (await page.$('[data-testid=sessions-revoke-others]')) throw new Error('with one session left there is nothing else to sign out');
+        await signedOutThere(laptop, 'the laptop');
+        // This browser is still signed in.
+        await page.goto(BASE + '/account/security');
+        await page.waitForSelector(items + '[data-current=true]');
+      } finally { await phone.c.close(); await laptop.c.close(); }
+    });
+
+    await step('connection: over http from another machine an administrator is warned, can put the banner away, and Settings says what to do', async () => {
+      // On this computer itself (localhost) there is nothing to warn about, and Settings says why.
+      await page.goto(BASE + '/admin/system');
+      await page.waitForSelector('[data-testid=connection-card][data-state=local]');
+      if (await page.$('[data-testid=connection-banner]')) throw new Error('http on localhost is not something to warn about');
+
+      // The same server under a name that is not this computer: a second browser in which nas.test leads to it.
+      const far = await chromium.launch({ args: ['--host-resolver-rules=MAP nas.test 127.0.0.1'] });
+      try {
+        const c = await far.newContext({ locale: 'nl-NL', viewport: { width: 1280, height: 900 } });
+        const p = await c.newPage();
+        const jsErrors = []; p.on('pageerror', (e) => jsErrors.push(e.message));
+        await p.goto('http://nas.test:' + new URL(BASE).port + '/');
+        await p.fill('[data-testid=login-username]', 'helmer');
+        await p.fill('[data-testid=login-password]', PASSWORD);
+        await p.click('[data-testid=login-submit]');
+        await p.waitForSelector('[data-testid=mfa-use-recovery]');
+        await p.click('[data-testid=mfa-use-recovery]');
+        await p.fill('[data-testid=mfa-code]', codes[3]);
+        await p.click('[data-testid=mfa-submit]');
+        await p.waitForSelector('[data-testid=user-menu]');
+
+        const banner = '[data-testid=connection-banner]';
+        await p.waitForSelector(banner + '[data-state=plain_http]');
+        const said = (await p.textContent(banner)).replace(/\s+/g, ' ');
+        if (!/niet versleuteld/.test(said) || !/wachtwoord/.test(said)) throw new Error('the banner does not say what is wrong: ' + said);
+        await p.screenshot({ path: path.join(SHOTS, '12c-connection-banner.png'), fullPage: true });
+
+        // "What can I do?" leads to the card, which names what to set.
+        await p.click('[data-testid=connection-view]');
+        await p.waitForSelector('[data-testid=connection-card][data-state=plain_http]');
+        const card = (await p.textContent('[data-testid=connection-card]')).replace(/\s+/g, ' ');
+        for (const want of ['NASSA_REQUIRE_HTTPS', 'NASSA_TRUSTED_PROXIES', 'reverse proxy']) if (!card.includes(want)) throw new Error('the card does not name ' + want + ': ' + card);
+        if (!(await p.$('[data-testid=connection-card] .badge.warn'))) throw new Error('an unencrypted connection has the amber status');
+        await p.screenshot({ path: path.join(SHOTS, '12d-connection-card.png'), fullPage: true });
+
+        // Put away: gone on every screen and after a reload. The card stays.
+        await p.click('[data-testid=connection-hide]');
+        await p.waitForSelector(banner, { state: 'detached' });
+        await p.reload();
+        await p.waitForSelector('[data-testid=connection-card][data-state=plain_http]');
+        if (await p.$(banner)) throw new Error('a banner that was put away came back after a reload');
+        if (jsErrors.length) throw new Error('JavaScript errors over plain http: ' + jsErrors.join('; '));
+      } finally { await far.close(); }
     });
 
     await step('users: add a viewer who must enrol a second factor; viewers cannot administer', async () => {
@@ -665,7 +864,7 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'session.revoke', 'share.create', 'share.test', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
       for (const name of ['film.mkv', 'report.pdf', 'notes.txt']) if (text.includes(name)) throw new Error('a file name in the audit log: ' + name);
     });
@@ -772,6 +971,57 @@ const expectText = async (page, sel, re, msg) => {
       await moved('→ Video');
     });
 
+    await step('notifications: a target is added without showing its address again, a test message arrives, and a refusal is said', async () => {
+      const address = 'http://127.0.0.1:' + HOOK_PORT + '/api/webhook/geheim-id';
+      await page.goto(BASE + '/admin/notifications');
+      await page.waitForSelector('[data-testid=target-table] >> text=Nog geen doelen');
+      if (hooks.length) throw new Error('something was sent before any target existed: ' + JSON.stringify(hooks));
+
+      // What is wrong with the form is said at the field.
+      await page.click('[data-testid=add-target]');
+      await page.fill('[data-testid=t-name]', 'Home Assistant');
+      await page.fill('[data-testid=t-url]', 'ftp://nas/x');
+      await page.click('[data-testid=t-save]');
+      await page.waitForSelector('dialog[open] .field-error');
+      await page.fill('[data-testid=t-url]', address);
+      await shot('14b-notification-form');
+      await page.click('[data-testid=t-save]');
+      const row = '[data-testid=target-row]:has-text("Home Assistant")';
+      await page.waitForSelector(row);
+      // The address is on the screen as its scheme and host only; the part that is the token is nowhere.
+      let text = (await page.textContent(row)).replace(/\s+/g, ' ');
+      if (!text.includes('http://127.0.0.1:' + HOOK_PORT + '/…') || !/Nog niets verstuurd/.test(text) || !/mislukt, niets vindt, niet alles kan lezen/.test(text))
+        throw new Error('the new target in the list: ' + text);
+      if ((await page.content()).includes('geheim-id')) throw new Error('the page still has the address of the target in it');
+
+      // The test message arrives, in the language of the interface it was made in.
+      await page.click('[data-testid="target-test-Home Assistant"]');
+      const sent = await waitForHook('the test message', (h) => h.json?.event === 'test');
+      if (sent.path !== '/api/webhook/geheim-id' || sent.type !== 'application/json' || sent.json.title !== 'NASSA: testmelding' || sent.json.app !== 'NASSA')
+        throw new Error('the test message: ' + JSON.stringify(sent));
+      await page.waitForSelector('[data-testid="target-last-Home Assistant"][data-tone=ok]');
+      await shot('14c-notification-arrived');
+
+      // A receiver that is down: the test says so, and the list keeps the reason without the receiver's own answer.
+      hookStatus = 500;
+      await page.click('[data-testid="target-test-Home Assistant"]');
+      await page.waitForSelector('[data-testid="target-last-Home Assistant"][data-tone=bad]');
+      text = (await page.textContent('[data-testid="target-last-Home Assistant"]')).replace(/\s+/g, ' ');
+      if (!/Niet aangekomen/.test(text) || !/HTTP 500/.test(text) || /answer of the receiver/.test(text)) throw new Error('a refused test in the list: ' + text);
+      hookStatus = 200;
+
+      // Changing something else keeps the address: the field is empty and the next test still arrives there.
+      await page.click('[data-testid="target-edit-Home Assistant"]');
+      if ((await page.inputValue('[data-testid=t-url]')) !== '') throw new Error('the form shows the stored address');
+      await page.check('[data-testid=t-finished]');
+      await page.click('[data-testid=t-save]');
+      await page.waitForSelector(row + ':has-text("klaar is")');
+      const before = hooks.length;
+      await page.click('[data-testid="target-test-Home Assistant"]');
+      await page.waitForSelector('[data-testid="target-last-Home Assistant"][data-tone=ok]');
+      if (hooks.length !== before + 1 || hooks[hooks.length - 1].path !== '/api/webhook/geheim-id') throw new Error('after an edit without an address the test went elsewhere');
+    });
+
     await step('a scan that finds nothing is flagged in the audit log', async () => {
       // A wrong NASSA_SHARES_DIR or an unmounted share is an empty folder: the scan succeeds, and used to leave no trace.
       fs.mkdirSync(path.join(SHARE_DIR, 'leeg'), { recursive: true });
@@ -781,6 +1031,12 @@ const expectText = async (page, sel, re, msg) => {
       await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'leeg'));
       await page.click('[data-testid=f-save]');
       await page.waitForSelector('[data-testid=share-row]:has-text("Leeg")');
+      // The test of the new share already says it, before any scan: reachable, and empty.
+      await page.waitForSelector('[data-testid=probe-Leeg][data-done=true]', { timeout: 20000 });
+      const emptyTest = (await page.textContent('[data-testid=probe-Leeg]')).replace(/\s+/g, ' ');
+      if ((await page.getAttribute('[data-testid=probe-Leeg]', 'data-tone')) !== 'warn' || !/hoofdmap is leeg/.test(emptyTest) || !(await page.$('[data-testid=probe-Leeg] .badge.warn')))
+        throw new Error('the test of an empty share must warn: ' + emptyTest);
+      await shot('14a-connection-test-empty');
       await page.click('[data-testid=share-row]:has-text("Leeg") >> text=Scan nu');
       let row = null;
       for (let i = 0; i < 40 && !row; i++) {
@@ -795,6 +1051,15 @@ const expectText = async (page, sel, re, msg) => {
       if (!(await row.$('.badge.warn'))) throw new Error('an empty scan must stand out (amber badge)');
       if (!(await page.$('[data-testid=audit-table] tbody tr:has-text("scan.finished"):has-text("Media")'))) throw new Error('the scan of Media is missing as scan.finished');
       await shot('14-audit-empty-scan');
+      // The notification target was told by the worker, in its language, with the outcome and no file name.
+      const told = await waitForHook('the message about the empty scan', (h) => h.json?.event === 'scan.empty' && h.json?.share === 'Leeg');
+      if (told.json.title !== 'NASSA: scan van Leeg vond niets' || told.json.files !== 0 || told.json.priority !== 8 || !/gekoppeld/.test(told.json.message))
+        throw new Error('the message about a scan that found nothing: ' + JSON.stringify(told.json));
+      // Adding and testing the target is in the audit log, by its name and host: the address is not.
+      await page.goto(BASE + '/admin/audit');
+      await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=notification.create');
+      const auditText = await page.textContent('[data-testid=audit-table]');
+      if (!auditText.includes('notification.test') || auditText.includes('geheim-id')) throw new Error('the audit log about the notification target');
     });
 
     await step('a scan that could not read folders: the audit log lists them, folded, as text', async () => {
@@ -995,6 +1260,9 @@ const expectText = async (page, sel, re, msg) => {
       const text = fs.readFileSync(file, 'utf8');
       const backup = JSON.parse(text);
       if (backup.format !== 'nas-storage-analyzer-backup' || backup.includes_files !== false || !backup.shares.some((x) => x.name === 'Media')) throw new Error('the file: ' + text.slice(0, 200));
+      // The notification target is in it as it was entered, its address only sealed: not its host, not its token.
+      if (backup.format_version !== 2 || backup.notifications?.length !== 1 || backup.notifications[0].name !== 'Home Assistant' || !backup.notifications[0].address ||
+        text.includes('geheim-id') || text.includes('api/webhook') || text.includes('127.0.0.1:' + HOOK_PORT)) throw new Error('the notification target in the backup: ' + JSON.stringify(backup.notifications));
       for (const w of [PASSWORD, 'argon2', 'totp', 'recovery', 'webauthn', 'credential', 'password', '"role"', 'csrf', 'session']) if (text.toLowerCase().includes(w.toLowerCase())) throw new Error('the backup holds "' + w + '"');
       await page.waitForSelector('[data-testid=backup-timing]');
       if (!/Server: [\d,]+ s, download: [\d,]+ s/.test(await page.textContent('[data-testid=backup-timing]'))) throw new Error('where the time went is not shown');
@@ -1018,7 +1286,7 @@ const expectText = async (page, sel, re, msg) => {
       await expectText(page, '[data-testid=backup-error]', /shares\[0\]\.cron/, 'a bad share');
       // A file from a newer version is refused with the version that made it.
       const newer = path.join(SHOTS, 'newer.json');
-      fs.writeFileSync(newer, JSON.stringify({ format: 'nas-storage-analyzer-backup', format_version: 2, app_version: '7.0.0' }));
+      fs.writeFileSync(newer, JSON.stringify({ format: 'nas-storage-analyzer-backup', format_version: 3, app_version: '7.0.0' }));
       await page.setInputFiles('[data-testid=backup-file]', newer);
       await expectText(page, '[data-testid=backup-error]', /nieuwere versie \(7\.0\.0\)/, 'a newer file');
       const afterRefusals = await api('GET', '/shares');
@@ -1076,7 +1344,7 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('.settings-nav');
       if (new URL(page.url()).pathname !== '/admin/shares') throw new Error('Settings opened ' + page.url());
       const groups = await page.$$eval('.settings-group', (gs) => gs.map((g) => [g.getAttribute('aria-label'), [...g.querySelectorAll('a')].map((a) => a.getAttribute('href'))]));
-      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/delete', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
+      const want = [['Gegevens', ['/admin/shares', '/admin/extensions', '/admin/delete', '/admin/notifications', '/admin/backup']], ['Beheer', ['/admin/users', '/admin/audit', '/admin/system']]];
       if (JSON.stringify(groups) !== JSON.stringify(want)) throw new Error('settings groups: ' + JSON.stringify(groups));
       for (const a of await page.$$('.settings-nav a')) if (!(await a.$('svg.icon')) || !(await a.textContent()).trim()) throw new Error('every part has an icon AND a label');
       const open = await page.$$eval('.settings-nav a[aria-current=page]', (as) => as.map((a) => a.textContent.trim()));
@@ -1221,6 +1489,45 @@ const expectText = async (page, sel, re, msg) => {
         const spread = parseFloat((shadow.replace(/\s*inset\s*/, ' ').trim().match(/(-?\d*\.?\d+)px$/) || [])[1]);
         if ((style === 'none' || width < 2) && !(spread >= 2)) throw new Error(sel + ' shows no focus indicator: ' + ring);
       }
+
+      // The first stop of the Tab key goes past the navigation: it is off the screen until then, and it puts the focus on the content.
+      await page.goto(BASE + '/admin/shares');
+      await page.waitForSelector('[data-testid=share-row]');
+      const hidden = await page.evaluate(() => document.querySelector('[data-testid=skip-link]').getBoundingClientRect().bottom);
+      if (hidden > 0) throw new Error('the skip link is on the screen before it is focused (bottom at ' + hidden + ')');
+      await page.keyboard.press('Tab');
+      const first = await page.evaluate(() => { const e = document.activeElement, r = e.getBoundingClientRect(); return [e.getAttribute('data-testid'), e.textContent.trim(), Math.round(r.top)]; });
+      if (first[0] !== 'skip-link' || first[1] !== 'Naar de inhoud' || first[2] < 0) throw new Error('the first Tab stop: ' + JSON.stringify(first));
+      await page.keyboard.press('Enter');
+      if ((await page.evaluate(() => document.activeElement.id)) !== 'main') throw new Error('the skip link did not move the focus to the content');
+      // From there the next stop is inside the content, not back in the navigation.
+      await page.keyboard.press('Tab');
+      if (!(await page.evaluate(() => !!document.activeElement.closest('main')))) throw new Error('after the skip link the next Tab stop is outside the content');
+
+      // A form that opens over the page: it has a name, takes the focus, keeps it, and Escape gives it back to the button that opened it.
+      await page.focus('[data-testid=add-share]');
+      await page.keyboard.press('Enter');
+      await page.waitForSelector('dialog[open]');
+      const dlg = await page.evaluate(() => {
+        const d = document.querySelector('dialog[open]'), title = document.getElementById(d.getAttribute('aria-labelledby'));
+        return [title?.tagName, title?.textContent.trim(), d.contains(document.activeElement)];
+      });
+      if (dlg[0] !== 'H2' || dlg[1] !== 'Share toevoegen' || !dlg[2]) throw new Error('the dialog: ' + JSON.stringify(dlg));
+      for (let i = 0; i < 60; i++) {
+        await page.keyboard.press('Tab');
+        if (!(await page.evaluate(() => document.querySelector('dialog[open]').contains(document.activeElement) || document.activeElement === document.body)))
+          throw new Error('Tab left the open dialog after ' + (i + 1) + ' stops, for ' + (await page.evaluate(() => document.activeElement.outerHTML.slice(0, 80))));
+      }
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !document.querySelector('dialog[open]'));
+      if ((await page.evaluate(() => document.activeElement.getAttribute('data-testid'))) !== 'add-share') throw new Error('closing the dialog did not give the focus back to the button that opened it');
+
+      // The switch for the language says what is on it: somebody who talks to their computer says what they see.
+      const lang = await page.evaluate(() => { const b = document.querySelector('[data-testid=lang-toggle]'); return [b.textContent.trim(), b.getAttribute('aria-label')]; });
+      if (!lang[1].startsWith(lang[0])) throw new Error('the name of the language switch does not start with its text: ' + JSON.stringify(lang));
+      // And the way home has a name at every width, also where its text is off the screen.
+      const brand = await page.evaluate(() => document.querySelector('a.brand').innerText.trim() + '|' + document.querySelector('a.brand .brand-name').textContent);
+      if (!brand.endsWith('NAS Storage Analyzer')) throw new Error('the brand link has no name: ' + brand);
     });
 
     await step('an update while a page is open: the page says so, and a reload or the next move loads the new version', async () => {
@@ -1281,6 +1588,85 @@ const expectText = async (page, sel, re, msg) => {
       await page.click('.nav a[href="/lists"]');
       await page.waitForFunction(() => !window.__oldPage && location.pathname === '/lists');
       if (await page.$(banner)) throw new Error('the bar is still there on the page that was loaded for the move');
+    });
+
+    await step('accessibility and the phone: every screen passes the WCAG checks in light and dark, and fits a narrow screen', async () => {
+      const shareId = await page.evaluate(async () => (await (await fetch('/api/v1/shares')).json()).items[0].id);
+      // Every screen an administrator has, and the two forms that open over one. `open` brings a screen into the state to check.
+      const screens = [
+        { name: 'dashboard', path: '/' }, { name: 'browse', path: '/browse/' + shareId }, { name: 'lists', path: '/lists' }, { name: 'search', path: '/search?q=film' },
+        { name: 'shares', path: '/admin/shares' }, { name: 'share form', path: '/admin/shares', open: '[data-testid=add-share]' },
+        { name: 'file types', path: '/admin/extensions' }, { name: 'delete scripts', path: '/admin/delete' },
+        { name: 'notifications', path: '/admin/notifications' }, { name: 'notification form', path: '/admin/notifications', open: '[data-testid=add-target]' },
+        { name: 'backup', path: '/admin/backup' }, { name: 'users', path: '/admin/users' }, { name: 'audit log', path: '/admin/audit' }, { name: 'system', path: '/admin/system' },
+        { name: 'appearance', path: '/account' }, { name: 'security', path: '/account/security' }, { name: 'about', path: '/about' },
+      ];
+      const variants = [
+        { name: 'light', theme: 'light', size: { width: 1280, height: 900 } },
+        { name: 'dark', theme: 'dark', size: { width: 1280, height: 900 } },
+        { name: 'phone', theme: 'light', size: { width: 390, height: 844 }, narrow: true },
+      ];
+      const found = [];
+      const check = async (pg, screen, v) => {
+        await pg.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, v.theme);
+        // Let what the screen loads arrive, and what fades in finish: a colour halfway a transition is not the colour to judge.
+        await pg.waitForFunction(() => !/Laden…/.test(document.querySelector('main')?.textContent ?? ''), null, { timeout: 10000 }).catch(() => {});
+        await pg.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'), null, { timeout: 5000 }).catch(() => {});
+        for (const x of await axeViolations(pg)) found.push({ screen: screen.name, variant: v.name, ...x });
+        if (v.narrow) { const over = await overflowing(pg); if (over.length) found.push({ screen: screen.name, variant: v.name, id: 'sideways-scroll', impact: 'serious', help: over[0], count: over.length - 1, nodes: over.slice(1).map((t) => ({ target: t, html: '', why: '' })) }); }
+        if (v.narrow) {
+          // The buttons of a row are on the screen. As a table their column fell off the right edge and had to be found by swiping; the
+          // page did not scroll sideways then either, so the check above could not see it.
+          const hiddenActions = await pg.evaluate(() => [...document.querySelectorAll('main td.actions .btn')].filter((b) => { const r = b.getBoundingClientRect(); return r.width > 0 && (r.right > window.innerWidth + 1 || r.left < -1); }).map((b) => b.textContent.trim()));
+          if (hiddenActions.length) found.push({ screen: screen.name, variant: v.name, id: 'row-actions-off-screen', impact: 'serious', help: 'buttons of a row are outside the screen: ' + [...new Set(hiddenActions)].join(', '), count: hiddenActions.length, nodes: [] });
+          // A table that is laid out as a stack here is still a table to a screen reader: its elements say what they are.
+          const stacked = await pg.evaluate(() => [...document.querySelectorAll('main table.rows-sm')].map((t) => {
+            const rows = [...t.querySelectorAll(':scope > tbody > tr')], cells = [...t.querySelectorAll(':scope > tbody > tr > td')];
+            return { stack: rows.every((r) => getComputedStyle(r).display === 'block'), table: t.getAttribute('role'), rows: rows.every((r) => r.getAttribute('role') === 'row'), cells: cells.every((c) => c.getAttribute('role') === 'cell') };
+          }));
+          for (const t of stacked) if (!t.stack || t.table !== 'table' || !t.rows || !t.cells)
+            found.push({ screen: screen.name, variant: v.name, id: 'stacked-table', impact: 'serious', help: 'a table with row buttons is not a stack on a phone, or lost its roles: ' + JSON.stringify(t), count: 1, nodes: [] });
+        }
+        // A frame that scrolls sideways can be reached and scrolled with the keyboard, and one that does not scroll is no stop of the Tab key.
+        const frames = await pg.evaluate(() => [...document.querySelectorAll('main .table-wrap')].map((w) => ({ scrolls: w.scrollWidth > w.clientWidth + 1, stop: w.tabIndex === 0, role: w.getAttribute('role'), name: w.getAttribute('aria-label') })));
+        for (const f of frames) if (f.scrolls !== f.stop || (f.scrolls && (f.role !== 'region' || !f.name)))
+          found.push({ screen: screen.name, variant: v.name, id: 'scrolling-frame', impact: 'serious', help: 'a table frame that ' + (f.scrolls ? 'scrolls cannot be reached by keyboard or has no name' : 'does not scroll is a Tab stop') + ': ' + JSON.stringify(f), count: 1, nodes: [] });
+        // What a phone shows, kept to look at: a check cannot say whether a screen is pleasant to use.
+        if (v.narrow) await pg.screenshot({ path: path.join(SHOTS, 'phone-' + screen.name.replace(/\s+/g, '-') + '.png'), fullPage: true });
+      };
+      try {
+        for (const v of variants) {
+          await page.setViewportSize(v.size);
+          for (const s of screens) {
+            await page.goto(BASE + s.path);
+            await page.waitForSelector('main h1');
+            if (s.open) { await page.click(s.open); await page.waitForSelector('dialog[open]'); }
+            await check(page, s, v);
+          }
+        }
+        // The screen before signing in, for somebody who is nobody yet.
+        const anon = await browser.newContext({ locale: 'nl-NL' });
+        try {
+          const p = await anon.newPage();
+          for (const v of variants) {
+            await p.setViewportSize(v.size);
+            await p.goto(BASE + '/');
+            await p.waitForSelector('[data-testid=login-username]');
+            await check(p, { name: 'sign in' }, v);
+          }
+        } finally { await anon.close(); }
+      } finally {
+        await page.setViewportSize({ width: 1280, height: 900 });
+        await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+      }
+      fs.writeFileSync(path.join(SHOTS, 'a11y.json'), JSON.stringify(found, null, 2));
+      if (found.length) {
+        // One line per rule, with where it was found and the first element, so the log alone says what to fix.
+        const byRule = new Map();
+        for (const f of found) { const k = f.id; if (!byRule.has(k)) byRule.set(k, { help: f.help, impact: f.impact, where: new Set(), first: f.nodes[0] }); byRule.get(k).where.add(f.screen + ' (' + f.variant + ')'); }
+        const lines = [...byRule].map(([id, r]) => `${id} [${r.impact}] ${r.help}: ${[...r.where].join(', ')}${r.first ? ' | first: ' + r.first.target + ' ' + r.first.html : ''}`);
+        throw new Error(found.length + ' accessibility findings (details in a11y.json):\n     ' + lines.join('\n     '));
+      }
     });
 
     await step('screenshots: light and dark in two accents', async () => {
@@ -1438,6 +1824,7 @@ const expectText = async (page, sel, re, msg) => {
     console.log('\nfailed at the step above; screenshot:', path.join(SHOTS, 'failure.png'));
   } finally {
     await browser.close();
+    hookServer.close();
   }
   console.log(`\n${results.filter((r) => r[0] === 'ok').length} steps passed, ${failures} failed`);
   process.exit(failures ? 1 : 0);

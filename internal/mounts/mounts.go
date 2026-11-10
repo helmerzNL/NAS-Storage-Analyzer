@@ -63,7 +63,7 @@ var ErrNeedsCapabilities = errors.New("mounting an SMB share needs the capabilit
 	"docker-compose.mounts.yml has them), or mount the share on the host and bind-mount it under the shares directory")
 
 // capabilityFailure reports whether a mount helper's output says it could not set its capabilities: mount.cifs built with
-// libcap (Alpine) says "Unable to set current process capabilities", with libcap-ng (Debian, Ubuntu) "Unable to apply new
+// libcap (Alpine up to 3.20) says "Unable to set current process capabilities", with libcap-ng (Alpine 3.24, Debian, Ubuntu) "Unable to apply new
 // capability set".
 func capabilityFailure(low string) bool {
 	return strings.Contains(low, "unable to set current process capabilities") ||
@@ -107,9 +107,19 @@ func credentials(in shares.Input, password string) (string, error) {
 }
 
 // Prepare makes the share's files reachable and returns the directory to scan
-// plus a cleanup function. For a bind share that is just the path.
+// plus a cleanup function. For a bind share that is just the path. The mount point is Dir/<share id>.
 func (m *Manager) Prepare(ctx context.Context, f *shares.Full) (path string, cleanup func(), err error) {
+	return m.PrepareAt(ctx, f, strconv.FormatInt(f.ID, 10))
+}
+
+// PrepareAt is Prepare with a mount point of its own, Dir/<name>. A connection test uses it: Prepare clears whatever is mounted on
+// its mount point before it mounts, so a test on the mount point of a running scan of the same share would pull the share away
+// from under that scan. name is one path element.
+func (m *Manager) PrepareAt(ctx context.Context, f *shares.Full, name string) (path string, cleanup func(), err error) {
 	noop := func() {}
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return "", noop, fmt.Errorf("mount point name %q is not one path element", name)
+	}
 	in := f.Input
 	if in.Kind == shares.KindBind {
 		fi, err := os.Stat(in.Path)
@@ -122,7 +132,7 @@ func (m *Manager) Prepare(ctx context.Context, f *shares.Full) (path string, cle
 		return in.Path, noop, nil
 	}
 
-	mp := filepath.Join(m.Dir, strconv.FormatInt(f.ID, 10))
+	mp := filepath.Join(m.Dir, name)
 	if err := os.MkdirAll(mp, 0o755); err != nil {
 		return "", noop, fmt.Errorf("%w (%v)", ErrUnavailable, err)
 	}

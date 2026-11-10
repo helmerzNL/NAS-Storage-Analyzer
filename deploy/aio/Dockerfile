@@ -15,12 +15,14 @@ USER root
 # PostgreSQL 16, the version of the Compose stack (postgres:16-alpine), asked for by name: a base whose Alpine has no
 # postgresql16 fails this build instead of starting with another major version. contrib holds ltree and pg_trgm, which the
 # migrations create. tini reaps the children of the mount helpers; setpriv (util-linux; busybox's cannot change users) starts
-# each process as its own user.
+# each process as its own user. Where Alpine installs it differs per release (/usr/bin up to 3.20, /bin from 3.24), so the build
+# checks that the one on PATH is util-linux's and the start script looks it up.
 RUN apk add --no-cache postgresql16 postgresql16-client postgresql16-contrib tini setpriv \
  && test -x /usr/libexec/postgresql16/postgres \
  && test -f /usr/share/postgresql16/extension/ltree.control \
  && test -f /usr/share/postgresql16/extension/pg_trgm.control \
  && test "$(id -u postgres)" = 70 \
+ && setpriv --version | grep -q util-linux \
  && mkdir -p /data /run/postgresql \
  && chown postgres:postgres /run/postgresql
 

@@ -11,6 +11,7 @@ Dit document hoort bij de [README](../README.md) ([English](../README.en.md)). N
 5. [Back-up en herstel](#5-back-up-en-herstel)
 6. [PostgreSQL afstellen](#6-postgresql-afstellen)
 7. [Monitoring: `/metrics`, logs, health checks](#7-monitoring)
+   * [7b. Meldingen: een bericht als een scan aandacht nodig heeft](#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft)
 8. [Bijwerken](#8-bijwerken)
    * [8b. All-in-one image: Unraid-store en Home Assistant](#8b-all-in-one-image-unraid-store-en-home-assistant)
 9. [Bekende beperkingen](#9-bekende-beperkingen)
@@ -36,7 +37,8 @@ stelt verplicht een tweede factor in (authenticator-app of passkey) en bewaart d
 standaardwachtwoorden.
 
 Daarna: **Shares → Share toevoegen**, kies het type *Gemount pad (aanbevolen)*, klik op **Bladeren…** en kies de map
-(of typ het pad, bijvoorbeeld `/mnt/shares/media`) en klik op *Scan nu* op het dashboard.
+(of typ het pad, bijvoorbeeld `/mnt/shares/media`). De share wordt meteen getest: eronder staat of de worker hem kan bereiken en
+hoeveel items de hoofdmap heeft. Klik daarna op *Scan nu* op het dashboard.
 
 **Welke image.** De stack haalt `ghcr.io/helmerznl/nas-storage-analyzer:${NASSA_TAG}` op; er wordt op de server niets gebouwd,
 dus een stackmanager heeft alleen `docker-compose.yml` en `.env` nodig. `NASSA_TAG` (in `.env`) is `latest` (stabiel, standaard),
@@ -172,17 +174,34 @@ een tmpfs en verwijdert het na het mounten. Opties komen uit een allow-list en d
   `CAP_DAC_OVERRIDE` bij `CAP_SYS_ADMIN`. Docker's standaardset heeft de tweede maar niet de eerste: bij `docker run` (all-in-one
   image, Portainer, Home Assistant) volstaat `--cap-add DAC_READ_SEARCH` naast `--cap-add SYS_ADMIN`. De worker in Compose laat alle
   rechten vallen (`cap_drop: ALL`), daarom geeft het override-bestand alle drie terug. Ontbreekt er een, dan stopt de mount nog voordat
-  er iets gemount wordt, en zegt het auditlog bij `scan.failed` welke rechten SMB nodig heeft (de helper zelf meldt `Unable to set
-  current process capabilities: Operation not permitted`). NFS heeft ze niet nodig. Eerdere versies van deze handleiding noemden alleen
+  er iets gemount wordt, en zegt het auditlog bij `scan.failed` welke rechten SMB nodig heeft (de helper zelf meldt `Unable to apply new capability set.`; oudere versies
+  `Unable to set current process capabilities: Operation not permitted`). NFS heeft ze niet nodig. Eerdere versies van deze handleiding noemden alleen
   `CAP_SYS_ADMIN`; een stack die alleen dat gaf, krijgt SMB pas aan de praat met de rest erbij.
 * Op hosts met AppArmor (Ubuntu, Debian) is `security_opt: apparmor:unconfined` nodig; dat staat al in het override-bestand.
 * Extra opties kies je uit een vaste lijst (onder andere `nolock`, `noatime`, `nconnect=`, `timeo=`, `soft`/`hard`); de
   mount is altijd `ro`. NFSv3 heeft soms `nolock` nodig; NFSv4 heeft geen rpcbind nodig.
 * Dit pad is in de ontwikkelomgeving getest tot en met de rechten en met een nagebootste mount-uitvoerder in de unit tests. Wat
-  daarbij gemeten is, in een container met Alpine 3.20 en `cifs-utils` 7.0 (het pakket in dit image): met Docker's standaardrechten plus
+  daarbij gemeten is, in een container met Alpine 3.24 en `cifs-utils` 7.5 (het pakket in dit image; hetzelfde gold voor Alpine 3.20 met 7.0): met Docker's standaardrechten plus
   `CAP_SYS_ADMIN` stopt `mount.cifs` op zijn rechten, met `CAP_DAC_READ_SEARCH` erbij komt hij daar voorbij; met `cap_drop: ALL` heeft hij
   alle drie nodig, zoals het override-bestand ze geeft. CI controleert beide bij elke build. Een echte NFS- of SMB-server was er niet beschikbaar (de kernel had geen NFS- of cifs-client); test een nieuwe
-  share dus eerst met *Scan nu* en lees de foutmelding op het dashboard.
+  share dus eerst met *Test verbinding* (zie hieronder): de melding van `mount` staat er binnen enkele seconden onder.
+
+### Test verbinding
+
+Onder **Instellingen → Shares** heeft elke share de knop **Test verbinding** (alleen beheerders). De worker doet dan wat hij aan het
+begin van een scan ook doet, en niets meer: het pad opzoeken (gemount pad) of de share koppelen (NFS, SMB), en de hoofdmap lezen.
+De uitkomst staat binnen enkele seconden onder de share:
+
+* **Bereikbaar**, met het aantal items in de hoofdmap (geteld tot 1000).
+* **Leeg**: de worker kan erbij, maar de hoofdmap is leeg. Zo ziet een share eruit die op de host niet gekoppeld is, of een
+  `NASSA_SHARES_DIR` die naar een andere map wijst dan je denkt.
+* **Niet bereikbaar**, met de melding van de worker of van `mount` zelf (een time-out, een geweigerd wachtwoord, een ontbrekend
+  recht van de container, *permission denied* met de gebruiker waaronder de app draait).
+
+Een share die je net hebt toegevoegd wordt vanzelf getest. Een test is geen scan: er wordt niets geïndexeerd, er wordt geen bestand
+geopend en er komt geen scan in de historie; in het auditlog staat alleen wie de test vroeg (`share.test`). De test wacht niet op een
+vrije plek achter lopende scans, en gebruikt bij NFS en SMB een eigen koppelpunt, zodat een scan van dezelfde share gewoon doorloopt.
+Pakt geen worker de test binnen een minuut op, dan staat er dat de worker niet draait.
 
 ### Route (c): de stack draait op de NAS zelf
 
@@ -228,7 +247,7 @@ Je kunt dan `/mnt/disk1/media`, `/mnt/cache/appdata` en `/mnt/user/documenten` d
 
 Op andere NAS-systemen geef je het pad van het volume of de pool door (Synology bijvoorbeeld `/volume1`); controleer het
 via SSH met `ls`. Controleer na het starten of de share zichtbaar is met `docker compose exec worker ls /mnt/user`
-(of je eigen pad) en doe een eerste *Scan nu*.
+(of je eigen pad). De share wordt bij het toevoegen getest (*Test verbinding*); doe daarna een eerste *Scan nu*.
 
 > Route (c) is getest tot en met de configuratie (`docker compose config`) en de pad-validatie in de unit tests, maar
 > niet op een echte Unraid- of andere NAS-machine, en niet met een draaiende container.
@@ -342,6 +361,13 @@ De app vertrouwt `X-Forwarded-For` alleen als de verbinding van een vertrouwd pr
 het rechtse niet-vertrouwde adres uit de keten (links kan de client vervalsen). Dat adres gebruikt de
 lockout per IP en het auditlog.
 
+**De app zegt het zelf.** Een beheerder die de app via http bereikt vanaf een ander apparaat dan de server zelf, krijgt bovenaan een melding
+(per browser weg te klikken). Dat gebeurt ook als de browser https gebruikt en de app http ziet: de proxy staat dan niet in
+`NASSA_TRUSTED_PROXIES` of stuurt geen `X-Forwarded-Proto`, waardoor de sessiecookie zijn `Secure`-vlag mist en elke bezoeker voor de app het adres
+van de proxy heeft. Onder **Instellingen → Systeem → Verbinding** staat altijd de stand, met wat je kunt instellen: *Versleuteld*,
+*Versleuteld, niet afgedwongen* (zet `NASSA_REQUIRE_HTTPS=true`), *De app ziet niet dat je HTTPS gebruikt*, *Deze verbinding is niet
+versleuteld*, of *Lokaal* (http op de server zelf, via `localhost`).
+
 ## 4. Passkeys: RP-ID en origin
 
 Een passkey is gebonden aan de hostnaam waarop hij is aangemaakt (de *relying party ID*).
@@ -376,6 +402,17 @@ wachtwoord of een passkey. Daardoor kent de beheerder het nooit, en reist het ni
 * **Alleen beheerder en je bent alles kwijt?** Een andere beheerder maakt je een inlog-link. Ben je de enige beheerder en heb je geen enkele manier meer om in te loggen, dan blijft alleen direct ingrijpen in de database
   of een herstel van de back-up over; zorg dus voor minstens twee beheerders en bewaar de herstelcodes.
 
+### Sessies: waar je bent aangemeld
+
+Onder **Beveiliging** in het gebruikersmenu staat bij *Sessies* elke browser waarin je bent aangemeld: de browser en het systeem, het adres
+dat de app zag, sinds wanneer, en wanneer hij voor het laatst is gebruikt. De sessie waarin je kijkt staat bovenaan. Een andere sessie meld
+je daar af; *Overal elders afmelden* beëindigt alle andere in één keer, ook een aanmelding die bij de tweede factor is blijven steken.
+Je ziet alleen je eigen sessies, en een beheerder ziet die van anderen niet.
+
+* Een sessie verloopt vanzelf na 12 uur zonder gebruik en uiterlijk na 7 dagen. Een wachtwoordwijziging beëindigt je andere sessies ook.
+* Het adres is dat van de proxy zolang die niet in `NASSA_TRUSTED_PROXIES` staat (§3).
+* In het auditlog: `session.revoke` (met de browser en het adres van de beëindigde sessie) en `session.revoke_others` (met het aantal).
+
 ## 5. Back-up en herstel
 
 Alles wat de moeite waard is staat in PostgreSQL, plus één sleutel buiten de database.
@@ -396,6 +433,40 @@ docker compose up -d
   scan (*Volledige scan* op het dashboard) bouwt de index desgewenst opnieuw op.
 * Een bestandssysteem-snapshot of kopie van `DATA_PATH/postgres` met de database gestopt werkt ook (`docker compose stop db`).
 * Een grote database (tientallen miljoenen bestanden) dumpt in minuten tot een uur; plan dat buiten de scantijd.
+
+### De versleutelsleutel wisselen
+
+`NASSA_ENCRYPTION_KEY` versleutelt wat de database versleuteld bewaart: de SMB-wachtwoorden van shares en de geheimen van
+authenticator-apps. Wissel de sleutel als iemand anders hem gezien kan hebben (een `.env` in een gedeelde back-up, een schermafbeelding),
+of gewoon af en toe. `nasa rekey` versleutelt alles opnieuw (ook de adressen van meldingsdoelen) met een nieuwe sleutel, in één transactie: daarna staat alles onder de nieuwe
+sleutel, of er is niets veranderd.
+
+```bash
+NEW="$(docker compose run --rm --no-deps app genkey)"       # de nieuwe sleutel
+docker compose stop app worker                               # de database blijft draaien
+NASSA_NEW_ENCRYPTION_KEY="$NEW" docker compose run --rm -e NASSA_NEW_ENCRYPTION_KEY app rekey
+echo "$NEW"                                                  # zet deze waarde in .env als NASSA_ENCRYPTION_KEY
+docker compose up -d
+docker compose exec app nasa rekey -check                    # alles gaat open met de nieuwe sleutel
+```
+
+* De nieuwe sleutel gaat via een omgevingsvariabele (`NASSA_NEW_ENCRYPTION_KEY`, of een bestand met `NASSA_NEW_ENCRYPTION_KEY_FILE`),
+  nooit als argument: argumenten zijn zichtbaar voor elk proces op de machine.
+* `rekey -check` verandert niets en zegt of alles wat is opgeslagen opengaat met de huidige sleutel.
+* Start je per ongeluk met de oude sleutel, dan staat in het log van `app` *NASSA_ENCRYPTION_KEY does not open what is stored*, met de
+  shares en gebruikers die het betreft. Aanmelden met een code van de authenticator-app geeft dan de melding dat de versleutelsleutel niet
+  klopt (een herstelcode of een passkey werkt nog wel). Er gaat niets verloren: zet de juiste sleutel en start opnieuw.
+* Gaat een opgeslagen waarde met geen van beide sleutels open (hij is ooit met weer een andere sleutel opgeslagen), dan stopt `rekey`
+  zonder iets te wijzigen en noemt hij de share of de gebruiker. Voer dat SMB-wachtwoord opnieuw in, of laat die gebruiker zijn
+  authenticator-app opnieuw instellen, en draai `rekey` daarna nog eens.
+* Een back-upbestand uit de app (*Instellingen → Back-up*) van vóór de wissel bevat de SMB-wachtwoorden nog onder de oude sleutel: maak
+  een nieuw. Een `pg_dump` van vóór de wissel hoort bij de oude sleutel; bewaar die sleutel erbij zolang je die dump bewaart.
+* Docker secrets (`docker-compose.secrets.yml`): geef beide Compose-bestanden mee aan de commando's hierboven en zet de nieuwe sleutel
+  na `rekey` in `secrets/encryption_key`.
+* All-in-one image: `NEW="$(docker run --rm <image> genkey)"`, dan in de draaiende container
+  `NASSA_NEW_ENCRYPTION_KEY="$NEW" docker exec -e NASSA_NEW_ENCRYPTION_KEY <container> nasa-aio rekey`, en maak de container daarna meteen
+  opnieuw aan met `NASSA_ENCRYPTION_KEY` op de nieuwe sleutel. Doe dat op een moment dat niemand de app gebruikt.
+* De wissel staat in het auditlog als `encryption.rekey`, door `nasa rekey`.
 
 ### In de app: een back-up van wat je zelf hebt ingevoerd
 
@@ -489,6 +560,59 @@ Zet de datadirectory van de database op SSD's. Dat is, meer dan elke parameter, 
   `time() - nasa_share_last_scan_timestamp_seconds > 2 * 86400`.
 * **API:** de volledige OpenAPI-specificatie staat op `/openapi.yaml` ([`api/openapi.yaml`](../api/openapi.yaml)).
   De API gebruikt dezelfde sessie en CSRF-bescherming als de UI.
+
+## 7b. Meldingen: een bericht als een scan aandacht nodig heeft
+
+Een scan die 's nachts mislukt, zie je pas als je het dashboard opent. Onder **Instellingen → Meldingen** voeg je een *doel* toe: een adres
+waar NASSA een bericht heen stuurt als een scan
+
+* **mislukt** (ook: geweigerd omdat de share niet gekoppeld lijkt);
+* **klaar is maar niets vond** (zo ziet een share eruit die niet gekoppeld is);
+* **klaar is maar mappen of bestanden niet kon lezen**;
+* en, als je dat aanvinkt, **klaar is zonder bijzonderheden**.
+
+Zolang er geen doel is, wordt er niets verstuurd. Er kunnen hoogstens vijf doelen zijn.
+
+| Ontvanger | Adres | Vorm |
+|---|---|---|
+| Home Assistant | `https://<jouw-ha>/api/webhook/<id>` (een automatisering met de trigger *Webhook*) | JSON: de titel en de tekst staan in `trigger.json.title` en `trigger.json.message` |
+| ntfy | `https://ntfy.sh/<onderwerp>`, of je eigen server | Tekst: het bericht als platte tekst, met de kopregels `Title`, `Priority` en `Tags` |
+| Gotify | `https://<jouw-gotify>/message?token=<app-token>` | JSON: Gotify leest `title`, `message` en `priority` |
+| Iets anders | elk adres dat een `POST` aanneemt | JSON of Tekst |
+
+**Wat er verstuurd wordt.** De uitkomst van een scan: de naam van de share, wat er gebeurde, de aantallen (bestanden, mappen, bytes,
+leesfouten) en bij een mislukte scan de reden in de woorden van de worker. Nooit een bestandsnaam of een lijst van mappen. Een JSON-bericht
+ziet er zo uit:
+
+```json
+{"app": "NASSA", "event": "scan.failed", "title": "NASSA: scan van Media mislukt",
+ "message": "De scan van Media is mislukt: share path /mnt/shares/media: ... (is the share mounted into the container?)",
+ "priority": 8, "share": "Media", "share_id": 1, "scan_id": 12, "job_id": 34, "trigger": "schedule",
+ "error": "share path /mnt/shares/media: ...", "at": "2026-11-10T03:00:05Z"}
+```
+
+`event` is `scan.failed`, `scan.empty`, `scan.errors`, `scan.finished` of `test`; `priority` loopt van 1 tot 10 (8 vraagt nu aandacht, 5 is
+het bekijken waard, 2 is ter kennisgeving). De titel en de tekst zijn Nederlands of Engels, per doel.
+
+**Het adres is een geheim.** Het bevat meestal het token van de ontvanger. Het wordt versleuteld opgeslagen (`NASSA_ENCRYPTION_KEY`, zoals een
+SMB-wachtwoord), daarna nooit meer getoond (alleen `https://host/…`) en het komt niet in het auditlog of in een logregel. Wil je het
+wijzigen, typ het dan opnieuw.
+
+**Test.** De knop *Test* stuurt nu één testmelding en zegt of die is aangekomen. Het scherm bewaart bij elk doel hoe het laatste bericht ging.
+
+**Wie verstuurt.** Berichten over scans verstuurt de `worker`, de testmelding de `app`: beide containers moeten het adres kunnen bereiken.
+Een bericht dat niet aankomt, wordt drie keer geprobeerd (meteen, na 2 s en na 8 s) en staat daarna in het auditlog als
+`notification.failed`, met de naam van het doel en de reden, zonder het adres. Er is geen wachtrij: is de ontvanger langer weg, dan is dat
+bericht verloren. De scan zelf merkt er niets van. Een scan die stopt omdat de worker zelf wordt afgesloten, wordt niet gemeld.
+
+**Wat de server niet doet.** De server volgt geen doorverwijzing (voer het uiteindelijke adres in), toont het antwoord van de ontvanger
+nooit (alleen de statuscode), wacht hooguit 10 seconden per poging, en weigert adressen die uitkomen op een link-local adres
+(`169.254.0.0/16`, `fe80::/10`: daar bewaren cloudmachines hun inloggegevens). Adressen op je eigen netwerk en op de server zelf mogen wel:
+daar staan Home Assistant en Gotify.
+
+**Back-up.** De doelen zitten in het back-upbestand van de app (§5), het adres alleen versleuteld. Zet je het bestand terug op een
+installatie met een andere sleutel, dan worden de doelen overgeslagen en zegt het scherm welke: voeg ze opnieuw toe. `nasa rekey` neemt de
+adressen mee naar de nieuwe sleutel.
 
 ## 8. Bijwerken
 
@@ -666,10 +790,15 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
 | De scan vindt niets, of de share-map is leeg | Het auditlog toont dan `scan.empty`. `NASSA_SHARES_DIR` wijst niet naar de map met je mounts (of is relatief en door je stackmanager ergens anders opgelost). Gebruik een absoluut pad op de host. |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkey: "Passkeys werken niet op dit adres" | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASSA_RP_ID` in. |
+| Je weet niet of de worker een share kan bereiken, of waarom een scan mislukt | **Instellingen → Shares → Test verbinding**: de uitkomst staat er binnen enkele seconden onder. Zie [Test verbinding](#test-verbinding). |
+| *Test verbinding* meldt "no worker picked the test up" | De worker draait niet of bereikt de database niet: `docker compose ps` en `docker compose logs worker` (all-in-one image: het log van de container). |
 | Scan mislukt met "is it still mounted?" | De share is niet gemount of leeg; zie [route (b)](#route-b-aanbevolen-mount-op-de-host-bind-mount-read-only-in-de-container). |
 | Bij het toevoegen van een share: "must be inside …" | Het pad moet onder `NASSA_SHARES_MOUNT` liggen (standaard `/mnt/shares`). Zet `NASSA_SHARES_MOUNT` op het pad dat je wilt typen, of gebruik het pad dat de melding noemt; herstart daarna `docker compose up -d`. |
 | Scan mislukt met "permission denied" op het share-pad, of de mapkiezer meldt het | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`), zie *Leesrechten*; de melding noemt de uid en gid waarmee de app draait. Of geef die gebruiker leesrechten (`o+rx`), of mount met `uid=`/`gid=` voor SMB. Mappen die niet leesbaar zijn tellen als fout, de scan loopt door. |
 | `/metrics` geeft 401 of 403 | Zet `NASSA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
+| Een melding *Deze verbinding is niet versleuteld* of *De app ziet niet dat je HTTPS gebruikt* | Zet een reverse proxy met https voor de app, of zet de proxy in `NASSA_TRUSTED_PROXIES`: zie [§3](#3-reverse-proxy-en-https). **Instellingen → Systeem → Verbinding** zegt welke van de twee. |
+| Het log van `app` meldt *NASSA_ENCRYPTION_KEY does not open what is stored* | De app is gestart met een andere sleutel dan waarmee de wachtwoorden zijn opgeslagen. Zet de juiste sleutel terug en start opnieuw; zie [De versleutelsleutel wisselen](#de-versleutelsleutel-wisselen). |
+| Een melding komt niet aan | **Instellingen → Meldingen → Test** zegt waarom (statuscode of fout). Berichten over scans verstuurt de `worker`: die moet het adres ook kunnen bereiken. Een bericht dat niet aankwam staat in het auditlog als `notification.failed`. Zie [§7b](#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft). |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
 
 ## 11. English summary
@@ -696,7 +825,7 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
   is required (`docker run --rm <image> genkey`); PostgreSQL listens on its socket only, with no password; give it `--shm-size=256m`.
   With `CAP_SYS_ADMIN` the worker runs as root and can mount NFS itself; mounting SMB needs `CAP_DAC_READ_SEARCH` as well
   (`--cap-add SYS_ADMIN --cap-add DAC_READ_SEARCH`, on top of Docker's default capabilities, which include `CAP_DAC_OVERRIDE`;
-  `mount.cifs` stops with "Unable to set current process capabilities" without it),
+  `mount.cifs` stops with "Unable to apply new capability set" without it; older versions said "Unable to set current process capabilities"),
   and where AppArmor blocks the mount also `--security-opt apparmor=unconfined`. The database folder of the Compose stack is taken
   over with its data. Compose stays the recommended route (ADR 0013).
 * **Services:** `app` (UI, API, scheduler), `worker` (runs scans), `db` (PostgreSQL 16). `app` and `worker` run as
@@ -728,11 +857,40 @@ Bewaar de sleutel die dit maakt; zonder kunnen de opgeslagen SMB-wachtwoorden ni
   without them, NFS needs none of the last two). This route is verified up to the privileges, including that `mount.cifs` of Alpine
   3.20 gets past its capability step with the override's set and not with `SYS_ADMIN` alone; it could not be tested against a real
   NFS/SMB server in the development sandbox.
+* **Connection test:** *Settings → Shares → Test connection* (administrators) has the worker do what it does at the start of a scan and
+  nothing more: find the path or mount the share, and list the top folder. Within seconds the share shows *Reachable* with the number
+  of items (counted up to 1,000), *Empty* (reachable, but nothing there: what an unmounted share or a wrong `NASSA_SHARES_DIR` looks
+  like) or *Not reachable* with the message of the worker or of `mount`. A share that was just added is tested by itself. A test is
+  not a scan: nothing is indexed, no file is opened, and only who asked is in the audit log (`share.test`). It does not wait behind
+  running scans and mounts on a mount point of its own. "No worker picked the test up" after a minute means the worker is not running.
 * **Missing mounts:** a scan that finds an empty share where the previous one found 100+ files is refused and the
   old data kept (`nasa scan -allow-empty` overrides, for a share that was emptied on purpose).
 * **Reverse proxy:** set `NASSA_TRUSTED_PROXIES`, `NASSA_REQUIRE_HTTPS=true`, `NASSA_RP_ID`, `NASSA_RP_ORIGINS`; turn off
   response buffering for `/api/v1/events`. Examples for Caddy, nginx and Traefik are above. Passkeys need a host
   name (not an IP address) and https.
+* **Connection warning:** an administrator who reaches the app over plain http from another machine gets a banner (it can be put away per
+  browser), and so does one whose browser uses https while the app sees http (the proxy is not in `NASSA_TRUSTED_PROXIES` or sends no
+  `X-Forwarded-Proto`, so the session cookie lacks `Secure`). *Settings → System → Connection* always shows the state and what to set.
+* **Sessions:** under *Security* in the user menu a person sees every browser they are signed in with (browser and system, the address
+  the app saw, since when, last used), signs another one out, or signs out everywhere else. Own sessions only. Audit log:
+  `session.revoke`, `session.revoke_others`.
+* **Notifications (§7b):** *Settings → Notifications* holds up to five targets: an address NASSA POSTs to when a scan fails, finds
+  nothing, or could not read everything (and, if ticked, when it simply finishes). `json` sends one object (`app`, `event`, `title`,
+  `message`, `priority` 1-10, `share`, ids, counts, `error`, `at`) for Home Assistant webhooks, Gotify and anything generic; `text` sends
+  the message as plain text with `Title`, `Priority` and `Tags` headers for ntfy. Nothing is sent without a target, and never a file
+  name or a folder listing. The address is a secret: stored sealed with `NASSA_ENCRYPTION_KEY`, shown only as `https://host/…`, never in
+  the audit log. *Test* sends one message now. Scan messages are sent by the `worker` (three attempts: at once, after 2 s, after 8 s;
+  then `notification.failed` in the audit log; there is no queue), the test by the `app`, so both must reach the address. Redirects are
+  not followed, the receiver's answer is never shown, one attempt takes at most 10 s, and link-local addresses are refused. The targets
+  are in the in-app backup (address sealed) and `nasa rekey` moves them to the new key.
+* **Changing the encryption key:** `nasa rekey` re-encrypts the stored SMB passwords and authenticator secrets with a new key in one
+  transaction (all of it, or nothing). Stop `app` and `worker`, run
+  `NASSA_NEW_ENCRYPTION_KEY="$NEW" docker compose run --rm -e NASSA_NEW_ENCRYPTION_KEY app rekey`, put the new key in `.env`, start again;
+  `rekey -check` only verifies the current key. The new key comes from the environment or `NASSA_NEW_ENCRYPTION_KEY_FILE`, never from an
+  argument. Started with the wrong key, the app log says `NASSA_ENCRYPTION_KEY does not open what is stored` and names what, and signing in
+  with an authenticator code answers that the key does not fit (a recovery code or a passkey still works). All-in-one
+  image: `docker exec -e NASSA_NEW_ENCRYPTION_KEY <container> nasa-aio rekey` in the running container, then recreate it with the new
+  key. An in-app backup file from before the change holds SMB passwords under the old key: make a new one.
 * **Backup:** `pg_dump -Fc` of the database, plus `NASSA_ENCRYPTION_KEY` stored separately. Without the key the
   stored SMB passwords cannot be decrypted. A copy of `DATA_PATH/postgres` with the database stopped works too.
 * **Factory reset:** *Settings → System → Factory reset* (administrators; folded by default) deletes **every table** of the database (accounts, including yours, shares with their scan data, edited file types, the audit

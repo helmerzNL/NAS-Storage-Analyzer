@@ -1,0 +1,16 @@
+# Secret scanning (job `supply-chain` in .github/workflows/ci.yml, and the weekly run). The default rules of gitleaks apply; the only
+# exceptions are three made-up values that tests need in plain text. They are listed by value, not by file, so a real secret in the
+# same file is still found, and a new fixture has to be added here on purpose.
+title = "NAS Storage Analyzer"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fixture values: a made-up invitation token in a unit test, and the passwords the browser tests and the screenshot generator sign in with"
+regexTarget = "match"
+regexes = [
+  '''Zx3-_aB9cD4eF5gH6iJ7kL8mN9oP0qR1sT2uV3wX4yZ''',
+  '''voorbeeld-wachtwoord-2026''',
+  '''een-lang-wachtwoord-123''',
+]

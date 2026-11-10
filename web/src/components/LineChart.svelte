@@ -4,7 +4,8 @@
   import { i18n } from '../lib/i18n.svelte';
 
   export interface Series { label: string; color: string; points: { x: number; y: number }[]; }
-  let { series, height = 170, stacked = false }: { series: Series[]; height?: number; stacked?: boolean } = $props();
+  // label is what the chart is, for somebody who cannot see it: the lines themselves cannot be read out, the legend and the numbers on the page can.
+  let { series, label, height = 170, stacked = false }: { series: Series[]; label: string; height?: number; stacked?: boolean } = $props();
 
   const W = 600, padL = 58, padR = 10, padT = 10, padB = 24;
   // Stacked: each series is drawn on top of the previous ones, so the top edge is the total.
@@ -35,7 +36,7 @@
 {#if xs.length === 0}
   <div class="muted small">–</div>
 {:else}
-  <svg viewBox="0 0 {W} {height}" width="100%" role="img" preserveAspectRatio="none" style:height="{height}px">
+  <svg viewBox="0 0 {W} {height}" width="100%" role="img" aria-label={label} preserveAspectRatio="none" style:height="{height}px">
     {#each ticks as tk}
       <line x1={padL} x2={W - padR} y1={sy(tk)} y2={sy(tk)} stroke="var(--lijn-strong)" />
       <text x={padL - 6} y={sy(tk) + 4} text-anchor="end" font-size="11" fill="var(--text-muted)">{formatBytes(tk, prefs.units, i18n.lang)}</text>

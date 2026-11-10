@@ -21,11 +21,14 @@
   import About from './routes/About.svelte';
   import UserMenu from './components/UserMenu.svelte';
   import Backup from './routes/Backup.svelte';
+  import Notifications from './routes/Notifications.svelte';
   import Delete from './routes/Delete.svelte';
   import Invite from './routes/Invite.svelte';
   import { invite } from './lib/invite.svelte';
   import UpdateBanner from './components/UpdateBanner.svelte';
   import BuildBanner from './components/BuildBanner.svelte';
+  import ConnectionBanner from './components/ConnectionBanner.svelte';
+  import { loadConnection, resetConnection } from './lib/connection.svelte';
   import { loadUpdate, resetUpdate } from './lib/updates.svelte';
   import SettingsLayout from './components/SettingsLayout.svelte';
 
@@ -38,6 +41,8 @@
   $effect(() => { if (isActive()) { startLive(); return () => stopLive(); } });
   // An update is the administrator's business: ask once after an administrator signs in (the server remembers the answer), nobody else.
   $effect(() => { if (isAdmin()) void loadUpdate(); else resetUpdate(); });
+  // So is a connection that is not encrypted: the administrator is the one who can put a proxy with https in front.
+  $effect(() => { if (isAdmin()) void loadConnection(); else resetConnection(); });
 
   // Settings are the application's own (shares, file types, backup, users, audit log, system): administrators only. What belongs to the signed-in
   // person (appearance and language, security) and About live in the user menu, so a viewer has no Settings entry at all.
@@ -65,11 +70,13 @@
   <Auth onfinished={() => navigate(route.path === '/' ? '/' : route.path)} />
 {:else}
   <div class="shell">
+    <!-- The first stop of the Tab key: past the navigation, to what the page is about. -->
+    <a class="skip-link" href="#main" onclick={(e) => { e.preventDefault(); document.getElementById('main')?.focus(); }} data-testid="skip-link">{t('nav.skip')}</a>
     <header class="topbar">
       <div class="topbar-inner">
         <a class="brand" href="/" use:link>
           <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#0f766e"/><path d="M16 16V5.5a10.5 10.5 0 0 1 9.4 5.8z" fill="#5eead4"/><path d="M16 16l9.4-4.7A10.5 10.5 0 1 1 16 5.5z" fill="#ccfbf1" opacity=".55"/><circle cx="16" cy="16" r="4" fill="#0f766e"/></svg>
-          <span class="hide-md">NAS Storage Analyzer</span>
+          <span class="brand-name">NAS Storage Analyzer</span>
           <BetaBadge />
         </a>
         <nav class="nav" aria-label={t('nav.main')}>
@@ -80,7 +87,8 @@
         <select aria-label={t('pref.units')} value={prefs.units} onchange={(e) => setPref('units', e.currentTarget.value)} class="auto" data-testid="units">
           <option value="binary">{t('pref.units.binary')}</option><option value="decimal">{t('pref.units.decimal')}</option>
         </select>
-        <button class="btn small ghost" onclick={() => setPref('language', i18n.lang === 'nl' ? 'en' : 'nl')} aria-label={t('pref.language')}>{i18n.lang === 'nl' ? 'EN' : 'NL'}</button>
+        <!-- The name a screen reader says starts with what is on the button, so somebody who talks to their computer can say what they see. -->
+        <button class="btn small ghost" onclick={() => setPref('language', i18n.lang === 'nl' ? 'en' : 'nl')} aria-label={(i18n.lang === 'nl' ? 'EN' : 'NL') + ': ' + t('pref.language')} data-testid="lang-toggle">{i18n.lang === 'nl' ? 'EN' : 'NL'}</button>
         <button class="btn small ghost" onclick={toggleTheme} aria-label={t('pref.theme')} title={t('pref.theme')} data-testid="theme-toggle">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             {#if prefs.theme === 'dark'}<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
@@ -91,7 +99,8 @@
         </div>
       </div>
     </header>
-    <main>
+    <main id="main" tabindex="-1">
+      {#if isAdmin()}<ConnectionBanner />{/if}
       <UpdateBanner />
       {#if route.path === '/'}<Dashboard />
       {:else if browse}<Browse shareId={browse.share} dirId={browse.dir} />
@@ -100,6 +109,7 @@
       {:else if route.path.startsWith('/admin/shares') && isAdmin()}<SettingsLayout scope="settings"><Shares /></SettingsLayout>
       {:else if route.path.startsWith('/admin/extensions') && isAdmin()}<SettingsLayout scope="settings"><Extensions /></SettingsLayout>
       {:else if route.path.startsWith('/admin/delete') && isAdmin()}<SettingsLayout scope="settings"><Delete /></SettingsLayout>
+      {:else if route.path.startsWith('/admin/notifications') && isAdmin()}<SettingsLayout scope="settings"><Notifications /></SettingsLayout>
       {:else if route.path.startsWith('/admin/backup') && isAdmin()}<SettingsLayout scope="settings"><Backup /></SettingsLayout>
       {:else if route.path.startsWith('/admin/users') && isAdmin()}<SettingsLayout scope="settings"><Users /></SettingsLayout>
       {:else if route.path.startsWith('/admin/audit') && isAdmin()}<SettingsLayout scope="settings"><Audit /></SettingsLayout>

@@ -41,6 +41,7 @@ func fill(t *testing.T, st *store.Store) {
 	exec(t, st, `INSERT INTO login_failures (scope, key) VALUES ('user', 'helmer')`)
 	exec(t, st, `INSERT INTO audit_log (action, username) VALUES ('login.success', 'helmer')`)
 	exec(t, st, `INSERT INTO app_settings (key, value) VALUES ('k', '"v"')`)
+	exec(t, st, `INSERT INTO notification_targets (name, url_enc, format, lang) VALUES ('ntfy', '\\x07', 'text', 'en')`)
 	exec(t, st, `INSERT INTO invitations (token_hash, kind, username, role, expires_at) VALUES ('\x05', 'new', 'guest', 'viewer', now() + interval '1 day')`)
 
 	exec(t, st, `INSERT INTO shares (name, kind, config, secret_enc) VALUES ('media', 'bind', '{"path":"/mnt/shares/media"}', '\x06'), ('docs', 'bind', '{"path":"/mnt/shares/docs"}', NULL)`)
@@ -55,6 +56,7 @@ func fill(t *testing.T, st *store.Store) {
 		exec(t, st, `INSERT INTO dir_category_agg (share_id, dir_id, category_id) VALUES ($1, 1, 1)`, id)
 		exec(t, st, `INSERT INTO share_ext_agg (share_id, ext, size, alloc, files) VALUES ($1, 'mkv', 10, 10, 1)`, id)
 		exec(t, st, `INSERT INTO jobs (kind, share_id, state, finished_at) VALUES ('scan', $1, 'done', now())`, id)
+		exec(t, st, `INSERT INTO share_probes (share_id, state, finished_at, entries) VALUES ($1, 'ok', now(), 3)`, id)
 		exec(t, st, `INSERT INTO snapshots (scan_id, share_id, taken_at, size, alloc, files, dirs) VALUES ($1, $2, now(), 10, 10, 1, 1)`, 100+id, id)
 		exec(t, st, `INSERT INTO snapshot_category (scan_id, category_id, size, files) VALUES ($1, 1, 10, 1)`, 100+id)
 		exec(t, st, `INSERT INTO snapshot_ext (scan_id, ext, size, files) VALUES ($1, 'mkv', 10, 1)`, 100+id)

@@ -70,6 +70,7 @@ Een NAS loopt langzaam vol, en op een share met miljoenen bestanden is *waar bli
 - **Verwijderscripts**: vink bestanden en mappen aan en je krijgt één script (`.ps1`, `.cmd`, `.sh` of een eenvoudige `.txt`) dat precies die dingen verwijdert. **NASSA verwijdert zelf nooit iets**: het schrijft de tekst, jij draait hem. Zie [Verwijderen](#verwijderen).
 - **Veilig inloggen, met meerdere gebruikers**: lokale accounts met Argon2id, een **verplichte tweede factor** (authenticator-app of passkey, ook wachtwoordloos met alleen een passkey), herstelcodes, lockout, CSRF-bescherming, de rollen Admin en Viewer en een auditlog. Geen standaardwachtwoorden. Een beheerder nodigt anderen uit met een eenmalige link; niemand kiest het wachtwoord van een ander.
 - **Instellingen per persoon**: Nederlands of Engels, binaire of decimale eenheden, licht, donker of volgens je systeem, en een eigen accentkleur.
+- **Meldingen**: laat een bericht sturen naar Home Assistant, ntfy, Gotify of een andere webhook als een scan mislukt, niets vindt of niet alles kon lezen.
 - **Voor beheerders**: een OpenAPI-REST-API, Prometheus-`/metrics`, JSON-logs, health checks, een back-up van wat je zelf invoerde en een fabrieksreset.
 - **Jij houdt de regie**: alles draait in je eigen containers. De update-check vraagt alleen aan GitHub of er een nieuwere release is en stuurt niets over jouw installatie mee; je zet hem uit met `NASSA_UPDATE_CHECK=false`.
 
@@ -134,7 +135,7 @@ Een nieuwe installatie opent een setup-wizard; een bestaande installatie ziet he
 1. **Setup-token.** Voer de `NASSA_SETUP_TOKEN` uit `.env` in. Staat er geen, dan staat een willekeurige token in het log: `docker compose logs app | grep setup_token`.
 2. **Beheerder.** Kies een naam en een wachtwoord. Er zijn geen standaardwachtwoorden.
 3. **Tweede factor.** Stel een authenticator-app in (je krijgt herstelcodes, één keer in beeld) of een passkey. Dat is verplicht, voor elk account.
-4. **Eerste share.** Kies **Shares → Share toevoegen**, klik op **Bladeren…** en kies de map (of typ het pad), en klik op **Scan nu** op het dashboard.
+4. **Eerste share.** Kies **Shares → Share toevoegen**, klik op **Bladeren…** en kies de map (of typ het pad). De share wordt meteen getest: onder de share staat of de worker hem kan bereiken. Klik daarna op **Scan nu** op het dashboard.
 
 Passkeys zijn aan een hostnaam gebonden en werken alleen via https of op `localhost`. Zet in productie `NASSA_RP_ID` en `NASSA_RP_ORIGINS`, zie [Reverse proxy en https](#reverse-proxy-en-https).
 
@@ -166,7 +167,9 @@ NASSA_SHARES_MOUNT=/mnt/user
 
 Melden de mapkiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan `NASSA_SHARES_GID=100`.
 
-**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE` (SMB heeft ze alle drie nodig: `mount.cifs` stopt zonder een ervan met *Unable to set current process capabilities*); je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
+**Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE` (SMB heeft ze alle drie nodig: `mount.cifs` stopt zonder een ervan met *Unable to apply new capability set* (oudere versies: *Unable to set current process capabilities*)); je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
+
+**Test verbinding.** Bij elke share staat onder **Instellingen → Shares** de knop **Test verbinding**. De worker koppelt de share (of zoekt het pad op), leest alleen de hoofdmap en zegt binnen enkele seconden of dat lukt, hoeveel items er staan, of wat er misgaat, in de woorden van `mount` zelf. Een nieuwe share wordt direct na het toevoegen getest. Een test is geen scan: er wordt niets geïndexeerd en geen enkel bestand geopend.
 
 Alleen wat je als share toevoegt wordt gescand. Een share die niet (meer) gemount is laat een lege map achter; een scan die dan niets vindt terwijl de vorige meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan. Details, SMB-voorbeelden, AppArmor, losse Unraid-schijven en Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
 
@@ -251,6 +254,8 @@ NASSA_RP_ORIGINS=https://nas.example.com
 
 Voorbeelden voor nginx en Traefik en uitleg over `X-Forwarded-*`: [`docs/deploy.md`](docs/deploy.md#3-reverse-proxy-en-https).
 
+Gebruik je de app zonder https vanaf een ander apparaat, dan krijgt een beheerder daar een melding over. Onder **Instellingen → Systeem → Verbinding** staat altijd hoe de verbinding beveiligd is en wat je kunt instellen.
+
 ## Beheer
 
 | Taak | Commando |
@@ -260,6 +265,7 @@ Voorbeelden voor nginx en Traefik en uitleg over `X-Forwarded-*`: [`docs/deploy.
 | Bijwerken | `docker compose pull && docker compose up -d` |
 | Terug naar de vorige versie | zet `NASSA_TAG` op het vorige versienummer, dan `docker compose pull && docker compose up -d` (zie [Bijwerken](#bijwerken)) |
 | Logboek | `docker compose logs -f app worker` |
+| De versleutelsleutel wisselen | `nasa rekey`: zie [`docs/deploy.md`](docs/deploy.md#de-versleutelsleutel-wisselen) |
 | Status | `docker compose ps` toont `(healthy)` voor `app`, `worker` en `db` |
 
 - **Health check:** `GET /healthz` antwoordt `200` met `ok` zodra `app` draait; `GET /readyz` antwoordt `200` met `ready` als ook de database antwoordt (dat gebruikt de Compose-health-check). De `worker` heeft een eigen `/healthz` op poort 8081 binnen de container. Alle endpoints: [`docs/operations.md`](docs/operations.md#2-health-check-endpoints).
@@ -289,9 +295,11 @@ sed -i 's/^NASA_/NASSA_/' .env
 |---|---|
 | `docker compose up` meldt dat `NASSA_SHARES_DIR` ontbreekt, of een variabele met `NASA_` | Een `.env` van vóór v0.2.0: `sed -i 's/^NASA_/NASSA_/' .env`. |
 | **Bladeren…** toont "Geen mappen gevonden", of de scan vindt niets | De share-map is leeg in de container: er is niets gemount, of `NASSA_SHARES_DIR` wijst naar een andere map dan je denkt (of is relatief). Het auditlog toont dan `scan.empty`. |
+| Je weet niet of de worker een share kan bereiken | **Instellingen → Shares → Test verbinding**: de uitkomst staat er binnen enkele seconden onder, met de melding van `mount` als het niet lukt. "No worker picked the test up" betekent dat de worker niet draait. |
 | Scan mislukt met "permission denied" | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`). |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkeys werken niet ("Passkeys hebben een beveiligd adres nodig") | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASSA_RP_ID` in. |
+| Je wilt weten dat een scan mislukte zonder het dashboard te openen | **Instellingen → Meldingen**: een webhook naar Home Assistant, ntfy of Gotify. Zie [`docs/deploy.md`](docs/deploy.md#7b-meldingen-een-bericht-als-een-scan-aandacht-nodig-heeft). |
 | Een scanfout op het dashboard | Klik erop (beheerder): het auditlog toont de oorzaak en de mappen die niet te lezen waren. |
 | `/metrics` geeft 401 of 403 | Zet `NASSA_METRICS_TOKEN` en stuur hem mee; zonder token antwoordt alleen loopback. |
 | `worker` blijft `unhealthy` | `docker compose logs worker`: meestal is de database niet bereikbaar. |
@@ -388,7 +396,7 @@ NASSA_TEST_DSN='postgres://user@host/postgres' NASSA_REQUIRE_DB=1 go test -race 
 cd web && npm run check && npx vitest run      # typecontrole en unit tests van de interface
 ```
 
-De **browsertest** (`web/e2e`) start een database, `serve` en `worker` en doorloopt met een echte Chromium de hele applicatie: setup-wizard, authenticator-app, herstelcodes, passkeys (virtuele authenticator), share toevoegen, scannen door de worker, bladeren, filters, treemap, lijsten, zoeken, CSV, gebruikers en auditlog:
+De **browsertest** (`web/e2e`) start een database, `serve` en `worker` en doorloopt met een echte Chromium de hele applicatie: setup-wizard, authenticator-app, herstelcodes, passkeys (virtuele authenticator), share toevoegen, scannen door de worker, bladeren, filters, treemap, lijsten, zoeken, CSV, gebruikers en auditlog. Hij controleert ook elk scherm op toegankelijkheid (axe-core, de WCAG 2.2-regels van niveau A en AA die een programma kan beoordelen) in licht, donker en op telefoonbreedte, en loopt de bediening met het toetsenbord na:
 
 ```bash
 npm install -g playwright && playwright install chromium     # eenmalig; de test gebruikt de globale installatie
@@ -409,12 +417,13 @@ Scannen zonder interface kan ook: `nasa scan -path /mnt/shares/media -name media
 
 ## Privacy en beveiliging
 
-- **Alles staat op je eigen server**: geen account bij ons, geen analytics, geen tracking. De enige verbinding naar buiten is de update-check: die vraagt aan `github.com` of er een nieuwere release is, met alleen een vaste `User-Agent` (geen versie, geen installatie-id, geen gebruikersgegevens), en werkt niets bij.
+- **Alles staat op je eigen server**: geen account bij ons, geen analytics, geen tracking. Uit zichzelf maakt de app één verbinding naar buiten, de update-check: die vraagt aan `github.com` of er een nieuwere release is, met alleen een vaste `User-Agent` (geen versie, geen installatie-id, geen gebruikersgegevens), en werkt niets bij. Voeg je onder **Meldingen** een doel toe, dan stuurt NASSA de uitkomst van een scan naar het adres dat jij koos, en naar niets anders: de naam van de share, wat er gebeurde en de aantallen, nooit een bestandsnaam.
 - **Lokale accounts** met Argon2id, lockout na mislukte pogingen en CSRF-bescherming. Een **tweede factor is verplicht**: een authenticator-app (met herstelcodes) of een passkey, die ook wachtwoordloos inloggen kan.
+- **Sessies:** onder *Beveiliging* in het gebruikersmenu zie je in welke browsers je bent aangemeld, en meld je een andere sessie af of alle andere in één keer.
 - **Rollen:** Admin en Viewer. Alleen beheerders maken verwijderscripts, beheren shares, gebruikers en bestandstypes en zien het auditlog.
 - **Auditlog** van aanmeldingen, wijzigingen aan de configuratie en de uitkomst van elke scan (gelukt, mislukt of niets gevonden).
 - **Alleen-lezen.** De containers draaien zonder rechten (`read_only`, `cap_drop: ALL`, `no-new-privileges`) en de shares zijn read-only gemount. Alleen route a geeft de worker meer rechten.
-- Meld een kwetsbaarheid vertrouwelijk via een [beveiligingsadvies](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), nooit in een openbaar issue.
+- Meld een kwetsbaarheid vertrouwelijk via een [beveiligingsadvies](https://github.com/helmerzNL/NAS-Storage-Analyzer/security/advisories/new), nooit in een openbaar issue. Wat ondersteund wordt en hoe het project zijn afhankelijkheden en images bewaakt, staat in [`SECURITY.md`](SECURITY.md).
 
 ## Steun NASSA
 
@@ -429,7 +438,7 @@ Er is nog geen licentie gekozen: alle rechten voorbehouden.
 
 ### Onderdelen
 
-NASSA is gebouwd met Go 1.24 en Svelte 5, op PostgreSQL 16. De directe afhankelijkheden:
+NASSA is gebouwd met Go 1.27 en Svelte 5, op PostgreSQL 16. De directe afhankelijkheden:
 
 | Onderdeel | Waarvoor | Licentie |
 |---|---|---|
@@ -441,6 +450,7 @@ NASSA is gebouwd met Go 1.24 en Svelte 5, op PostgreSQL 16. De directe afhankeli
 | [golang.org/x/crypto](https://pkg.go.dev/golang.org/x/crypto), [x/sys](https://pkg.go.dev/golang.org/x/sys), [x/time](https://pkg.go.dev/golang.org/x/time) | Argon2id, systeemaanroepen, snelheidsbegrenzing | BSD-3-Clause |
 | [Svelte](https://svelte.dev), [Vite](https://vite.dev), [TypeScript](https://www.typescriptlang.org), [Vitest](https://vitest.dev) | De interface en de tests | MIT, MIT, Apache-2.0, MIT |
 | [qrcode-generator](https://github.com/kazuhikoarase/qrcode-generator) | De QR-code voor de authenticator-app | MIT |
+| [axe-core](https://github.com/dequelabs/axe-core) | De toegankelijkheidscontrole in de browsertest; zit niet in de applicatie | MPL-2.0 |
 | [Material Design Icons](https://pictogrammers.com/library/mdi/) (Pictogrammers) | De pictogrammen; ze zitten in de applicatie, er wordt niets bij een derde partij geladen | Apache-2.0 |
 | [PostgreSQL](https://www.postgresql.org) | De database (image `postgres:16-alpine`) | PostgreSQL License |
 

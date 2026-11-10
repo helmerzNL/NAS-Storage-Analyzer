@@ -18,7 +18,7 @@ PostgreSQL als enige database, doel < 500 ms met ≤ 2 s geaccepteerd voor vrije
 
 | Onderdeel | Keuze | Onderbouwing |
 |---|---|---|
-| Scanner, API, scheduler | **Go 1.24, één module, één binary `nasa`** met subcommando's `serve`, `worker`, `scan`, `migrate`, `seed` | Goroutines passen bij I/O-bound walks; `x/sys/unix` geeft `openat`/`fstatat`/`getdents`; één taal en één image voor `app` en `worker`; geen CGO nodig |
+| Scanner, API, scheduler | **Go 1.27, één module, één binary `nasa`** met subcommando's `serve`, `worker`, `scan`, `migrate`, `seed` | Goroutines passen bij I/O-bound walks; `x/sys/unix` geeft `openat`/`fstatat`/`getdents`; één taal en één image voor `app` en `worker`; geen CGO nodig |
 | Database | **PostgreSQL 16** (`pgx/v5`, `CopyFrom`) | Gevraagd; COPY, partitionering, `ltree`, `pg_trgm`, advisory locks, `LISTEN/NOTIFY`, `SKIP LOCKED` dekken schema, queue en zoeken zonder extra services |
 | API | `chi` + **spec-first OpenAPI 3.1** (`api/openapi.yaml`, `oapi-codegen`) | Spec is de bron van waarheid, CI controleert dat code en spec gelijk lopen |
 | Frontend | **SvelteKit + TypeScript** (static adapter, via `go:embed` in de binary), d3-hierarchy voor treemap/sunburst, uPlot voor tijdreeksen | Klein, snel, geen aparte Node-runtime in productie; dark mode via CSS-variabelen; i18n via NL/EN-woordenboeken |
@@ -76,6 +76,8 @@ leegmaken/verwijderen van een share).
 | `shares` | `kind` (nfs/smb/bind), `config jsonb`, `secret_enc bytea`, `excludes text[]`, `workers`, `max_ops_per_sec`, `cron`, `last_used_basis` (atime/mtime), `retention_scans`, `retention_days`, `full_scan_every_n` |
 | `scan_jobs` / `scans` | status, mode (full/incremental), trigger, start/eind, tellers (files, dirs, bytes, errors), `atime_quality` (percentages), vorig-scan-totalen voor ETA |
 | `scan_errors` | scan_id, pad, soort (EACCES, ENOENT, timeout), tijdstip |
+| `notification_targets` | meldingsdoelen (migratie 0010): naam, `url_enc` (het adres, versleuteld zoals een SMB-wachtwoord), vorm (json/text), taal, voor welke uitkomsten van een scan, aan/uit, en de uitkomst van het laatste bericht. Hoogstens vijf. In de back-up van de app (adres alleen versleuteld) |
+| `share_probes` | verbindingstest van een share (migratie 0008): status (queued/running/ok/failed), aanvrager, tijden, `entries` (items in de hoofdmap, geteld tot 1000) en `more`, foutmelding. Eén actieve test per share (unieke partiële index); een eigen wachtrij naast `jobs`, zodat een test niet achter scans wacht. Uitkomsten ouder dan 7 dagen worden verwijderd |
 | `categories`, `extension_map` | `ext` (lowercase, PK) → `category_id`; seed met standaardlijst; UI-bewerkbaar |
 | `dirs` | `id`, `share_id`, `parent_id`, `name`, `path ltree` (labels = dir-id's), `mtime`, `entry_count`, `last_seen_scan`, **voorberekend:** `size_direct/total`, `alloc_direct/total`, `files_direct/total`, `dirs_total`, `min/max_mtime`, `min/max_atime`. Indexen: `(parent_id, size_total DESC) INCLUDE (...)`, GiST op `path`, `(share_id, size_total DESC)` voor top-N mappen |
 | `dir_category_agg` | `(dir_id, category_id)` → size, alloc, files (recursief). PK + index op `(category_id, size DESC)` |
