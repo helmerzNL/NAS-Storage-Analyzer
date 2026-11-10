@@ -188,6 +188,12 @@ tbody tr.audit-focus { background: color-mix(in srgb, var(--accent) 12%, transpa
 .badge.cat { border-color: transparent; }   /* the fill is a category colour (data); the label colour is chosen for contrast in the component */
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
 .intro-row { margin-bottom: 14px; }
+/* The outcome of a connection test sits under its share and reads as part of it: no line between the two, no hover of its own. */
+tr:has(+ tr.probe-row) > td { border-bottom-color: transparent; }
+tbody tr.probe-row:hover { background: none; } tr.probe-row > td { padding-top: 0; }
+.probe-line { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.probe-line .badge { flex: none; } .probe-line .btn { flex: none; margin-left: auto; }
+.probe-text { flex: 1 1 28ch; min-width: 0; font-size: .875rem; overflow-wrap: anywhere; align-self: center; }
 td.actions { text-align: right; } td.actions > .btn { margin: 2px 0 2px 4px; }   /* the row's actions wrap instead of pushing the table wider than the screen */
 
 /* The update check: a banner at the top of the page for administrators, and a dot on the entries that lead to Settings > System. The dot is not

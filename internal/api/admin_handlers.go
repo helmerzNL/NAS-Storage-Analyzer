@@ -22,6 +22,9 @@ func (s *Server) adminRoutes(h routeFn, v string) {
 		h("DELETE "+v+"/shares/{share}/scan", lvAdmin, s.cancelScan)
 		h("POST "+v+"/shares/{share}/recategorize", lvAdmin, s.recategorize)
 		h("GET "+v+"/shares/{share}/jobs", lvViewer, s.listJobs)
+		// A connection test: asked for here, run by a worker (only a worker can mount), read back here.
+		h("POST "+v+"/shares/{share}/probe", lvAdmin, s.startProbe)
+		h("GET "+v+"/shares/{share}/probe", lvAdmin, s.getProbe)
 		h("PUT "+v+"/extension-map/{ext}", lvAdmin, s.putExtension)
 		h("DELETE "+v+"/extension-map/{ext}", lvAdmin, s.deleteExtension)
 		h("GET "+v+"/settings", lvViewer, s.getSettings)
@@ -191,6 +194,44 @@ func (s *Server) recategorize(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.audit(r, "share.recategorize", info.Name, nil)
 	return writeJSONStatus(w, http.StatusAccepted, job)
+}
+
+// startProbe asks a worker to test whether it can reach the share and list its top folder. Asking twice while one is under way
+// returns the one that is under way.
+func (s *Server) startProbe(w http.ResponseWriter, r *http.Request) error {
+	id, err := shareID(r)
+	if err != nil {
+		return err
+	}
+	info, err := s.q.ShareByID(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	probe, err := s.opts.Queue.Probes().Request(r.Context(), id, sessionOf(r).User.Username)
+	if err != nil {
+		return err
+	}
+	s.audit(r, "share.test", info.Name, map[string]any{"probe": probe.ID})
+	return writeJSONStatus(w, http.StatusAccepted, probe)
+}
+
+// getProbe returns the latest connection test of a share: under way, or how it ended.
+func (s *Server) getProbe(w http.ResponseWriter, r *http.Request) error {
+	id, err := shareID(r)
+	if err != nil {
+		return err
+	}
+	if _, err := s.q.ShareByID(r.Context(), id); err != nil {
+		return err
+	}
+	probe, err := s.opts.Queue.Probes().Latest(r.Context(), id)
+	if err != nil {
+		return err
+	}
+	if probe == nil {
+		return query.ErrNotFound
+	}
+	return writeJSON(w, probe)
 }
 
 func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) error {

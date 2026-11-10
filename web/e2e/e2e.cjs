@@ -173,6 +173,49 @@ const expectText = async (page, sel, re, msg) => {
       await page.waitForSelector('[data-testid=share-row]');
     });
 
+    await step('connection test: a new share is tested at once, the button tests again, and a failure says what is wrong', async () => {
+      const outcome = '[data-testid=probe-Media]';
+      const ended = async (tone) => {
+        await page.waitForSelector(outcome + '[data-done=true]', { timeout: 20000 });
+        const got = await page.getAttribute(outcome, 'data-tone');
+        const text = (await page.textContent(outcome)).replace(/\s+/g, ' ').trim();
+        if (got !== tone) throw new Error('the test ended ' + got + ', expected ' + tone + ': ' + text);
+        return text;
+      };
+      // Nobody pressed anything: adding the share asked for the test. The worker lists the top folder (video, audio, photos, docs).
+      let text = await ended('ok');
+      if (!/Bereikbaar/.test(text) || !/4 items in de hoofdmap/.test(text)) throw new Error('the outcome of a new share: ' + text);
+      if (!(await page.$(outcome + ' .badge.ok'))) throw new Error('a reachable share has the green status');
+      if (await page.isDisabled('[data-testid=test-Media]')) throw new Error('the button is free again once the test has ended');
+      await shot('04c-connection-test-ok');
+      // The outcome stands under its share and is not a share of its own.
+      if ((await page.$$('[data-testid=share-row]')).length !== 1) throw new Error('the outcome was counted as a share');
+      await page.click('[data-testid=probe-close-Media]');
+      await page.waitForSelector(outcome, { state: 'detached' });
+
+      // The folder is gone, as with a disk that is not mounted or a typo in the path: the test says so, in the words of the worker.
+      fs.renameSync(path.join(SHARE_DIR, 'media'), path.join(SHARE_DIR, 'media-weg'));
+      try {
+        await page.click('[data-testid=test-Media]');
+        text = await ended('bad');
+        if (!/Niet bereikbaar/.test(text) || !/mounted into the container/.test(text)) throw new Error('the outcome of a share whose folder is gone: ' + text);
+        if (!(await page.$(outcome + ' .badge.bad'))) throw new Error('an unreachable share has the red status');
+        await shot('04d-connection-test-failed');
+      } finally { fs.renameSync(path.join(SHARE_DIR, 'media-weg'), path.join(SHARE_DIR, 'media')); }
+
+      // With the folder back the next test replaces the outcome, and a screen reader is told.
+      await page.click('[data-testid=test-Media]');
+      text = await ended('ok');
+      if (!/4 items in de hoofdmap/.test(text)) throw new Error('the outcome after the folder came back: ' + text);
+      const said = await page.textContent('[data-testid=probe-announce]');
+      if (!/^Media: Bereikbaar\. 4 items/.test(said)) throw new Error('the outcome for a screen reader: ' + said);
+      // A test is not a scan: the share still has none.
+      const row = (await page.textContent('[data-testid=share-row]')).replace(/\s+/g, ' ');
+      if (!row.includes('–')) throw new Error('the share has a last scan after a test: ' + row);
+      await page.click('[data-testid=probe-close-Media]');
+      await page.waitForSelector(outcome, { state: 'detached' });
+    });
+
     await step('scan now: the worker scans and the dashboard shows the result', async () => {
       await page.click('a[href="/"]');
       await page.click('[data-testid=scan-now]');
@@ -665,7 +708,7 @@ const expectText = async (page, sel, re, msg) => {
       // The table also has a "loading" row; wait for a real entry.
       await page.waitForSelector('[data-testid=audit-table] tbody tr >> text=setup.complete');
       const text = await page.textContent('[data-testid=audit-table]');
-      for (const a of ['setup.complete', 'login.success', 'share.create', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
+      for (const a of ['setup.complete', 'login.success', 'share.create', 'share.test', 'scan.start', 'scan.finished', 'invitation.create', 'invitation.accept', 'mfa.passkey_added', 'script.generate']) if (!text.includes(a)) throw new Error('missing ' + a);
       if (text.includes(PASSWORD)) throw new Error('password in the audit log');
       for (const name of ['film.mkv', 'report.pdf', 'notes.txt']) if (text.includes(name)) throw new Error('a file name in the audit log: ' + name);
     });
@@ -781,6 +824,12 @@ const expectText = async (page, sel, re, msg) => {
       await page.fill('[data-testid=f-path]', path.join(SHARE_APP_PATH, 'leeg'));
       await page.click('[data-testid=f-save]');
       await page.waitForSelector('[data-testid=share-row]:has-text("Leeg")');
+      // The test of the new share already says it, before any scan: reachable, and empty.
+      await page.waitForSelector('[data-testid=probe-Leeg][data-done=true]', { timeout: 20000 });
+      const emptyTest = (await page.textContent('[data-testid=probe-Leeg]')).replace(/\s+/g, ' ');
+      if ((await page.getAttribute('[data-testid=probe-Leeg]', 'data-tone')) !== 'warn' || !/hoofdmap is leeg/.test(emptyTest) || !(await page.$('[data-testid=probe-Leeg] .badge.warn')))
+        throw new Error('the test of an empty share must warn: ' + emptyTest);
+      await shot('14a-connection-test-empty');
       await page.click('[data-testid=share-row]:has-text("Leeg") >> text=Scan nu');
       let row = null;
       for (let i = 0; i < 40 && !row; i++) {

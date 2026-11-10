@@ -27,6 +27,7 @@ var Tables = map[string]Coverage{
 	"scans":             {false, "derived from the files on the NAS: scan again after a restore"},
 	"scan_errors":       {false, "derived from a scan"},
 	"jobs":              {false, "work in progress"},
+	"share_probes":      {false, "the outcome of a connection test: asked again whenever it is needed"},
 	"dirs":              {false, "scan results"},
 	"files":             {false, "scan results"},
 	"dir_category_agg":  {false, "scan results"},

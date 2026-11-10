@@ -134,7 +134,7 @@ Een nieuwe installatie opent een setup-wizard; een bestaande installatie ziet he
 1. **Setup-token.** Voer de `NASSA_SETUP_TOKEN` uit `.env` in. Staat er geen, dan staat een willekeurige token in het log: `docker compose logs app | grep setup_token`.
 2. **Beheerder.** Kies een naam en een wachtwoord. Er zijn geen standaardwachtwoorden.
 3. **Tweede factor.** Stel een authenticator-app in (je krijgt herstelcodes, één keer in beeld) of een passkey. Dat is verplicht, voor elk account.
-4. **Eerste share.** Kies **Shares → Share toevoegen**, klik op **Bladeren…** en kies de map (of typ het pad), en klik op **Scan nu** op het dashboard.
+4. **Eerste share.** Kies **Shares → Share toevoegen**, klik op **Bladeren…** en kies de map (of typ het pad). De share wordt meteen getest: onder de share staat of de worker hem kan bereiken. Klik daarna op **Scan nu** op het dashboard.
 
 Passkeys zijn aan een hostnaam gebonden en werken alleen via https of op `localhost`. Zet in productie `NASSA_RP_ID` en `NASSA_RP_ORIGINS`, zie [Reverse proxy en https](#reverse-proxy-en-https).
 
@@ -167,6 +167,8 @@ NASSA_SHARES_MOUNT=/mnt/user
 Melden de mapkiezer of de scan *permission denied* voor een map met `drwxrwx---` voor `nobody:users`? Zet dan `NASSA_SHARES_GID=100`.
 
 **Route a: de worker mount zelf**, met `docker compose -f docker-compose.yml -f docker-compose.mounts.yml up -d`. Dat geeft alleen de worker root, `CAP_SYS_ADMIN`, `CAP_DAC_READ_SEARCH` en `CAP_DAC_OVERRIDE` (SMB heeft ze alle drie nodig: `mount.cifs` stopt zonder een ervan met *Unable to apply new capability set* (oudere versies: *Unable to set current process capabilities*)); je vult in de interface server, export of share, versie en eventueel SMB-inloggegevens in (versleuteld opgeslagen). Deze route is getest tot en met de rechten en met een nagebootste mount-uitvoerder, maar niet tegen een echte NFS- of SMB-server. Test een nieuwe share met *Scan nu*.
+
+**Test verbinding.** Bij elke share staat onder **Instellingen → Shares** de knop **Test verbinding**. De worker koppelt de share (of zoekt het pad op), leest alleen de hoofdmap en zegt binnen enkele seconden of dat lukt, hoeveel items er staan, of wat er misgaat, in de woorden van `mount` zelf. Een nieuwe share wordt direct na het toevoegen getest. Een test is geen scan: er wordt niets geïndexeerd en geen enkel bestand geopend.
 
 Alleen wat je als share toevoegt wordt gescand. Een share die niet (meer) gemount is laat een lege map achter; een scan die dan niets vindt terwijl de vorige meer dan 100 bestanden zag, wordt geweigerd en laat de oude gegevens staan. Details, SMB-voorbeelden, AppArmor, losse Unraid-schijven en Exclusive shares: [`docs/deploy.md`](docs/deploy.md#2-shares-beschikbaar-maken).
 
@@ -289,6 +291,7 @@ sed -i 's/^NASA_/NASSA_/' .env
 |---|---|
 | `docker compose up` meldt dat `NASSA_SHARES_DIR` ontbreekt, of een variabele met `NASA_` | Een `.env` van vóór v0.2.0: `sed -i 's/^NASA_/NASSA_/' .env`. |
 | **Bladeren…** toont "Geen mappen gevonden", of de scan vindt niets | De share-map is leeg in de container: er is niets gemount, of `NASSA_SHARES_DIR` wijst naar een andere map dan je denkt (of is relatief). Het auditlog toont dan `scan.empty`. |
+| Je weet niet of de worker een share kan bereiken | **Instellingen → Shares → Test verbinding**: de uitkomst staat er binnen enkele seconden onder, met de melding van `mount` als het niet lukt. "No worker picked the test up" betekent dat de worker niet draait. |
 | Scan mislukt met "permission denied" | De container draait als uid 10001 en is niet de eigenaar van de map. Zet `NASSA_SHARES_GID` op de groep die de share bezit (Unraid: `100`). |
 | Het scherm vraagt om een setup-token die je niet hebt | `docker compose logs app \| grep setup_token`, of `NASSA_SETUP_TOKEN` in `.env`. |
 | Passkeys werken niet ("Passkeys hebben een beveiligd adres nodig") | Open de app via een hostnaam met https (of `http://localhost`) en stel `NASSA_RP_ID` in. |

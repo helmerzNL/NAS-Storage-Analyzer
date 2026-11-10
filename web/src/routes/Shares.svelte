@@ -1,12 +1,13 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { get, post, patch, del, ApiError, type ShareInfo } from '../lib/api';
+  import { onDestroy, onMount } from 'svelte';
+  import { get, post, patch, del, ApiError, type ShareInfo, type ShareProbe } from '../lib/api';
   import { t, i18n } from '../lib/i18n.svelte';
   import { formatDateTime, ago } from '../lib/format';
   import { link } from '../lib/router.svelte';
   import { loadShares, sharesStore } from '../lib/shares.svelte';
   import { errMessage } from '../lib/errors';
   import { toast } from '../lib/toast.svelte';
+  import { followProbe, probeView } from '../lib/probe';
   import Dialog from '../components/Dialog.svelte';
   import FolderPicker from '../components/FolderPicker.svelte';
 
@@ -20,6 +21,11 @@
   let sharesRoot = $state('/mnt/shares');
   let open = $state(false), f = $state<Form>(blank()), busy = $state(false), error = $state(''), fieldErr = $state<Record<string, string>>({});
   let confirmDelete = $state<ShareInfo | null>(null), delOpen = $state(false), pickOpen = $state(false);
+  // The connection test of a share, by share id: the test as the server last described it, or why its outcome did not arrive.
+  let tests = $state<Record<number, { probe?: ShareProbe; lost?: string }>>({});
+  let announce = $state('');   // the outcome, for a screen reader: said once when a test ends
+  const following = new Map<number, AbortController>();
+  onDestroy(() => { for (const ac of following.values()) ac.abort(); });
 
   function blank(): Form {
     return { name: '', kind: 'bind', path: '/mnt/shares/', server: '', export: '', share: '', username: '', domain: '', version: '', mount_options: '', password: '',
@@ -64,8 +70,11 @@
       }
     }
     try {
-      if (f.id) await patch(`/shares/${f.id}`, body); else await post('/shares', body);
+      const added = f.id ? null : await post<{ id: number }>('/shares', body);
+      if (f.id) await patch(`/shares/${f.id}`, body);
       open = false; toast(t('shares.saved')); await loadShares(true);
+      // A share that was just added is tested at once: a wrong path or password shows now, and not as a scan that fails tonight.
+      if (added) void test(added.id, f.name);
     } catch (err) {
       if (err instanceof ApiError && err.field) fieldErr = { [err.field]: err.detail ?? err.message };
       error = errMessage(err);
@@ -77,6 +86,24 @@
     try { await del(`/shares/${confirmDelete.id}`); toast(t('shares.deleted')); delOpen = false; await loadShares(true); }
     catch (e) { toast(errMessage(e), true); delOpen = false; }
   }
+  /** The tone, the label and the sentence of a test, in the reader's language. */
+  function shown(x: { probe?: ShareProbe; lost?: string }) {
+    if (x.lost !== undefined) return { tone: 'bad', label: t('shares.test.label.lost'), text: t('shares.test.lost', { error: x.lost }), done: true };
+    if (!x.probe) return { tone: 'busy', label: t('shares.test.label.busy'), text: t('shares.test.starting'), done: false };
+    const v = probeView(x.probe);
+    return { tone: v.tone, label: t(v.label), text: v.key ? t(v.key, v.vars) : (v.raw ?? ''), done: v.done };
+  }
+  async function test(id: number, name: string) {
+    following.get(id)?.abort();
+    const ac = new AbortController(); following.set(id, ac);
+    tests[id] = {};
+    try { await followProbe(id, (p) => { tests[id] = { probe: p }; }, ac.signal); }
+    catch (e) { if (ac.signal.aborted) return; tests[id] = { lost: errMessage(e) }; }
+    finally { if (following.get(id) === ac) following.delete(id); }
+    const v = shown(tests[id]);
+    announce = `${name}: ${v.label}. ${v.text}`;
+  }
+  function closeTest(id: number) { following.get(id)?.abort(); following.delete(id); delete tests[id]; }
   async function scan(s: ShareInfo, mode: 'auto' | 'full') {
     try { await post(`/shares/${s.id}/scan`, { mode }); toast(t('scan.started', { name: s.name })); } catch (e) { toast(errMessage(e), true); }
   }
@@ -103,13 +130,23 @@
           <td class="hide-sm small">{#if s.cron}<span class="mono">{s.cron}</span><div class="muted">{t('shares.next', { when: formatDateTime(s.next_run_at, i18n.lang) })}</div>{:else}<span class="muted">{t('cron.none')}</span>{/if}</td>
           <td class="hide-sm small">{s.last_scan ? ago(s.last_scan.finished_at, i18n.lang) : '–'}</td>
           <td class="right actions">
+            <button class="btn small" onclick={() => test(s.id, s.name)} disabled={!!tests[s.id] && !shown(tests[s.id]).done} data-testid={'test-' + s.name}>{t('shares.test')}</button>
             <button class="btn small" onclick={() => scan(s, 'auto')} disabled={!!s.active_job}>{t('scan.now')}</button>
             <button class="btn small" onclick={() => edit(s)} data-testid={'edit-' + s.name}>{t('common.edit')}</button>
             <button class="btn small danger" onclick={() => { confirmDelete = s; delOpen = true; }}>{t('common.delete')}</button></td></tr>
+        {#if tests[s.id]}
+          {@const v = shown(tests[s.id])}
+          <tr class="probe-row" data-testid={'probe-' + s.name} data-tone={v.tone} data-done={v.done}><td colspan="5">
+            <div class="probe-line"><span class="badge {v.tone === 'busy' ? 'info' : v.tone}">{v.label}</span>
+              <span class="probe-text" class:mono={v.tone === 'bad'}>{v.text}</span>
+              {#if v.done}<button class="btn small" onclick={() => closeTest(s.id)} aria-label={t('shares.test.close', { name: s.name })} data-testid={'probe-close-' + s.name}>{t('common.close')}</button>{/if}</div>
+          </td></tr>
+        {/if}
       {:else}<tr><td colspan="5" class="muted">{t('shares.none')}</td></tr>{/each}
     </tbody>
   </table>
 </div>
+<div class="sr-only" role="status" aria-live="polite" data-testid="probe-announce">{announce}</div>
 
 <Dialog bind:open title={f.id ? t('shares.edit', { name: f.name }) : t('shares.add')} wide>
   <form id="share-form" class="stack" onsubmit={save}>

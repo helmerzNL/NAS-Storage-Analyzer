@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -37,6 +39,7 @@ type Config struct {
 type Worker struct {
 	st     *store.Store
 	q      *jobs.Queue
+	probes *jobs.Probes
 	shares *shares.Service
 	mounts *mounts.Manager
 	cfg    Config
@@ -65,7 +68,7 @@ func New(st *store.Store, sh *shares.Service, m *mounts.Manager, cfg Config, log
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	w := &Worker{st: st, q: jobs.NewQueue(st.Pool), shares: sh, mounts: m, cfg: cfg, log: log}
+	w := &Worker{st: st, q: jobs.NewQueue(st.Pool), probes: jobs.NewProbes(st.Pool), shares: sh, mounts: m, cfg: cfg, log: log}
 	w.lastClaim.Store(cfg.Now().UnixNano())
 	return w
 }
@@ -112,6 +115,8 @@ func (w *Worker) Run(ctx context.Context) {
 	w.log.Info("worker started", "id", w.cfg.ID, "parallel", w.cfg.Parallel)
 	slots := make(chan struct{}, w.cfg.Parallel)
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); w.runProbes(ctx) }()
 	reap := time.NewTicker(30 * time.Second)
 	defer reap.Stop()
 	for ctx.Err() == nil {
@@ -155,6 +160,100 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 	wg.Wait()
 	w.log.Info("worker stopped", "id", w.cfg.ID)
+}
+
+// A connection test ("probe") of a share: mount it (or find its path) and list the top folder. The whole test is bounded well inside
+// jobs.ProbeRunLimit, after which the queue closes it as failed, and it counts at most probeEntries entries.
+const (
+	probeLimit   = 75 * time.Second
+	probeEntries = 1000
+)
+
+// runProbes runs the connection tests, one at a time, beside the jobs: a test answers in seconds and must not wait for a free slot
+// behind scans that take hours.
+func (w *Worker) runProbes(ctx context.Context) {
+	for ctx.Err() == nil {
+		p, err := w.probes.Claim(ctx, w.cfg.ID)
+		if err != nil || p == nil {
+			if err != nil && ctx.Err() == nil {
+				w.log.Error("claiming a connection test failed", "error", err)
+			}
+			select {
+			case <-time.After(w.cfg.PollEvery):
+			case <-ctx.Done():
+			}
+			continue
+		}
+		entries, more, err := w.probe(ctx, p)
+		msg := ""
+		switch {
+		case err != nil && ctx.Err() != nil:
+			msg = "the worker was stopped during the test" // not the share's fault: say so instead of a timeout or "context canceled"
+		case err != nil:
+			msg = err.Error()
+			if hint := failureHint(msg); hint != "" {
+				msg += " " + hint
+			}
+		}
+		done, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if ferr := w.probes.Finish(done, p.ID, entries, more, msg); ferr != nil {
+			w.log.Error("cannot record the outcome of a connection test", "probe", p.ID, "error", ferr)
+		}
+		cancel()
+		w.log.Info("connection test finished", "probe", p.ID, "share_id", p.ShareID, "ok", err == nil, "entries", entries, "error", msg)
+	}
+}
+
+// probe does one connection test. It mounts on a mount point of its own, never the one a scan of the same share is using.
+func (w *Worker) probe(ctx context.Context, p *jobs.Probe) (entries int, more bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, probeLimit)
+	defer cancel()
+	f, err := w.shares.Load(ctx, p.ShareID)
+	if err != nil {
+		return 0, false, err
+	}
+	path, cleanup, err := w.mounts.PrepareAt(ctx, f, fmt.Sprintf("probe-%d", f.ID))
+	if err != nil {
+		return 0, false, err
+	}
+	defer cleanup()
+	return listTop(ctx, path, probeEntries)
+}
+
+// listTop counts the entries of a folder, up to limit. It is a directory listing and nothing else: no file is opened or read
+// (AGENTS.md section 1). A network file system that stopped answering can block the call for as long as it likes, so the listing
+// runs beside the deadline of ctx; the goroutine of a call that never returns is left behind, as the scanner does.
+func listTop(ctx context.Context, path string, limit int) (int, bool, error) {
+	type result struct {
+		n    int
+		more bool
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		d, err := os.Open(path)
+		if err != nil {
+			ch <- result{err: err}
+			return
+		}
+		defer d.Close()
+		names, err := d.Readdirnames(limit + 1)
+		if err != nil && !errors.Is(err, io.EOF) {
+			ch <- result{err: err}
+			return
+		}
+		if len(names) > limit {
+			ch <- result{n: limit, more: true}
+			return
+		}
+		ch <- result{n: len(names)}
+	}()
+	select {
+	case r := <-ch:
+		return r.n, r.more, r.err
+	case <-ctx.Done():
+		return 0, false, fmt.Errorf("the share did not answer: listing its top folder took longer than %s", probeLimit)
+	}
 }
 
 // execute runs one job and records how it ended.

@@ -156,6 +156,24 @@ paths:
       responses:
         "204": {description: "Cancelling."}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/shares/{share}/probe:
+    parameters: [{$ref: "#/components/parameters/Share"}]
+    post:
+      tags: [admin]
+      operationId: startProbe
+      summary: Test the connection to a share (admin)
+      description: "Asks a worker to reach the share (mounting it for `nfs` and `smb`) and to list its top folder; nothing is scanned or stored about its contents. The answer is the test as it stands; read the outcome with the GET. While a test of this share is waiting or running, another request returns that same test. A test that no worker picks up within 60 seconds ends as `failed`, and so does one that runs longer than 3 minutes."
+      responses:
+        "202": {description: "The test, waiting or running.", content: {application/json: {schema: {$ref: "#/components/schemas/ShareProbe"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+    get:
+      tags: [admin]
+      operationId: getProbe
+      summary: The latest connection test of a share (admin)
+      description: "404 when the share was never tested. Outcomes are kept for a week."
+      responses:
+        "200": {description: "The latest test: waiting, running, or how it ended.", content: {application/json: {schema: {$ref: "#/components/schemas/ShareProbe"}}}}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/shares/{share}/recategorize:
     post:
       tags: [admin]
@@ -1918,6 +1936,21 @@ components:
         finished_at: {type: string, format: date-time, nullable: true}
         scan_id: {type: integer, format: int64, nullable: true}
         error: {type: string, nullable: true}
+    ShareProbe:
+      type: object
+      description: "A connection test of a share. `ok` means the worker reached the share and listed its top folder; `entries` is how many entries it counted there (at most 1000, `more` says there are more). `entries` 0 is a share that is reachable but empty, which on a mounted path usually means that it is not mounted on the host. `error` is the reason of a `failed` test, in the worker's words."
+      required: [id, share_id, state, requested_by, requested_at, started_at, finished_at, error, entries, more]
+      properties:
+        id: {type: integer, format: int64}
+        share_id: {type: integer, format: int64}
+        state: {type: string, enum: [queued, running, ok, failed]}
+        requested_by: {type: string}
+        requested_at: {type: string, format: date-time}
+        started_at: {type: string, format: date-time, nullable: true}
+        finished_at: {type: string, format: date-time, nullable: true}
+        error: {type: string, nullable: true}
+        entries: {type: integer, nullable: true}
+        more: {type: boolean}
     HistoryPoint:
       type: object
       required: [scan_id, at, size, alloc, files, dirs, categories]

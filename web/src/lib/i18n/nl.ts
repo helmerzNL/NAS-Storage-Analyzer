@@ -275,5 +275,11 @@ export const nl: Record<string, string> = {
   'about.beta.note': 'Een beta-build krijgt wijzigingen eerder dan de stabiele release. Gebruik er een aparte gegevensmap voor (DATA_PATH).',
   'about.source': 'Broncode en meldingen op GitHub',
   'about.updates.admin': 'Of er een nieuwere release is, zien beheerders.',
+  'shares.test': 'Test verbinding', 'shares.test.close': 'Sluit de uitkomst van de test van {name}',
+  'shares.test.label.busy': 'Bezig', 'shares.test.label.ok': 'Bereikbaar', 'shares.test.label.warn': 'Leeg', 'shares.test.label.bad': 'Niet bereikbaar', 'shares.test.label.lost': 'Geen uitkomst',
+  'shares.test.starting': 'De test wordt aangevraagd…', 'shares.test.queued': 'Wacht tot de worker de test oppakt…', 'shares.test.running': 'De worker leest de hoofdmap van de share…',
+  'shares.test.ok': '{n} items in de hoofdmap.', 'shares.test.ok.one': 'Eén item in de hoofdmap.', 'shares.test.ok.more': 'Meer dan {n} items in de hoofdmap.',
+  'shares.test.empty': 'De worker kan de share bereiken, maar de hoofdmap is leeg. Klopt het pad? Een share die niet gekoppeld is, ziet er zo uit.',
+  'shares.test.lost': 'De uitkomst kon niet worden opgehaald: {error}',
   'about.credits': 'Met dank aan', 'about.credits.body': 'Pictogrammen: Material Design Icons van Pictogrammers (Apache-2.0), meegeleverd met de applicatie; er wordt niets bij een derde partij opgehaald.',
 };
