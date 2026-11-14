@@ -32,6 +32,16 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+      # vite and its Svelte plugin only move together: each major of the plugin needs one major of vite, so a pull request
+      # for one alone cannot install (npm ci refuses the peer dependency). Seen with vite 8 and the plugin 7 (#53, #55).
+      vite:
+        patterns: ["vite", "@sveltejs/vite-plugin-svelte"]
+        update-types: [major]
+    ignore:
+      # svelte-check, the type check in `npm run check`, accepts TypeScript 5 and 6 only (its peer dependency, 4.7.8). A
+      # pull request for TypeScript 7 cannot install. Take this out once svelte-check names 7.
+      - dependency-name: typescript
+        versions: [">=7"]
 
   # The actions are pinned to a commit (`uses: owner/action@<sha> # vN`); Dependabot moves the commit and the comment together.
   - package-ecosystem: github-actions
